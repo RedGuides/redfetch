@@ -1,6 +1,7 @@
 #standard
 import traceback
 import webbrowser
+import sqlite3
 # external
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -23,14 +24,24 @@ def create_app(settings, db_name, headers, special_resources, category_map):
         if resource_id and remote_version is not None:
             with db.get_db_connection(db_name) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT local_version FROM resources WHERE resource_id = ?", (resource_id,))
-                result = cursor.fetchone()
-                if not result:
-                    return jsonify({"action": "install"}), 200
-                elif result[0] < remote_version:
-                    return jsonify({"action": "update"}), 200
-                else:
-                    return jsonify({"action": "re-install"}), 200
+                try:
+                    cursor.execute("SELECT local_version FROM resources WHERE resource_id = ?", (resource_id,))
+                    result = cursor.fetchone()
+                    if not result:
+                        return jsonify({"action": "install"}), 200
+                    elif result[0] < remote_version:
+                        return jsonify({"action": "update"}), 200
+                    else:
+                        return jsonify({"action": "re-install"}), 200
+                except sqlite3.OperationalError as e:
+                    if 'no such table' in str(e):
+                        # Table doesn't exist, so return 'install' action
+                        return jsonify({"action": "install"}), 200
+                    else:
+                        # Unhandled database error
+                        print("Database error during health check:", str(e))
+                        traceback.print_exc()
+                        return jsonify({"success": False, "message": "Database error"}), 500
         return jsonify({"status": "up"}), 200
 
 
@@ -39,13 +50,11 @@ def create_app(settings, db_name, headers, special_resources, category_map):
         resource_id = request.json.get('resource_id')
         if not resource_id:
             return jsonify({"success": False, "message": "Resource ID is required."}), 400
-        
-        # Convert to int
-        #resource_id = int(resource_id)
 
         with db.get_db_connection(db_name) as conn:
             cursor = conn.cursor()
             try:
+                db.initialize_db(db_name)
                 # Updated to match the new parameter requirements
                 success = synchronize_db_and_download(cursor, headers, [resource_id])
                 if success:
@@ -62,6 +71,7 @@ def create_app(settings, db_name, headers, special_resources, category_map):
         with db.get_db_connection(db_name) as conn:
             cursor = conn.cursor()
             try:
+                db.initialize_db(db_name)
                 # Updated to match the new parameter requirements
                 success = synchronize_db_and_download(cursor, headers)
                 if success:
