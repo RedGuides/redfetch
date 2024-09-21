@@ -1,0 +1,41 @@
+# Python cache files
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+
+#virtual environments
+env/
+venv/
+
+# Downloaded files
+Downloads/
+
+# Build files
+build/
+dist/
+
+# Secret configuration
+.secrets.toml
+# Local configuration
+*.local.toml
+
+# Database files
+*.db
+
+# Environment file
+.env
+
+# Editor-specific files
+.vscode/
+.idea/
+.cursorignore
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Other cruft
+*.bak
+*.swp
+*.backup

@@ -1,0 +1,134 @@
+Header {
+    color: #ff3737 /* Set the text color of the title */
+}
+
+Button {
+    transition: border 0, color 0.5;
+    /* Other base styles */
+}
+
+Label {
+    color: $accent;
+}
+
+.left_middle {
+    height: 1fr;
+    content-align: left middle;
+}
+
+TabbedContent Tab {
+    color: #990000;
+}
+
+TabbedContent Tab.-active {
+    color: #ff3737; 
+}
+
+.hidden {
+    display: none;
+}
+
+.visible {
+    display: block;
+}
+
+/* Fetch Grid */
+
+#fetch_grid {
+    layout: grid;
+    grid-size: 3;
+    grid-rows: auto auto auto auto 1fr;
+    grid-columns: 1fr 2fr;      
+    grid-gutter: 1;
+}
+#center_welcome {
+    column-span: 3;
+    text-align: right;
+}
+#welcome_label {
+    width: 1fr;
+    content-align: center middle;
+}
+#center_watched {
+    column-span: 3;
+}
+#update_watched {
+    content-align: center middle;
+    padding: 1 1;
+}
+#copy_log {
+    offset: 0 1;
+}
+#redguides_interface {
+    column-span: 2;
+    background: red 14%;
+    width: 24;
+}
+#redguides_interface:hover {
+    background: red 5%;
+}
+#resource_id_input {
+    column-span: 2;
+}
+#update_resource_id {
+    column-span: 1;
+}
+#fetch_log {
+    border: panel red 14%;
+    border-bottom: none;
+    background: red 4%;
+    column-span: 3;
+}
+
+/* Settings Grid */
+
+#settings_grid {
+    layout: grid;
+    grid-size: 3;  /* Two columns */
+    grid-columns: 1fr 2fr;  
+    grid-rows: auto;        
+    grid-gutter: 1;   
+}
+#dl_path_input, #eq_path_input, #vvmq_path_input, #server_type, #eq_maps, #myseq, #ionbc {
+    column-span: 2;
+}
+
+/* Website Grid */
+
+#account_label {
+    padding-bottom: 1;
+}
+
+#account_grid {
+    align: center middle;
+    content-align: center middle;
+    padding: 2;
+}
+
+#btn_ding {
+    width: 35;
+    height: 5;
+    margin: 1 0;
+    padding: 0 1;
+    border: tall red 2%;
+    color: $text;
+    text-style: bold;
+    transition: background 0.3, color 0.3;
+}
+
+.web_link {
+    width: 35;
+    height: 3;
+    margin: 1 0;
+    padding: 0 1;
+    border: tall red 3%;
+    background: $background-lighten-1;
+    color: $text;
+    text-style: bold;
+    transition: background 0.3, color 0.3;
+}
+
+#account_grid Button:hover {
+    background: $background-darken-1;
+    color: $accent-lighten-1;
+}

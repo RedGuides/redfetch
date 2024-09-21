@@ -1,0 +1,110 @@
+# Hail adventurer! This file is not meant to be edited directly. 
+# Instead, you should make a settings.local.toml file, and edit that. It will override anything here.
+
+# ========================================
+# DEFAULT SETTINGS USED IN ALL ENVIRONMENTS
+# ========================================
+# These settings are the base configuration for all environments. You can override them with [LIVE], [TEST], or [EMU] sections.
+[DEFAULT]
+DOWNLOAD_FOLDER = "Downloads"
+EQPATH = ""
+
+[DEFAULT.SPECIAL_RESOURCES.2463]
+default_path = "IonBC"
+custom_path = ""
+opt_in = false
+
+# ========================================
+# LIVE ENVIRONMENT SETTINGS
+# ========================================
+[LIVE.PROTECTED_FILES_BY_RESOURCE]
+1974 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
+
+[LIVE.SPECIAL_RESOURCES.1974]
+default_path = "VanillaMQ_LIVE"
+custom_path = ""
+opt_in = true
+
+[LIVE.SPECIAL_RESOURCES.151]
+default_path = "MySEQ_LIVE"
+custom_path = ""
+opt_in = false
+
+[LIVE.SPECIAL_RESOURCES.151.dependencies.153]
+subfolder = "maps"
+flatten = true
+opt_in = true
+
+[LIVE.SPECIAL_RESOURCES.151.dependencies.1865]
+subfolder = ""
+flatten = false
+opt_in = true
+
+[LIVE.SPECIAL_RESOURCES.153]
+default_path = "@format {this.eqpath}/maps/Brewall_Maps"
+custom_path = ""
+opt_in = false
+
+[LIVE.SPECIAL_RESOURCES.303]
+default_path = "@format {this.eqpath}/maps/Goods_Maps"
+custom_path = ""
+opt_in = false
+
+# ========================================
+# TEST ENVIRONMENT SETTINGS
+# ========================================
+
+[TEST.PROTECTED_FILES_BY_RESOURCE]
+2218 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
+
+[TEST.SPECIAL_RESOURCES.2218]
+default_path = "VanillaMQ_TEST"
+custom_path = ""
+opt_in = true
+
+[TEST.SPECIAL_RESOURCES.164]
+default_path = "MySEQ_TEST"
+custom_path = ""
+opt_in = false
+
+[TEST.SPECIAL_RESOURCES.164.dependencies.153]
+subfolder = "maps"
+flatten = true
+opt_in = true
+
+[TEST.SPECIAL_RESOURCES.164.dependencies.1865]
+subfolder = ""
+flatten = false
+opt_in = true
+
+[TEST.SPECIAL_RESOURCES.153]
+default_path = "@format {this.eqpath}/maps/Brewall_Maps"
+custom_path = ""
+opt_in = false
+
+[TEST.SPECIAL_RESOURCES.303]
+default_path = "@format {this.eqpath}/maps/Goods_Maps"
+custom_path = ""
+opt_in = false
+
+# ========================================
+# EMULATOR ENVIRONMENT SETTINGS
+# ========================================
+
+[EMU.PROTECTED_FILES_BY_RESOURCE]
+60 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
+
+[EMU.SPECIAL_RESOURCES.60]
+default_path = "VanillaMQ_EMU"
+custom_path = ""
+opt_in = true
+
+[EMU.SPECIAL_RESOURCES.153]
+default_path = "@format {this.eqpath}/maps/Brewall_Maps"
+custom_path = ""
+opt_in = false
+
+[EMU.SPECIAL_RESOURCES.303]
+default_path = "@format {this.eqpath}/maps/Goods_Maps"
+custom_path = ""
+opt_in = false
