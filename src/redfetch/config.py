@@ -127,7 +127,7 @@ def save_config(file_path, config_data):
 
 def update_setting(setting_path, setting_value, env=None):
     """Update a specific setting in the settings.local.toml file and in memory, optionally within a specific environment."""
-    config_file = 'config/settings.local.toml'
+    config_file = 'settings.local.toml'
     ensure_config_file_exists(config_file)
     config_data = load_config(config_file)
 
