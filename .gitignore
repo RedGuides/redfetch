@@ -39,3 +39,4 @@ Thumbs.db
 *.bak
 *.swp
 *.backup
+*.egg-info

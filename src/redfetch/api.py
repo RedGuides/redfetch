@@ -1,9 +1,9 @@
 import requests
 import keyring
-
-KEYRING_SERVICE_NAME = 'RedFetchApp'
+from auth import KEYRING_SERVICE_NAME, authorize
 
 def get_api_headers():
+
     """Fetches API details and returns the constructed headers for requests."""
     api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
     user_id = keyring.get_password(KEYRING_SERVICE_NAME, 'user_id')
@@ -119,8 +119,12 @@ def fetch_versions_info(resource_id, headers):
     return response.json()
 
 def get_username():
-    """Fetches the username from the keyring."""
+    """Fetches the username from the keyring or initiates authorization if not found."""
     username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
     if not username:
-        raise Exception("Username not found in keyring.")
+        print("Username not found. Initiating authorization process...")
+        authorize()  # This will trigger the authorization process
+        username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
+        if not username:
+            raise Exception("Authorization failed. Unable to retrieve username.")
     return username

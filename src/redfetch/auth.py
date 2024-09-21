@@ -11,7 +11,7 @@ import keyring  # for storing tokens
 from keyring.errors import NoKeyringError
 
 # Constants for keyring
-KEYRING_SERVICE_NAME = 'RedGuides'  # Name of your application/service
+KEYRING_SERVICE_NAME = 'RedFetch'  # Name of your application/service
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
