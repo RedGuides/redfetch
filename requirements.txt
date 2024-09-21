@@ -1,0 +1,10 @@
+requests
+dynaconf
+tomlkit
+flask
+flask-cors
+keyring
+textual
+pyperclip
+textual-fspicker
+cheroot
