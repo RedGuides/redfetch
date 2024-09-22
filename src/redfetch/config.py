@@ -109,11 +109,12 @@ def switch_environment(new_env):
 #         print("Download folder is valid and exists.")
             
 def ensure_config_file_exists(file_path):
-    """Ensure the configuration file and directory exist."""
+    """Ensure the configuration file exists."""
     if not os.path.exists(file_path):
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        # If the file doesn't exist, create it with an empty TOML structure
         with open(file_path, 'w') as f:
             f.write(tomlkit.dumps({}))  # Create an empty TOML file
+        print(f"Created new configuration file: {file_path}")
 
 def load_config(file_path):
     """Load the TOML configuration file."""
@@ -127,7 +128,7 @@ def save_config(file_path, config_data):
 
 def update_setting(setting_path, setting_value, env=None):
     """Update a specific setting in the settings.local.toml file and in memory, optionally within a specific environment."""
-    config_file = 'settings.local.toml'
+    config_file = os.path.abspath('settings.local.toml')
     ensure_config_file_exists(config_file)
     config_data = load_config(config_file)
 
