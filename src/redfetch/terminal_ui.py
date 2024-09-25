@@ -1,5 +1,6 @@
 # standard
 import re
+import os
 import webbrowser
 import pyperclip
 import requests
@@ -519,7 +520,7 @@ class RedFetch(App):
         return None
 
     def get_current_download_folder(self):
-        return config.settings.from_env(self.current_env).DOWNLOAD_FOLDER
+        return os.path.normpath(config.settings.from_env(self.current_env).DOWNLOAD_FOLDER)
 
     def get_current_vvmq_id(self):
         for resource_id, env in config.VANILLA_MAP.items():

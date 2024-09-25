@@ -6,7 +6,7 @@
 # ========================================
 # These settings are the base configuration for all environments. You can override them with [LIVE], [TEST], or [EMU] sections.
 [DEFAULT]
-DOWNLOAD_FOLDER = "Downloads"
+DOWNLOAD_FOLDER = "@format {env[SCRIPT_DIR]}/Downloads"
 EQPATH = ""
 
 [DEFAULT.SPECIAL_RESOURCES.2463]

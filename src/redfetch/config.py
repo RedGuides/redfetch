@@ -35,21 +35,25 @@ def normalize_paths_in_dict(data):
             normalize_paths_in_dict(item)  # Recursively normalize list items
     return data
     
+# Determine the directory where config.py resides
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.environ['SCRIPT_DIR'] = script_dir
+
 # Path to the .env file
-env_file_path = '.env'
+env_file_path = os.path.join(script_dir, '.env')
 
 # Check if the .env file exists
 if not os.path.exists(env_file_path):
     # If not, create it and set the default environment to 'live'
-    with open(env_file_path, 'w') as env_file:
+    with env_file_path.open('w') as env_file:
         env_file.write('REDFETCH_ENV=LIVE\n')
-        print(".env file created with default environment set to 'LIVE'.")
+        print(f".env file created with default environment set to 'LIVE' at {env_file_path}")
 
 # Initialize Dynaconf settings
 settings = Dynaconf(
     envvar_prefix="REDFETCH",
     settings_files=[
-        'settings.toml'
+        os.path.join(script_dir, 'settings.toml')
     ],
     load_dotenv=True,
     env_switcher="REDFETCH_ENV",
@@ -89,24 +93,6 @@ def switch_environment(new_env):
         print(f"Validation error after switching to {new_env}: {e}")
 
     return settings
-
-# def check_folder():
-#     """This is only for the download_folder, i should either flesh this out or remove it"""
-#     download_folder = settings.DOWNLOAD_FOLDER
-#     if not os.path.exists(download_folder):
-#         user_input = input(f"The directory '{download_folder}' does not exist. Do you want to create it? (y/n): ")
-#         if user_input.lower() == 'y':
-#             try:
-#                 os.makedirs(download_folder, exist_ok=True)
-#                 print(f"Directory '{download_folder}' created successfully.")
-#             except OSError as e:
-#                 print(f"Failed to create directory '{download_folder}': {e}")
-#                 sys.exit("Exiting due to failure in creating directory.")
-#         else:
-#             print("Download folder not created. Please set a valid path.")
-#             sys.exit("Exiting due to invalid directory path.")
-#     else:
-#         print("Download folder is valid and exists.")
             
 def ensure_config_file_exists(file_path):
     """Ensure the configuration file exists."""
@@ -170,7 +156,6 @@ def update_setting(setting_path, setting_value, env=None):
 
 def write_env_to_file(new_env):
     """Update the environment setting in the .env file."""
-    env_file_path = '.env'
     # Read the existing content of the .env file
     with open(env_file_path, 'r') as file:
         lines = file.readlines()
