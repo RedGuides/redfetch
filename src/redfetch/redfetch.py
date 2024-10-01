@@ -1,10 +1,12 @@
 # standard
 import argparse
+import os
 
 # local
 import api
 import auth
 import config
+import selfupdate
 import db
 import download
 import listener
@@ -26,6 +28,7 @@ def parse_arguments():
     parser.add_argument('--serve', action='store_true', help='Run as a server to handle download requests.')
     parser.add_argument('--update-setting', nargs=2, metavar=('SETTING_PATH', 'VALUE'), help='Update a setting by specifying the path and value. Path should be dot-separated.')
     parser.add_argument('--switch-env', metavar='ENVIRONMENT', help='Chage the server type. Live, Test, Emu.')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {selfupdate.get_current_version()}')
 
     # Parse the arguments
     args = parser.parse_args()
@@ -190,7 +193,9 @@ def main():
     args = parse_arguments()
     auth.initialize_keyring()
     auth.authorize()
-    #config.initialize_settings()
+
+    # Check for updates
+    update_available = selfupdate.check_for_update()
 
     if args.logout:
         auth.logout()

@@ -26,6 +26,7 @@ import config
 import download
 from listener import run_server
 from redfetch import synchronize_db_and_download
+from __about__ import __version__
 
 class RedFetchCommands(Provider):
     """Command provider for RedFetch application."""
@@ -167,7 +168,7 @@ class RedFetch(App):
                     with Center():
                         yield Button("Ding for level 2 🆙", id="btn_ding", variant="primary", tooltip="Upgrade your RedGuides account to level 2.")
                         yield Button("Manage Watched Resources 🪺", id="btn_watched", variant="default", classes="web_link", tooltip="Manage the resources you're watching.")
-                        yield Button("Licensed Resources 🪆", id="btn_licensed", variant="default", classes="web_link", tooltip="Manage your purchased resources.")
+                        yield Button("Licensed Resources 🎫", id="btn_licensed", variant="default", classes="web_link", tooltip="Manage your purchased resources.")
                         yield Button("Manage Account 🧾", id="btn_account", variant="default", classes="web_link", tooltip="Manage your RedGuides 'Level 2' subscription.")
                         yield Button("RedGuides 🍻", id="btn_redguides", variant="default", classes="web_link")
 
@@ -756,7 +757,7 @@ class RedFetch(App):
     def on_mount(self) -> None:
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
-        log.write_line("RedFetch is a resource downloader for RedGuides")
+        log.write_line(f"RedFetch v{__version__} is a resource downloader for RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
         self.title = "🥏 RedFetch 🐕"
