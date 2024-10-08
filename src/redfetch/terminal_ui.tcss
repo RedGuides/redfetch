@@ -149,8 +149,7 @@ TabbedContent Tab.-active {
     width: 100%;
     content-align: center middle;
     height: 3;     /* Sets the background to the accent color */
-    color: $text;
-    background: $panel-darken-1;             /* Ensures the text is readable */
+    color: $text;       /* Ensures the text is readable */
     text-style: bold;/* Makes the text bold and underlined */
     border: ascii $primary-background;     /* Adds a border with the accent color */
 }

@@ -245,7 +245,7 @@ class RedFetch(App):
         elif event.button.id == "launch_everquest":
             self.run_executable(config.settings.from_env(self.current_env).EQPATH, "LaunchPad.exe")
         elif event.button.id == "launch_everquest_client":
-            self.run_executable(config.settings.from_env(self.current_env).EQPATH, "eqgame.exe")
+            self.run_executable(config.settings.from_env(self.current_env).EQPATH, "eqgame.exe", ["patchme"])
         elif event.button.id == "run_myseq":
             self.run_myseq_executable()
         elif event.button.id == "open_myseq_folder":
@@ -478,7 +478,7 @@ class RedFetch(App):
             state = "enabled" if value else "disabled"
             self.notify(f"IonBC is now {state}")
 
-    def run_executable(self, folder_path: str, executable_name: str) -> None:
+    def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
         """Run an executable from a specified folder."""
         if not sys.platform.startswith('win'):
             self.notify("Running executables is only supported on Windows.", severity="error")
@@ -491,7 +491,9 @@ class RedFetch(App):
         executable_path = os.path.join(folder_path, executable_name)
         if os.path.isfile(executable_path):
             try:
-                subprocess.Popen([executable_path], cwd=folder_path)
+                if args is None:
+                    args = []
+                subprocess.Popen([executable_path] + args, cwd=folder_path)
                 self.notify(f"{executable_name} started successfully.")
             except Exception as e:
                 self.notify(f"Failed to start {executable_name}: {e}", severity="error")
