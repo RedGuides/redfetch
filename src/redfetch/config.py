@@ -3,6 +3,7 @@ import os
 # external
 from dynaconf import Dynaconf, settings, Validator, ValidationError
 import tomlkit
+from .config_firstrun import first_run_setup
 
 # Parent Category to folder
 CATEGORY_MAP = {
@@ -20,55 +21,92 @@ MYSEQ_MAP = {
     151: "LIVE",
     164: "TEST"
 }
+EQMAPS_MAP = {
+    153: "Brewall",
+    303: "Goods"
+}
     
+def validate_no_eqgame(path):
+    """Validate that the path and its parents don't contain eqgame.exe."""
+    current_path = os.path.abspath(path)
+    while current_path != os.path.dirname(current_path):  # Stop at root
+        if os.path.exists(os.path.join(current_path, 'eqgame.exe')):
+            raise ValidationError(f"Path '{path}' or its parent contains eqgame.exe")
+        current_path = os.path.dirname(current_path)
+
+def normalize_and_create_path(path):
+    if not path:
+        raise ValidationError("Path is not set.")
+    normalized_path = os.path.normpath(path)
+    validate_no_eqgame(normalized_path)
+    if not os.path.exists(normalized_path):
+        try:
+            os.makedirs(normalized_path, exist_ok=True)
+            print(f"Created directory: {normalized_path}")
+        except OSError as e:
+            raise ValidationError(f"Failed to create the directory '{normalized_path}': {e}")
+    return normalized_path
+
 # custom dynaconf validator specifically for SPECIAL_RESOURCE paths, since keys can't be wildcarded
-def normalize_paths_in_dict(data):
+def normalize_paths_in_dict(data, parent_key=None):
     if isinstance(data, dict):
         for key, value in data.items():
-            if key in ['default_path', 'custom_path'] and isinstance(value, str):
-                original_value = value  # Store original value for comparison
-                data[key] = os.path.normpath(value) if value else value
-            elif isinstance(value, (dict, list)):
-                normalize_paths_in_dict(value)  # Recursively normalize nested structures
+            if isinstance(value, dict):
+                normalize_paths_in_dict(value, parent_key=key)
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    normalize_paths_in_dict(item, parent_key=key)
+            elif key in ['default_path', 'custom_path'] and isinstance(value, str):
+                normalized_value = os.path.normpath(value) if value else value
+                parent_key_int = int(parent_key) if isinstance(parent_key, str) and parent_key.isdigit() else parent_key
+                if parent_key_int not in EQMAPS_MAP:
+                    validate_no_eqgame(normalized_value)
+                data[key] = normalized_value
     elif isinstance(data, list):
         for index, item in enumerate(data):
-            normalize_paths_in_dict(item)  # Recursively normalize list items
+            normalize_paths_in_dict(item, parent_key=parent_key)
     return data
     
-# Determine the directory where config.py resides
 script_dir = os.path.dirname(os.path.abspath(__file__))
-os.environ['SCRIPT_DIR'] = script_dir
+os.environ['REDFETCH_SCRIPT_DIR'] = script_dir
+
+config_dir = first_run_setup()
+os.environ['REDFETCH_CONFIG_DIR'] = config_dir
 
 # Path to the .env file
-env_file_path = os.path.join(script_dir, '.env')
+env_file_path = os.path.join(config_dir, '.env')
 
 # Check if the .env file exists
 if not os.path.exists(env_file_path):
     # If not, create it and set the default environment to 'live'
-    with env_file_path.open('w') as env_file:
+    with open(env_file_path, 'w') as env_file:
         env_file.write('REDFETCH_ENV=LIVE\n')
-        print(f".env file created with default environment set to 'LIVE' at {env_file_path}")
-
+    print(f".env file created with default environment set to 'LIVE' at {env_file_path}")
+    
 # Initialize Dynaconf settings
 settings = Dynaconf(
     envvar_prefix="REDFETCH",
     settings_files=[
-        os.path.join(script_dir, 'settings.toml')
+        os.path.join(script_dir, 'settings.toml'),
+        os.path.join(config_dir, 'settings.local.toml')
     ],
     load_dotenv=True,
+    dotenv_path=env_file_path,
+    dotenv_override=True,
     env_switcher="REDFETCH_ENV",
     merge_enabled=True,
     lazy_load=True,
     environments=True, 
+    validate_on_update=True,
     validators=[
-        Validator("DOWNLOAD_FOLDER", must_exist=True, cast=os.path.normpath),
+        Validator("DOWNLOAD_FOLDER", cast=normalize_and_create_path),
+        # we need a separate validator for EQPATH, so it doesn't trigger our eqgame.exe check.
         Validator("EQPATH", default=None, cast=lambda x: os.path.normpath(x) if x else None),
         Validator("SPECIAL_RESOURCES", cast=normalize_paths_in_dict)
     ]
 )
 # Debugging output to see what is loaded
 #print("Initial complete configuration:", settings.as_dict())
-print("Server:", settings.current_env)
 
 def switch_environment(new_env):
     """Switch the environment and update the settings."""
@@ -115,8 +153,7 @@ def save_config(file_path, config_data):
 
 def update_setting(setting_path, setting_value, env=None):
     """Update a specific setting in the settings.local.toml file and in memory, optionally within a specific environment."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_file = os.path.join(script_dir, 'settings.local.toml')
+    config_file = os.path.join(config_dir, 'settings.local.toml')
     ensure_config_file_exists(config_file)
     config_data = load_config(config_file)
 
@@ -151,8 +188,8 @@ def update_setting(setting_path, setting_value, env=None):
     save_config(config_file, config_data)
 
     print("Configuration saved.")
-    print("update_setting post-configuration:", settings.as_dict())
-    print("update_setting post-configuration from_env:", settings.from_env(env).as_dict())
+    #print("update_setting post-configuration:", settings.as_dict())
+    #print("update_setting post-configuration from_env:", settings.from_env(env).as_dict())
 
 def write_env_to_file(new_env):
     """Update the environment setting in the .env file."""

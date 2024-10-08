@@ -1,6 +1,6 @@
 import requests
 import keyring
-from auth import KEYRING_SERVICE_NAME, authorize
+from .auth import KEYRING_SERVICE_NAME, authorize
 
 def get_api_headers():
 

@@ -1,10 +1,13 @@
 #standard
 import sqlite3
 import time
+import os
 
 def get_db_connection(db_name):
-    """Establishes a database connection to the specified SQLite database."""
-    return sqlite3.connect(db_name)
+    """Establishes a database connection to the specified SQLite database in the script directory."""
+    config_dir = os.getenv('REDFETCH_CONFIG_DIR')
+    db_path = os.path.join(config_dir, db_name)
+    return sqlite3.connect(db_path)
 
 def ensure_column_exists(cursor, table_name, column_name, data_type):
     cursor.execute(f"PRAGMA table_info({table_name})")

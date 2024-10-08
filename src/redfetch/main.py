@@ -1,16 +1,18 @@
 # standard
 import argparse
-import os
+import sys
+
+#external
+from dynaconf import ValidationError
 
 # local
-import api
-import auth
-import config
-import selfupdate
-import db
-import download
-import listener
-import utils
+from . import api
+from . import auth
+from . import config
+from . import selfupdate
+from . import db
+from . import download
+from . import utils
 
 # Global constant
 CATEGORY_MAP = config.CATEGORY_MAP
@@ -34,6 +36,14 @@ def parse_arguments():
     args = parser.parse_args()
 
     return args
+
+def validate_settings():
+    try:
+        config.settings.validators.validate()
+    except ValidationError as e:
+        print(f"Validation error: {e}")
+        sys.exit(1)
+    print("Server:", config.settings.current_env)
 
 def get_special_resource_status(resource_ids=None):
     resource_ids = utils.filter_and_fetch_dependencies(resource_ids)
@@ -190,22 +200,22 @@ def synchronize_db_and_download(cursor, headers, resource_ids=None):
         return False
 
 def main():
+    update_available = selfupdate.check_for_update()
     args = parse_arguments()
     auth.initialize_keyring()
     auth.authorize()
-
-    # Check for updates
-    update_available = selfupdate.check_for_update()
 
     if args.logout:
         auth.logout()
         print("Logged out successfully.")
         return
+    
+    validate_settings()
 
     if args.switch_env:
         config.switch_environment(args.switch_env)
         print(f"Environment updated to {args.switch_env}.")
-        print("New complete configuration:", config.settings.from_env('DEFAULT').as_dict())
+        print("New complete configuration:", config.settings.from_env(args.switch_env).as_dict())
         return
 
     if args.update_setting:
@@ -225,12 +235,13 @@ def main():
             print("You're not level 2 on RedGuides, so some resources will not be downloadable.")
 
     if args.serve:
-        listener.run_server(config.settings, db_name, headers, special_resources, CATEGORY_MAP)
+        from .listener import run_server
+        run_server(config.settings, db_name, headers, special_resources, CATEGORY_MAP)
         return
 
     if not any(vars(args).values()):
         print("No arguments provided, launching UI.")
-        from terminal_ui import run_textual_ui
+        from .terminal_ui import run_textual_ui
         run_textual_ui() 
         return
 

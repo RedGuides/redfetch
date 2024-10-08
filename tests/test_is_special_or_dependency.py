@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-import utils
+from src.redfetch import utils, config
 
 # Realistic and complex sample data to mock config.settings.SPECIAL_RESOURCES
 special_resources_mock = {
@@ -44,7 +44,7 @@ def mock_config(mocker):
     mock_settings.from_env.return_value = mock_env_settings
     
     # Patch config.settings
-    mocker.patch('config.settings', mock_settings)
+    mocker.patch('src.redfetch.config.settings', mock_settings)
 
     # If ENV is used in your code, you might want to set it as well
     mock_settings.ENV = 'test'

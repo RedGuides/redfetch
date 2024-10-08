@@ -2,10 +2,15 @@
 import os
 import requests
 import shutil
+import time
 from zipfile import ZipFile
 
 # local
-import config
+from . import config
+from .utils import (
+    get_folder_path,
+    is_safe_path,
+)
 
 #
 # download functions
@@ -28,11 +33,11 @@ def download_resource(resource_id, parent_category_id, download_url, filename, h
     except requests.exceptions.RequestException as e:
         print(f"Failed to fetch or download resource {resource_id}: {str(e)}")
         return False
-    
+
 def download_file(download_url, file_path, headers):
     # Ensure the directory exists before downloading
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    
+
     # Perform the file download
     try:
         download_response = requests.get(download_url, headers=headers)
@@ -111,102 +116,45 @@ def extract_with_structure(zip_ref, extract_to, protected_files):
 
 def extract_zip_member(zip_ref, member, target_path):
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    with zip_ref.open(member) as source, open(target_path, 'wb') as target:
-        shutil.copyfileobj(source, target)
-    # uncomment if you like spam
-    # print(f"Extracted {member.filename} to {target_path}")
+    max_retries = 3
+    retry_delay = 10  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            with zip_ref.open(member) as source, open(target_path, 'wb') as target:
+                shutil.copyfileobj(source, target)
+            return  # Successful extraction, exit the function
+        except PermissionError:
+            if attempt < max_retries - 1:
+                file_name = os.path.basename(target_path)
+                print(f"Warning: Unable to extract {file_name}. Did you forget to close MacroQuest?")
+                print(f"Or maybe you didn't close eqbcs.exe, or some other application?")
+                print(f"Retrying in {retry_delay} seconds... (Attempt {attempt + 1} of {max_retries})")
+                time.sleep(retry_delay)
+            else:
+                file_name = os.path.basename(target_path)
+                print(f"Error: Failed to extract {file_name} after {max_retries} attempts.")
+                print("Please ensure all related applications are closed and try again.")
+        except Exception as e:
+            print(f"Unexpected error while extracting {os.path.basename(target_path)}: {str(e)}")
+            break
+
+    # If we've exhausted all retries or encountered an unexpected error,
+    # stop the extraction by raising an exception
+    raise Exception(f"Extraction stopped due to failure extracting {os.path.basename(target_path)}.")
 
 def delete_zip_file(zip_path):
     try:
         os.remove(zip_path)
     except PermissionError as e:
         print(f"PermissionError: Unable to delete zip file {zip_path}. Error: {e}")
-
-#
-# path functions
-#
-
-def get_base_path():
-    """ Determine the base path based on the active version. """
-    # Find the vanilla mq version that corresponds to the config.settings.ENV
-    active_version_key = next((k for k, v in config.VANILLA_MAP.items() if v.upper() == config.settings.ENV.upper()), None)
-    if not active_version_key:
-        return config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
-
-    # retrieve the path
-    special_path = get_special_resource_path(str(active_version_key)) # the VANILLA_MAP resource ids are INTs but SPECIAL_RESOURCES are STRs
-
-    return special_path if special_path else config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
-
-def get_folder_path(resource_id, parent_category_id, is_dependency=False, parent_resource_id=None):
-    """ Determine the folder path for resources and dependencies. """
-
-    if is_dependency and parent_resource_id:
-        dependency_path = get_dependency_folder_path(resource_id, parent_resource_id)
-        if dependency_path:
-            return os.path.normpath(dependency_path)
-
-    # Next, check if there's a special path for this resource.
-    special_path = get_special_resource_path(resource_id)
-    if special_path:
-        return special_path  # Already normalized in get_special_resource_path
-
-    # If no special path given, use the base path combined with any category-specific subfolder.
-    base_path = get_base_path()
-    category_subfolder = config.CATEGORY_MAP.get(parent_category_id, '')
-    final_path = os.path.join(base_path, category_subfolder)
-    return os.path.normpath(final_path)
-
-def get_special_resource_path(resource_id):
-    """ Get the path for special resources. """
-    special_resource = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES.get(resource_id)
-
-    if not special_resource:
-        return None
-
-    if 'custom_path' in special_resource and special_resource['custom_path']:
-        path = os.path.realpath(special_resource['custom_path'])
-    elif 'default_path' in special_resource and special_resource['default_path']:
-        path = os.path.join(config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER, special_resource['default_path'])
-        # making sure the default vvmq path exists for our tui dir select
-        os.makedirs(path, exist_ok=True)
-    else:
-        # If neither path is specified, return the DOWNLOAD_FOLDER
-        path = config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
-
-    # Normalize the path
-    return os.path.normpath(path)
-
-def get_dependency_folder_path(resource_id, parent_resource_id):
-    """ Get the folder path for a dependency resource. """
-    parent_special_resource = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES.get(parent_resource_id)
-    
-    if parent_special_resource and 'dependencies' in parent_special_resource:
-        dependencies = parent_special_resource['dependencies']
         
-        # Check if the resource_id is a key in the dependencies dictionary
-        if resource_id in dependencies:
-            dependency_info = dependencies[resource_id]
-            base_path = os.path.join(config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER, parent_special_resource.get('custom_path') or parent_special_resource.get('default_path', ''))
-            subfolder = dependency_info.get('subfolder', '') or ''
-            final_path = os.path.join(base_path, subfolder)
-            return os.path.normpath(final_path)
-    
-    print("No matching dependency found or no dependencies available.")
-    return None
-
-def is_safe_path(base_directory, target_path):
-    """ is that a directory traversal? """
-    abs_base = os.path.realpath(base_directory)
-    abs_target = os.path.realpath(target_path)
-    return os.path.commonpath([abs_base, abs_target]) == abs_base
-
 #
 # utility functions
 #
 
 def get_flatten_status(resource_id, is_dependency, parent_resource_id):
-    # does the zip want to be flattened?
+    # Does the zip want to be flattened?
     flatten = False
     if is_dependency and parent_resource_id:
         # Check if the parent resource has specific settings for this dependency
@@ -222,14 +170,14 @@ def get_flatten_status(resource_id, is_dependency, parent_resource_id):
     special_resource = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES.get(resource_id)
     if special_resource and 'flatten' in special_resource:
         flatten = special_resource['flatten']
-    
+
     return flatten
 
 def is_protected(filename, target_path, protected_files):
-    # overwrite protection for specified files
+    # Overwrite protection for specified files
     filename_lower = filename.lower()
     protected_files_lower = [f.lower() for f in protected_files]
-    
+
     if filename_lower in protected_files_lower and os.path.exists(target_path):
         # Retrieve the original filename case for message consistency
         original_filename = protected_files[protected_files_lower.index(filename_lower)]

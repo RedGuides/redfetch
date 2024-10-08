@@ -100,7 +100,6 @@ TabbedContent Tab.-active {
 }
 
 #account_grid {
-    align: center middle;
     content-align: center middle;
     padding: 2;
 }
@@ -131,4 +130,46 @@ TabbedContent Tab.-active {
 #account_grid Button:hover {
     background: $background-darken-1;
     color: $accent-lighten-1;
+}
+
+/* Shortcuts Grid */
+
+#shortcuts_grid {
+    layout: grid;
+    content-align: center middle;
+    grid-size: 3;  /* Two columns */
+    grid-rows: auto;        
+    grid-gutter: 1;   
+}
+#shortcuts_grid Label {
+    column-span: 3;
+    width: 100%;
+    content-align: center middle;
+    height: 3;     /* Sets the background to the accent color */
+    color: $text;
+    background: $panel-darken-1;             /* Ensures the text is readable */
+    text-style: bold;/* Makes the text bold and underlined */
+    border: ascii $primary-background;     /* Adds a border with the accent color */
+}
+#shortcuts_grid Button {
+    width: 35;
+    height: 3;
+}
+#shortcuts_grid Button.folder {
+    width: 35;
+    background: $accent-darken-3;
+}
+#shortcuts_grid Button.folder:hover {
+    width: 35;
+    background: $primary-darken-2;
+}
+#shortcuts_grid Button.executable {
+    background: brown;
+}
+#shortcuts_grid Button.executable:hover {
+    background: maroon;
+}
+#run_myseq {
+    column-span: 3;
+    max-width: 32%;
 }
