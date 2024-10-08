@@ -1,5 +1,8 @@
+$primary-red: #ff3737;
+$secondary-red: #990000;
+
 Header {
-    color: #ff3737 /* Set the text color of the title */
+    color: $primary-red;
 }
 
 Button {
@@ -17,11 +20,11 @@ Label {
 }
 
 TabbedContent Tab {
-    color: #990000;
+    color: $secondary-red;
 }
 
 TabbedContent Tab.-active {
-    color: #ff3737; 
+    color: $primary-red; 
 }
 
 .hidden {
@@ -157,17 +160,17 @@ TabbedContent Tab.-active {
 }
 #shortcuts_grid Button.folder {
     width: 35;
-    background: $accent-darken-3;
+    background: 20%;
 }
 #shortcuts_grid Button.folder:hover {
     width: 35;
-    background: $primary-darken-2;
+    background: 10%;
 }
 #shortcuts_grid Button.executable {
-    background: brown;
+    background: red 26%;
 }
 #shortcuts_grid Button.executable:hover {
-    background: maroon;
+    background: red 10%;
 }
 #run_myseq {
     column-span: 3;
