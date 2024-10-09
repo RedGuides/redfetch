@@ -531,6 +531,15 @@ class RedFetch(App):
         else:
             self.notify("IonBC path not found.", severity="error")
 
+    def handle_uninstall(self) -> None:
+        from . import meta
+        try:
+            with self.suspend():
+                meta.uninstall()
+        except SystemExit:
+            print("bye bye!")
+            self.exit()
+
     def run_myseq_executable(self) -> None:
         """Run the MySEQ executable if available."""
         myseq_path = self.get_myseq_path()
@@ -580,7 +589,9 @@ class RedFetch(App):
         self.query_one("#open_myseq_folder", Button).disabled = self.is_updating or self.interface_running or not bool(self.get_myseq_path())
         self.query_one("#run_ionbc", Button).disabled = self.is_updating or self.interface_running or not bool(self.get_ionbc_path())
         self.query_one("#open_ionbc_folder", Button).disabled = self.is_updating or self.interface_running or not bool(self.get_ionbc_path())
-        self.query_one("#open_dl_folder", Button).disabled = self.is_updating or self.interface_running
+        self.query_one("#open_dl_folder", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
+        self.query_one("#uninstall", Button).disabled = self.is_updating or self.interface_running
+        self.query_one("#open_vvmq_folder", Button).disabled = self.is_updating or self.interface_running or not bool(self.get_vvmq_path())
 
         # Selects!
         self.query_one("#server_type", Select).disabled = self.is_updating or self.interface_running
@@ -742,15 +753,6 @@ class RedFetch(App):
     #
     # worker handlers
     #
-
-    def handle_uninstall(self) -> None:
-        from . import meta
-        try:
-            with self.suspend():
-                meta.uninstall()
-        except SystemExit:
-            print("bye bye!")
-            self.exit()
 
     @work(exclusive=True, thread=True, group="generic_group")
     def handle_update_watched(self) -> None:

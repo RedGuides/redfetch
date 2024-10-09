@@ -159,11 +159,43 @@ def self_remove():
         console.print("[bold]Performing self-uninstall...[/bold]")
 
         executable_path = get_executable_path()
-        uninstall_command = [executable_path, 'self', 'remove']
+        console.print(f"[debug]Executable path: {executable_path}[/debug]")
 
-        # Start the uninstall process in a new console and exit the current one
+        if not executable_path:
+            console.print("[bold red]Executable path not found. Exiting self-remove.[/bold red]")
+            return
+
+        # Create a batch script to handle the uninstallation
+        batch_script = f"""
+        @echo off
+        timeout /t 2 > nul
+        "{executable_path}" self remove
+        if %errorlevel% neq 0 (
+            echo Uninstallation failed. Press any key to exit.
+            pause > nul
+            exit /b 1
+        )
+        echo Uninstallation successful. Cleaning up...
+        del "{executable_path}"
+        if exist "{executable_path}" (
+            echo Failed to delete the executable. You may need to delete it manually.
+        ) else (
+            echo Executable deleted successfully.
+        )
+        echo Cleanup complete. Press any key to exit.
+        pause > nul
+        (goto) 2>nul & del "%~f0"
+        """
+
+        batch_file_path = os.path.join(os.path.dirname(executable_path), "uninstall.bat")
+        with open(batch_file_path, 'w') as batch_file:
+            batch_file.write(batch_script)
+
+        console.print(f"[debug]Batch script created at: {batch_file_path}[/debug]")
+    
+        # Run the batch script in a new console
         subprocess.Popen(
-            uninstall_command,
+            ['cmd.exe', '/c', 'start', batch_file_path],
             creationflags=subprocess.CREATE_NEW_CONSOLE
         )
 
@@ -172,6 +204,7 @@ def self_remove():
 
     except Exception as e:
         console.print(f"[bold red]Error during self-uninstall process:[/bold red] {e}")
+        input("Press Enter to close this window...")
         sys.exit(1)
 
 def uninstall():
@@ -257,7 +290,8 @@ def uninstall():
             console.print(f" - [cyan]{path}[/cyan]")
 
         # Generate OS-specific commands to remove the directories
-        generate_removal_commands(existing_paths, console)
+        commands = generate_removal_commands(existing_paths, console)
+        write_commands_to_file(commands, existing_paths)
     else:
         console.print("[green]No existing directories found that need manual cleanup.[/green]\n")
 
@@ -266,7 +300,7 @@ def uninstall():
 
     if executable_path:
         # Ask the user if they want to proceed with self-uninstall
-        if Confirm.ask("Would you like to proceed with uninstalling RedFetch's little python environment?"):
+        if Confirm.ask("Would you like to uninstall RedFetch's little python environment?"):
             # Now, perform self-remove
             self_remove()
         else:
@@ -285,7 +319,7 @@ def generate_removal_commands(paths, console):
 
     if system == 'Windows':
         # Generate PowerShell commands
-        console.print("[bold]These directories need to be removed manually, you can do so by running the following PowerShell commands:[/bold]\n")
+        console.print("[bold]These directories may be removed manually after you make sure there's nothing you need from them, you can do so by running the following PowerShell commands:[/bold]\n")
         commands = []
         for path in sorted(paths):
             # Escape quotes and handle special characters
@@ -304,3 +338,27 @@ def generate_removal_commands(paths, console):
             commands.append(command)
             console.print(f"  {command}")
     console.print("\n[bold yellow]These directories must be removed manually.[/bold yellow]")
+    return commands
+
+def write_commands_to_file(commands, paths):
+    """Write the removal commands and additional information to a text file and open it."""
+    import os
+    import subprocess
+    import platform
+    file_path = os.path.join(os.path.expanduser("~"), "redfetch_removal_commands.txt")
+    with open(file_path, 'w') as file:
+        file.write("Manual Cleanup Instructions:\n")
+        file.write("The following directories may contain files downloaded by RedFetch. You can remove them manually if you want:\n")
+        for path in sorted(paths):
+            file.write(f" - {path}\n")
+        file.write("\nMake sure there's nothing you want in them. When ready to delete, you can use:\n\n")
+        
+        for command in commands:
+            file.write(command + '\n')
+    
+    # Automatically open the file with the default text editor
+    if platform.system() == 'Windows':
+        os.startfile(file_path)
+    else:
+        opener = "open" if platform.system() == "Darwin" else "xdg-open"
+        subprocess.Popen([opener, file_path])
