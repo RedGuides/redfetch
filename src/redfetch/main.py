@@ -217,9 +217,10 @@ def main():
     validate_settings()
 
     if args.switch_env:
-        config.switch_environment(args.switch_env)
-        print(f"Environment updated to {args.switch_env}.")
-        print("New complete configuration:", config.settings.from_env(args.switch_env).as_dict())
+        ENV = args.switch_env.upper()
+        config.switch_environment(ENV)
+        print(f"Environment updated to {ENV}.")
+        print("New complete configuration:", config.settings.from_env(ENV).as_dict())
         return
 
     if args.update_setting:
