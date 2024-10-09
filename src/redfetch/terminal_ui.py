@@ -168,7 +168,8 @@ class RedFetch(App):
                     yield Label("IonBC:", classes="left_middle")
                     yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
                     yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="Make all resources downloadable again by resetting their download dates.")
-
+                    yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall RedFetch and guide through manual cleanup.")
+                
             with TabPane("Shortcuts", id="shortcuts"):
                 with ScrollableContainer(id="shortcuts_grid"):
                     yield Label("⚡ Run Executables ⚡")
@@ -232,6 +233,8 @@ class RedFetch(App):
             self.select_directory("vvmq_path_input")
         elif event.button.id == "reset_downloads":
             self.handle_reset_downloads()
+        elif event.button.id == "uninstall":
+            self.handle_uninstall()
 
         # shortcuts
         elif event.button.id == "open_dl_folder":
@@ -739,6 +742,15 @@ class RedFetch(App):
     #
     # worker handlers
     #
+
+    def handle_uninstall(self) -> None:
+        from . import meta
+        try:
+            with self.suspend():
+                meta.uninstall()
+        except SystemExit:
+            print("bye bye!")
+            self.exit()
 
     @work(exclusive=True, thread=True, group="generic_group")
     def handle_update_watched(self) -> None:

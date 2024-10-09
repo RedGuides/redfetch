@@ -95,6 +95,15 @@ TabbedContent Tab.-active {
 #dl_path_input, #eq_path_input, #vvmq_path_input, #server_type, #eq_maps, #myseq, #ionbc {
     column-span: 2;
 }
+#uninstall {
+    /* Styles for the uninstall button */
+    background: red 25%;  /* Adjust as per your theme */
+    text-style: bold;
+}
+#uninstall:hover {
+    /* Styles for the uninstall button */
+    background: red 10%;  /* Adjust as per your theme */
+}
 
 /* Website Grid */
 

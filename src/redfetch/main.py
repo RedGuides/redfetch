@@ -9,7 +9,7 @@ from dynaconf import ValidationError
 from . import api
 from . import auth
 from . import config
-from . import selfupdate
+from . import meta
 from . import db
 from . import download
 from . import utils
@@ -30,7 +30,8 @@ def parse_arguments():
     parser.add_argument('--serve', action='store_true', help='Run as a server to handle download requests.')
     parser.add_argument('--update-setting', nargs=2, metavar=('SETTING_PATH', 'VALUE'), help='Update a setting by specifying the path and value. Path should be dot-separated.')
     parser.add_argument('--switch-env', metavar='ENVIRONMENT', help='Chage the server type. Live, Test, Emu.')
-    parser.add_argument('--version', action='version', version=f'%(prog)s {selfupdate.get_current_version()}')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {meta.get_current_version()}')
+    parser.add_argument('--uninstall', action='store_true', help='Uninstall RedFetch and clean up data.')
 
     # Parse the arguments
     args = parser.parse_args()
@@ -200,8 +201,11 @@ def synchronize_db_and_download(cursor, headers, resource_ids=None):
         return False
 
 def main():
-    update_available = selfupdate.check_for_update()
+    update_available = meta.check_for_update()
     args = parse_arguments()
+    if args.uninstall:
+        meta.uninstall()
+        return
     auth.initialize_keyring()
     auth.authorize()
 
