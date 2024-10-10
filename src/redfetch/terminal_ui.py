@@ -101,6 +101,7 @@ class RedFetchCommands(Provider):
 class RedFetch(App):
     interface_running = False
     is_updating = reactive(False)
+    mq_down = reactive(None)
     CSS_PATH = "terminal_ui.tcss"
     current_env = config.settings.ENV 
     download_folder = config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
@@ -115,16 +116,15 @@ class RedFetch(App):
 
     def compose(self) -> ComposeResult:
         # this function and the tcss file make up the button placement and styling
-        username = api.get_username()
         yield Header()
         yield Footer()
         with TabbedContent():
             with TabPane("Fetch", id="fetch"):
                 with ScrollableContainer(id="fetch_grid"):
                     with Center(id="center_welcome"):
-                        yield Label("Loading...", id="welcome_label")
+                        yield Label("Who's this?", id="welcome_label")
                     with Center(id="center_watched"):
-                        yield Button("Update Watched & Special Resources 🍦", id="update_watched", variant="primary", tooltip="Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ. (Manage watched resources on the website, and edit 'special' resources in settings.local.toml)")
+                        yield Button("Checking if Very Vanilla MQ is up. 🍦", id="update_watched", variant="default", tooltip="is MQ down?")
                     yield Button("Update Single Resource", id="update_resource_id", variant="default", disabled=True, tooltip="Update a single resource by its ID or URL.")
                     yield Input(placeholder="Paste resource URL or ID", id="resource_id_input", tooltip="Update a single resource by its ID or URL.")
                     yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="default", tooltip="Access an interface for this script on the website.")
@@ -303,6 +303,7 @@ class RedFetch(App):
                 self.current_env = new_env
                 config.switch_environment(new_env)
                 self.update_widget_states()
+                self.check_mq_status_worker()
                 self.notify(f"Server type changed to: {new_env}")
             
             # Update the download folder input
@@ -563,11 +564,36 @@ class RedFetch(App):
         self.query_one("#vvmq_path_input", Input).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
 
         # Buttons!
-        self.query_one("#update_watched", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
+        update_watched_button = self.query_one("#update_watched", Button)
+        # Use self.mq_down to determine the button state
+        if self.mq_down is None:
+            # MQ status not yet known; disable the button or set to a default state
+            update_watched_button.label = "Checking if Very Vanilla MQ is up. 🍦"
+            update_watched_button.tooltip = "Please wait while we check MQ status."
+            update_watched_button.disabled = True
+        elif self.mq_down:
+            update_watched_button.label = "MQ Down - Patch Day 💔"
+            update_watched_button.tooltip = (
+                "Very Vanilla MQ is down for patch day, check redguides.com for current status."
+            )
+            update_watched_button.disabled = True
+            update_watched_button.variant = "default"
+        else:
+            update_watched_button.label = "Update Watched & Special Resources 🍦"
+            update_watched_button.tooltip = (
+                "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ. "
+                "(Manage watched resources on the website, and edit 'special' resources in settings.local.toml)"
+            )
+            update_watched_button.variant = "primary"
+            # Also consider other conditions to disable the button
+            update_watched_button.disabled = (
+                self.is_updating or self.interface_running or not bool(self.download_folder)
+            )
         self.query_one("#update_resource_id", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder) or not bool(resource_input.value)
         redguides_interface_button = self.query_one("#redguides_interface", Button)
         if self.interface_running:
             redguides_interface_button.label = "Stop Interface 🛑"
+            redguides_interface_button.tooltip = "RedGuides Interface is currently running, click to stop."
             redguides_interface_button.disabled = False
         else:
             redguides_interface_button.label = "RedGuides Interface 🌐"
@@ -754,6 +780,16 @@ class RedFetch(App):
     # worker handlers
     #
 
+    @work(thread=True, exclusive=True, group="mq_status_group")
+    def check_mq_status_worker(self):
+        """Background worker to check MQ status."""
+        mq_down = utils.is_mq_down()
+        self.call_from_thread(self.set_mq_down_status, mq_down)
+
+    def set_mq_down_status(self, mq_down: bool | None):
+        """Set the mq_down reactive variable."""
+        self.mq_down = mq_down
+
     @work(exclusive=True, thread=True, group="generic_group")
     def handle_update_watched(self) -> None:
         self.notify("Updating watched resources...")
@@ -929,7 +965,7 @@ class RedFetch(App):
         self.start_redguides_interface()
         return True
     
-    @work(exclusive=True, thread=True)
+    @work(thread=True)
     def load_user_level(self):
         username = api.get_username()
         if api.is_kiss_downloadable(api.get_api_headers()):
@@ -960,6 +996,7 @@ class RedFetch(App):
         log.write_line("\n")
         self.title = "🥏 RedFetch 🐕"
         self.load_user_level()  # background task for welcome message
+        self.check_mq_status_worker()
 
     # 
     # the end

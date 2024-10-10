@@ -1,5 +1,7 @@
 from . import config
 import os
+import requests
+import json
 
 def is_special_or_dependency(resource_id):
     """Determine if a resource is special or a dependency, and its parent IDs."""
@@ -65,6 +67,28 @@ def get_dependencies_for_resources(resource_ids):
                 if is_dependency_opted_in(dep_id):
                     dependencies.add(dep_id)
     return dependencies
+
+def is_mq_down():
+    """Check if MQ is down based on the status from the ready.json file."""
+    url = "https://www.redguides.com/update/ready.json"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        data = response.json()
+        
+        # Get the current environment from config settings and convert to lowercase
+        current_env = config.settings.ENV.lower()
+        
+        # Check if the current environment exists in the Status dictionary (case-insensitive)
+        for env, status in data["Status"].items():
+            if env.lower() == current_env:
+                return status.lower() != "yes"
+        
+        print(f"Warning: Environment {current_env} not found in status JSON.")
+        return True  # Assume down if environment not found
+    except (requests.RequestException, json.JSONDecodeError) as e:
+        print(f"Error fetching or parsing status: {e}")
+        return True  # Assume down if there's an error
 
 def is_resource_opted_in(resource_id):
     """Check if the given resource is opted-in."""
