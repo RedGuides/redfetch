@@ -4,6 +4,8 @@ import sys
 
 #external
 from dynaconf import ValidationError
+from rich import print as rprint
+from rich.prompt import Confirm
 
 # local
 from . import api
@@ -30,7 +32,7 @@ def parse_arguments():
     parser.add_argument('--serve', action='store_true', help='Run as a server to handle download requests.')
     parser.add_argument('--update-setting', nargs=2, metavar=('SETTING_PATH', 'VALUE'), help='Update a setting by specifying the path and value. Path should be dot-separated.')
     parser.add_argument('--switch-env', metavar='ENVIRONMENT', help='Chage the server type. Live, Test, Emu.')
-    parser.add_argument('--version', action='version', version=f'%(prog)s {meta.get_current_version()}')
+    parser.add_argument('--version', action='version', version=f'RedFetch {meta.get_current_version()}')
     parser.add_argument('--uninstall', action='store_true', help='Uninstall RedFetch and clean up data.')
 
     # Parse the arguments
@@ -263,6 +265,12 @@ def main():
             print(f"Downloading resource {args.download_resource}.")
             synchronize_db_and_download(cursor, headers, [args.download_resource])
         elif args.download_watched: 
+            if utils.is_mq_down():
+                rprint("[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work.")
+                continue_download = Confirm.ask("Do you want to continue with the download?")
+                if not continue_download:
+                    print("Download cancelled by user.")
+                    return False
             synchronize_db_and_download(cursor, headers)
 
 if __name__ == "__main__":
