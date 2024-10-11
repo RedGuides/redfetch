@@ -2,6 +2,8 @@ from . import config
 import os
 import requests
 import json
+import re
+from urllib.parse import urlparse
 
 def is_special_or_dependency(resource_id):
     """Determine if a resource is special or a dependency, and its parent IDs."""
@@ -205,3 +207,92 @@ def is_safe_path(base_directory, target_path):
     abs_base = os.path.realpath(base_directory)
     abs_target = os.path.realpath(target_path)
     return os.path.commonpath([abs_base, abs_target]) == abs_base
+
+def get_current_vvmq_id():
+    current_env = config.settings.ENV
+    for resource_id, env in config.VANILLA_MAP.items():
+        if env.upper() == current_env:
+            return str(resource_id)
+    return None  # Return None if no matching environment is found
+    
+def get_vvmq_path():
+    vvmq_id = get_current_vvmq_id()
+    if vvmq_id:
+        return get_special_resource_path(vvmq_id)
+    return None
+    
+def get_current_myseq_id():
+    current_env = config.settings.ENV
+    for resource_id, env in config.MYSEQ_MAP.items():
+        if env.upper() == current_env:
+            return str(resource_id)
+    return None # Return None if no matching environment is found
+    
+def get_myseq_path():
+    myseq_id = get_current_myseq_id()
+    if myseq_id:
+        return get_special_resource_path(myseq_id)
+    return None  # Don't use None on select widgets
+        
+def get_ionbc_path() -> str | None:
+    """Get the path to the IonBC resource, checking both the base directory and the subdirectory."""
+    ionbc_id = "2463"  # The resource ID for IonBC
+    base_path = get_special_resource_path(ionbc_id)
+    if not base_path:
+        return None
+
+    # Check both the base path and the subdirectory for the IonBC executable
+    possible_paths = [
+        base_path,
+        os.path.join(base_path, "IonBC")
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(os.path.join(path, "IonBC.exe")):
+            return path
+
+    return None
+    
+def get_current_download_folder():
+    return os.path.normpath(config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER)
+
+def get_eq_maps_status():
+    """Get the status of EQ maps (Brewall's and Good's)."""
+    special_resources = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES
+    brewall_opt_in = special_resources.get('153', {}).get('opt_in', False)
+    good_opt_in = special_resources.get('303', {}).get('opt_in', False)
+    
+    if brewall_opt_in and good_opt_in:
+        return "all"
+    elif brewall_opt_in:
+        return "brewall"
+    elif good_opt_in:
+        return "good"
+    else:
+        return None
+    
+def parse_resource_id(input_string):
+    # Check if it's already a number
+    if input_string.isdigit():
+        return str(input_string)
+
+    # Parse the URL
+    parsed_url = urlparse(input_string)
+
+    # Check if it's a redguides.com URL
+    if not parsed_url.netloc.endswith('redguides.com'):
+        print(f"Invalid URL: Not a redguides.com URL")
+        raise ValueError("Invalid URL: Not a redguides.com URL")
+
+    # Check if it's a thread URL
+    if 'threads' in parsed_url.path:
+        print(f"Invalid URL: This appears to be a discussion thread, not a resource")
+        raise ValueError("Invalid URL: This appears to be a discussion thread, not a resource")
+
+    # Extract the resource ID using regex
+    match = re.search(r'\.(\d+)(?:/|$)', parsed_url.path)
+    if match:
+        return int(match.group(1))
+    else:
+        print(f"Could not find a valid resource ID in the URL")
+        raise ValueError("Could not find a valid resource ID in the URL")
