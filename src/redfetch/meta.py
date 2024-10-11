@@ -3,6 +3,7 @@ import os
 import subprocess
 import requests
 from packaging import version
+import platform
 
 # rich
 from rich.console import Console
@@ -81,7 +82,6 @@ def check_for_update():
                     console.print("[yellow]Update skipped. You can manually update later.[/yellow]")
     except Exception as e:
         console.print(f"[bold red]Error checking for updates:[/bold red] {e}")
-    print("No update available.")
     return False
 
 def pip_update_redfetch(update_command, latest_version):
@@ -210,11 +210,6 @@ def self_remove():
 def uninstall():
     """Guide the user through the uninstallation process."""
     # Import required modules when necessary
-    import sys
-    import os
-    import platform
-    from rich.console import Console
-    from rich.prompt import Confirm
     from . import config
 
     console = Console()
@@ -314,9 +309,7 @@ def uninstall():
 
 def generate_removal_commands(paths, console):
     """Generate OS-specific commands to remove the given directories."""
-    import platform
     system = platform.system()
-
     if system == 'Windows':
         # Generate PowerShell commands
         console.print("[bold]These directories may be removed manually after you make sure there's nothing you need from them, you can do so by running the following PowerShell commands:[/bold]\n")
@@ -342,9 +335,6 @@ def generate_removal_commands(paths, console):
 
 def write_commands_to_file(commands, paths):
     """Write the removal commands and additional information to a text file and open it."""
-    import os
-    import subprocess
-    import platform
     file_path = os.path.join(os.path.expanduser("~"), "redfetch_removal_commands.txt")
     with open(file_path, 'w') as file:
         file.write("Manual Cleanup Instructions:\n")
