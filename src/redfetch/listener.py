@@ -1,12 +1,14 @@
-#standard
+# standard
 import traceback
 import webbrowser
 import sqlite3
-# external
+import threading
+
+# third-party
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from cheroot.wsgi import Server as WSGIServer
-import threading
+
 # local
 from . import db
 from . import utils

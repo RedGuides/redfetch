@@ -1,9 +1,14 @@
-from . import config
+# Standard 
 import os
-import requests
 import json
 import re
 from urllib.parse import urlparse
+
+# Third-party
+import requests
+
+# Local
+from . import config
 
 def is_special_or_dependency(resource_id):
     """Determine if a resource is special or a dependency, and its parent IDs."""

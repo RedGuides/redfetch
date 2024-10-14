@@ -168,11 +168,11 @@ TabbedContent Tab.-active {
 }
 #shortcuts_grid Button.folder {
     width: 35;
-    background: 20%;
+    background: goldenrod 50%;
 }
 #shortcuts_grid Button.folder:hover {
     width: 35;
-    background: 10%;
+    background: goldenrod 30%;
 }
 #shortcuts_grid Button.executable {
     background: red 26%;
@@ -180,7 +180,18 @@ TabbedContent Tab.-active {
 #shortcuts_grid Button.executable:hover {
     background: red 10%;
 }
+#shortcuts_grid Button.file {
+    background: $primary-background-lighten-1;
+}
+#shortcuts_grid Button.file:hover {
+    background: $primary-background-darken-1;
+}
+/* the last in the row needs to span the width of the row */
 #run_myseq {
     column-span: 3;
     max-width: 32%;
+}
+#open_myseq_folder {
+    column-span: 2;
+    max-width: 50%;
 }

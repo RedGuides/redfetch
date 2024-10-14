@@ -1,9 +1,11 @@
 # standard
 import os
-import requests
 import shutil
 import time
 from zipfile import ZipFile
+
+# third-party
+import requests
 
 # local
 from . import config

@@ -1,5 +1,8 @@
+# third-party
 import requests
 import keyring
+
+# local
 from .auth import KEYRING_SERVICE_NAME, authorize
 
 def get_api_headers():

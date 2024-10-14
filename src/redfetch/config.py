@@ -1,8 +1,11 @@
 # standard
 import os
-# external
-from dynaconf import Dynaconf, settings, Validator, ValidationError
+
+# third-party
 import tomlkit
+from dynaconf import Dynaconf, settings, Validator, ValidationError
+
+# local
 from .config_firstrun import first_run_setup
 
 # Parent Category to folder

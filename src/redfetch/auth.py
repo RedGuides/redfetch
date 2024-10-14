@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, urlencode
 
-# external
+# third-party
 import requests
 import keyring  # for storing tokens
 from keyring.errors import NoKeyringError

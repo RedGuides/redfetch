@@ -1,13 +1,15 @@
 # standard
-import re
 import os
 import sys
 import subprocess
 import webbrowser
+from pathlib import Path
+
+# third-party
 import pyperclip
 import requests
-from urllib.parse import urlparse
-from pathlib import Path
+from dynaconf import ValidationError
+from textual_fspicker import SelectDirectory
 
 # textual framework
 from textual import work
@@ -18,16 +20,11 @@ from textual.events import Print
 from textual.containers import ScrollableContainer, Center, Container
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState, get_current_worker
-from textual_fspicker import SelectDirectory
 
-# external
-from dynaconf import ValidationError
-
-# local 
+# local
 from . import db
 from . import api
 from . import config
-from . import download
 from . import utils
 from . import listener
 from .main import synchronize_db_and_download
@@ -167,7 +164,7 @@ class RedFetch(App):
                     yield Switch(id="myseq", value=config.settings.from_env(self.current_env).SPECIAL_RESOURCES.get(myseq_id, {}).get('opt_in', False), tooltip="Adds MySEQ to your 'special resources', with maps and offsets for your selected server type.")
                     yield Label("IonBC:", classes="left_middle")
                     yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
-                    yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="Make all resources downloadable again by resetting their download dates.")
+                    yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="This clears a record of what has been downloaded. (it doesn't delete any actual downloads.)")
                     yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall RedFetch and guide through manual cleanup.")
                 
             with TabPane("Shortcuts", id="shortcuts"):
@@ -176,18 +173,23 @@ class RedFetch(App):
                     yield Button("Very Vanilla MQ 🍦", id="run_macroquest", classes="executable", tooltip="run MacroQuest.exe, the legendary add-on platform for EverQuest.")
                     yield Button("MeshUpdater 🌐", id="run_meshupdater", classes="executable", tooltip="Update EQ zone meshes, needed for MQNav.")
                     yield Button("EQBCS 💬", id="run_eqbcs", classes="executable", tooltip="run EQBCs.exe, the server for eq box chat.")
-                    yield Button("EQ LaunchPad 🪆", id="launch_everquest", classes="executable", tooltip="run LaunchPad.exe, the launcher and updater for EverQuest.")
-                    yield Button("EQGame 🪆🩹", id="launch_everquest_client", classes="executable", tooltip="run eqgame.exe patchme, which runs the EverQuest client without updating.")
+                    yield Button("EQ LaunchPad 🐲", id="launch_everquest", classes="executable", tooltip="run LaunchPad.exe, the launcher and updater for EverQuest.")
+                    yield Button("EQGame 🐲🩹", id="launch_everquest_client", classes="executable", tooltip="run eqgame.exe patchme, which runs the EverQuest client without updating.")
                     yield Button("IonBC 💻", id="run_ionbc", classes="executable", tooltip="run IonBC.exe, a self-contained EQ box chat server for multiple computers that doesn't use MacroQuest.")
                     yield Button("MySEQ 📍", id="run_myseq", classes="executable", tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.")
-                    
                     
                     yield Label("📂 Open Folders 📂")
                     yield Button("Downloads 📂", id="open_dl_folder", classes="folder", tooltip="Open RedFetch downloads folder")
                     yield Button("Very Vanilla MQ 🍦", id="open_vvmq_folder", classes="folder", tooltip="Open MacroQuest folder")
-                    yield Button("EverQuest 🪆", id="open_eq_folder", classes="folder", tooltip="Open EverQuest game folder")
+                    yield Button("EverQuest 🐲", id="open_eq_folder", classes="folder", tooltip="Open EverQuest game folder")
                     yield Button("IonBC 💻", id="open_ionbc_folder", classes="folder", tooltip="Open IonBC folder")
                     yield Button("MySEQ 📍", id="open_myseq_folder", classes="folder", tooltip="Open MySEQ folder")
+
+                    yield Label("📎 Open Files 📎")
+                    yield Button("settings.local.toml 🥏🐕", id="open_redfetch_config", classes="file", tooltip="Open the RedFetch config file.")
+                    yield Button("MacroQuest.ini 🍦", id="open_mq_config", classes="file", tooltip="Open VV MQ's config file.")
+                    yield Button("eqclient.ini 🐲", id="open_eq_config", classes="file", tooltip="Open EverQuest's config file.")
+                    yield Button("eqhost.txt 🐲", id="open_eq_host", classes="file", tooltip="Open EverQuest's eqhost.txt, which is useful for emulators.")
                     
 
             with TabPane("Account", id="account"):
@@ -261,6 +263,14 @@ class RedFetch(App):
             self.run_executable(utils.get_vvmq_path(), "MeshUpdater.exe")
         elif event.button.id == "run_eqbcs":
             self.run_executable(utils.get_vvmq_path(), "EQBCS.exe")
+        elif event.button.id == "open_redfetch_config":
+            self.open_redfetch_config()
+        elif event.button.id == "open_mq_config":
+            self.open_mq_config()
+        elif event.button.id == "open_eq_config":
+            self.open_eq_config()
+        elif event.button.id == "open_eq_host":
+            self.open_eq_host()
 
         # account
         elif event.button.id == "btn_watched":
@@ -474,6 +484,54 @@ class RedFetch(App):
         else:
             self.notify(f"Directory does not exist: {path}", severity="error")
 
+    def open_file(self, file_path: str, file_name: str) -> None:
+        """Open a file in the default application."""
+        full_path = os.path.join(file_path, file_name)
+        if os.path.isfile(full_path):
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(full_path)
+                elif sys.platform == 'darwin':
+                    subprocess.Popen(['open', full_path])
+                else:
+                    subprocess.Popen(['xdg-open', full_path])
+                self.notify(f"{file_name} opened in default text editor.")
+            except Exception as e:
+                self.notify(f"Failed to open {file_name}: {e}", severity="error")
+        else:
+            self.notify(f"File not found: {full_path}", severity="error")
+
+    def open_redfetch_config(self) -> None:
+        """Open the settings.local.toml file."""
+        config_file_path = os.path.join(config.config_dir, 'settings.local.toml')
+        config.ensure_config_file_exists(config_file_path)
+        # Now open the file
+        self.open_file(config.config_dir, 'settings.local.toml')
+
+    def open_mq_config(self) -> None:
+        """Open the MacroQuest.ini file."""
+        vvmq_path = utils.get_vvmq_path()
+        if vvmq_path:
+            self.open_file(os.path.join(vvmq_path, 'config'), 'MacroQuest.ini')
+        else:
+            self.notify("VVMQ path not found.", severity="error")
+
+    def open_eq_config(self) -> None:
+        """Open the eqclient.ini file."""
+        eq_path = config.settings.from_env(self.current_env).EQPATH
+        if eq_path:
+            self.open_file(eq_path, 'eqclient.ini')
+        else:
+            self.notify("EverQuest path not set.", severity="error")
+
+    def open_eq_host(self) -> None:
+        """Open the eqhost.txt file."""
+        eq_path = config.settings.from_env(self.current_env).EQPATH
+        if eq_path:
+            self.open_file(eq_path, 'eqhost.txt')
+        else:
+            self.notify("EverQuest path not set.", severity="error")
+
     def handle_toggle_myseq(self, value: bool) -> None:
         myseq_id = utils.get_current_myseq_id()
         if myseq_id:
@@ -575,7 +633,7 @@ class RedFetch(App):
         # Use self.mq_down to determine the button state
         if self.mq_down is None:
             # MQ status not yet known; disable the button or set to a default state
-            update_watched_button.label = "Checking if Very Vanilla MQ is up. 🍦"
+            update_watched_button.label = "Checking MQ status...📞"
             update_watched_button.tooltip = "Please wait while we check MQ status."
             update_watched_button.disabled = True
         elif self.mq_down:
@@ -586,7 +644,7 @@ class RedFetch(App):
             update_watched_button.disabled = True
             update_watched_button.variant = "default"
         else:
-            update_watched_button.label = "Update Watched & Special Resources 🍦"
+            update_watched_button.label = "Update Watched & [i]Special[/i] Resources 🍦"
             update_watched_button.tooltip = (
                 "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ. "
                 "(Manage watched resources on the website, and edit 'special' resources in settings.local.toml)"
@@ -596,6 +654,8 @@ class RedFetch(App):
             update_watched_button.disabled = (
                 self.is_updating or self.interface_running or not bool(self.download_folder)
             )
+        #this changes the size of the button
+        update_watched_button.refresh(layout=True)
         self.query_one("#update_resource_id", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder) or not bool(resource_input.value)
         redguides_interface_button = self.query_one("#redguides_interface", Button)
         if self.interface_running:
@@ -625,6 +685,10 @@ class RedFetch(App):
         self.query_one("#open_dl_folder", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
         self.query_one("#uninstall", Button).disabled = self.is_updating or self.interface_running
         self.query_one("#open_vvmq_folder", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
+        self.query_one("#open_redfetch_config", Button).disabled = self.is_updating or self.interface_running
+        self.query_one("#open_mq_config", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
+        self.query_one("#open_eq_config", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
+        self.query_one("#open_eq_host", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
 
         # Selects!
         self.query_one("#server_type", Select).disabled = self.is_updating or self.interface_running

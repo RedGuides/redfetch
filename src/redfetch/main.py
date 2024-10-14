@@ -2,7 +2,7 @@
 import argparse
 import sys
 
-#external
+#e xternal
 from dynaconf import ValidationError
 from rich import print as rprint
 from rich.prompt import Confirm

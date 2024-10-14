@@ -1,18 +1,21 @@
-import sys
+# Standard
 import os
+import platform
 import subprocess
+import sys
+
+# Third-party
 import requests
 from packaging import version
-import platform
 
-# rich
+# Rich library
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.prompt import Confirm
 
-# local
+# Local
 from .__about__ import __version__
 
 TEST_PYPI_URL = "https://test.pypi.org/pypi/redfetch/json"

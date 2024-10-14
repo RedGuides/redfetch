@@ -1,5 +1,8 @@
+# Standard
 import os
 import platform
+
+# Third-party
 from platformdirs import user_config_dir
 from rich.console import Console
 from rich.panel import Panel
