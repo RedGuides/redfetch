@@ -2,19 +2,19 @@
 import argparse
 import sys
 
-#e xternal
+# third-party
 from dynaconf import ValidationError
 from rich import print as rprint
 from rich.prompt import Confirm
 
 # local
-from . import api
-from . import auth
-from . import config
-from . import meta
-from . import db
-from . import download
-from . import utils
+from redfetch import api
+from redfetch import auth
+from redfetch import config
+from redfetch import meta
+from redfetch import db
+from redfetch import download
+from redfetch import utils
 
 # Global constant
 CATEGORY_MAP = config.CATEGORY_MAP
@@ -248,7 +248,7 @@ def main():
 
     if not any(vars(args).values()):
         print("No arguments provided, launching UI.")
-        from .terminal_ui import run_textual_ui
+        from redfetch.terminal_ui import run_textual_ui
         run_textual_ui() 
         return
 

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import requests
 
 # Local
-from . import config
+from redfetch import config
 
 def is_special_or_dependency(resource_id):
     """Determine if a resource is special or a dependency, and its parent IDs."""

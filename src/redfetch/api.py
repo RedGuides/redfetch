@@ -3,7 +3,10 @@ import requests
 import keyring
 
 # local
-from .auth import KEYRING_SERVICE_NAME, authorize
+from redfetch.auth import KEYRING_SERVICE_NAME, authorize
+
+# Constants
+BASE_URL = 'https://www.redguides.com/devtestbaby/api'
 
 def get_api_headers():
 
@@ -20,7 +23,7 @@ def fetch_all_resources(headers):
     all_resources = []
 
     while True:
-        response = requests.get(f'https://www.redguides.com/devtestbaby/api/resources/?page={page}', headers=headers)
+        response = requests.get(f'{BASE_URL}/resources/?page={page}', headers=headers)
         if response.ok:
             data = response.json()
             resources = data['resources']
@@ -36,7 +39,7 @@ def fetch_all_resources(headers):
 
 def fetch_watched_resources(headers):
     """Fetches watched resources from the API with pagination."""
-    url = 'https://www.redguides.com/devtestbaby/api/rgwatched'
+    url = f'{BASE_URL}/rgwatched'
     page = 1
     rgwatched_resources = []
 
@@ -61,7 +64,7 @@ def fetch_watched_resources(headers):
 
 def fetch_licenses(headers):
     """Fetches user licenses from the API with pagination, only including licenses for downloadable resources."""
-    url = 'https://www.redguides.com/devtestbaby/api/user-licenses'
+    url = f'{BASE_URL}/user-licenses'
     page = 1
     all_licenses = []
 
@@ -86,7 +89,7 @@ def fetch_licenses(headers):
 
 def fetch_single_resource(resource_id, headers):
     """Fetches a single resource from the API, ensuring it is downloadable and has files."""
-    url = f'https://www.redguides.com/devtestbaby/api/resources/{resource_id}'
+    url = f'{BASE_URL}/resources/{resource_id}'
     response = requests.get(url, headers=headers)
     if response.ok:
         resource_data = response.json()
@@ -116,7 +119,7 @@ def is_kiss_downloadable(headers):
     
 def fetch_versions_info(resource_id, headers):
     # fetch individual resource data from the API
-    url = f'https://www.redguides.com/devtestbaby/api/resources/{resource_id}/versions'
+    url = f'{BASE_URL}/resources/{resource_id}/versions'
     response = requests.get(url, headers=headers)
     response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
     return response.json()

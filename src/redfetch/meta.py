@@ -16,7 +16,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRe
 from rich.prompt import Confirm
 
 # Local
-from .__about__ import __version__
+from redfetch.__about__ import __version__
 
 TEST_PYPI_URL = "https://test.pypi.org/pypi/redfetch/json"
 

@@ -22,16 +22,18 @@ from textual.reactive import reactive
 from textual.worker import Worker, WorkerState, get_current_worker
 
 # local
-from . import db
-from . import api
-from . import config
-from . import utils
-from . import listener
-from .main import synchronize_db_and_download
-from .__about__ import __version__
+from redfetch import db
+from redfetch import api
+from redfetch import config
+from redfetch import utils
+from redfetch import listener
+from redfetch.main import synchronize_db_and_download
+from redfetch.__about__ import __version__
 
 
-# for dev mode, from the src directory run "textual run --dev redfetch.terminal_ui:RedFetch"
+# for dev mode, from root dir:
+# "hatch shell dev" 
+# "textual run --dev .\src\redfetch\main.py"
 
 class RedFetchCommands(Provider):
     """Command provider for RedFetch application."""
@@ -179,7 +181,7 @@ class RedFetch(App):
                     yield Button("MySEQ 📍", id="run_myseq", classes="executable", tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.")
                     
                     yield Label("📂 Open Folders 📂")
-                    yield Button("Downloads 📂", id="open_dl_folder", classes="folder", tooltip="Open RedFetch downloads folder")
+                    yield Button("Downloads 🥏🐕", id="open_dl_folder", classes="folder", tooltip="Open RedFetch downloads folder")
                     yield Button("Very Vanilla MQ 🍦", id="open_vvmq_folder", classes="folder", tooltip="Open MacroQuest folder")
                     yield Button("EverQuest 🐲", id="open_eq_folder", classes="folder", tooltip="Open EverQuest game folder")
                     yield Button("IonBC 💻", id="open_ionbc_folder", classes="folder", tooltip="Open IonBC folder")

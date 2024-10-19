@@ -8,8 +8,8 @@ from zipfile import ZipFile
 import requests
 
 # local
-from . import config
-from .utils import (
+from redfetch import config
+from redfetch.utils import (
     get_folder_path,
     is_safe_path,
 )

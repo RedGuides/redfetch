@@ -10,9 +10,9 @@ from flask_cors import CORS
 from cheroot.wsgi import Server as WSGIServer
 
 # local
-from . import db
-from . import utils
-from .main import synchronize_db_and_download
+from redfetch import db
+from redfetch import utils
+from redfetch.main import synchronize_db_and_download
 
 def create_app(settings, db_name, headers, special_resources, category_map):
     app = Flask(__name__)

@@ -1,6 +1,6 @@
 [project]
 name = "redfetch"
-description = "Download EverQuest scripts and software from the RedGuides API"
+description = "Download and publish EverQuest scripts and software using the RedGuides API"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 dynamic = ["version"]
@@ -28,11 +28,14 @@ dependencies = [
     "cheroot",
     "packaging",
     "platformdirs",
-    "rich"
+    "rich",
+    "md2bbcode",
+    "keepachangelog"
 ]
 
 [project.scripts]
 redfetch = "redfetch.main:main"
+redpush = "redfetch.push:main"
 
 [project.urls]
 Homepage = "https://www.redguides.com"
@@ -53,13 +56,16 @@ path = "src/redfetch/__about__.py"
 
 [tool.hatch.build.targets.sdist]
 include = ["README.md", "LICENSE", "src/redfetch/*.py", "src/redfetch/settings.toml", "src/redfetch/terminal_ui.tcss"]
-exclude = ["tests/**"]
 
 [tool.hatch.build.targets.wheel]
 include = ["README.md", "LICENSE", "src/redfetch/settings.toml", "src/redfetch/terminal_ui.tcss"]
-exclude = ["tests/**"]
 packages = ["src/redfetch"]
 
 [tool.hatch.envs.default]
 # remove this before release.
 pip-extra-args = ["--index-url", "https://test.pypi.org/simple/", "--extra-index-url", "https://pypi.org/simple/"]
+
+[tool.hatch.envs.dev]
+dependencies = [
+  "textual-dev"
+]
