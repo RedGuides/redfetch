@@ -31,6 +31,13 @@ special_resources_mock = {
     }
 }
 
+@pytest.fixture(autouse=True)
+def mock_first_run_setup(mocker):
+    # Mock the first_run_setup function to return a dummy config dir
+    mock_setup = mocker.patch('redfetch.config.first_run_setup')
+    mock_setup.return_value = '/dummy/config/dir'
+    return mock_setup
+
 @pytest.fixture
 def mock_config(mocker):
     # Create a mock for the config.settings object
