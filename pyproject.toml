@@ -37,6 +37,19 @@ dependencies = [
 [project.scripts]
 redfetch = "redfetch.main:main"
 
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/redfetch/__about__.py"
+
 [tool.hatch.metadata.hooks.vcs.urls]
 Homepage = "https://www.redguides.com"
 Documentation = "https://www.redguides.com/community/resources/redfetch.3177/"
@@ -44,17 +57,6 @@ Repository = "https://github.com/RedGuides/redfetch"
 Issues = "https://github.com/RedGuides/redfetch/issues"
 Changelog = "https://github.com/RedGuides/redfetch/blob/main/CHANGELOG.md"
 source_archive = "https://github.com/RedGuides/redfetch/archive/{commit_hash}.zip"
-
-[build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "vcs"
-version-file = "src/redfetch/__about__.py"
-
-[tool.hatch.version.raw-options]
-local_scheme = "no-local-version"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/redfetch"]
