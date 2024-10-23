@@ -53,6 +53,9 @@ build-backend = "hatchling.build"
 source = "vcs"
 version-file = "src/redfetch/__about__.py"
 
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/redfetch"]
 
