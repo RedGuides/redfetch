@@ -369,6 +369,7 @@ def handle_fetch(args):
 
 def main():
     args = parse_arguments()
+    config.initialize_config()
 
     # Handle uninstall command early if needed
     if args.uninstall:
