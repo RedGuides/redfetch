@@ -48,11 +48,9 @@ jobs:
           hatch test
 
       - name: Build Package
-        run: |
-          if [ -n "$DEV_VERSION" ]; then
-            hatch version $DEV_VERSION
-          fi
-          hatch build
+        env:
+          HATCH_BUILD_HOOK_FORCE_VERSION: ${{ env.DEV_VERSION }}
+        run: hatch build
 
       - name: Publish to TestPyPI
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
