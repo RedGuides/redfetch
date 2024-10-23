@@ -1,0 +1,107 @@
+name: Publish Executable
+
+on:
+  workflow_run:
+    workflows: ["Publish Python"]
+    branches:
+      - develop
+      - main     # Matches tags starting with 'v', e.g., 'v1.0.0'
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  build-pyapp:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0  # Ensure full Git history is available for versioning
+
+      - name: Determine Trigger Type
+        id: trigger_type
+        shell: pwsh
+        run: |
+          $branch = "${{ github.event.workflow_run.head_branch }}"
+          $ref = "${{ github.event.workflow_run.head_ref }}"
+          
+          if ($branch -eq 'develop') {
+            Write-Output "trigger=develop_push" | Out-File -Encoding ascii -FilePath $env:GITHUB_OUTPUT
+          }
+          elseif ($ref.StartsWith('refs/tags/v')) {
+            Write-Output "trigger=production_tag" | Out-File -Encoding ascii -FilePath $env:GITHUB_OUTPUT
+          }
+          else {
+            Write-Output "trigger=unknown" | Out-File -Encoding ascii -FilePath $env:GITHUB_OUTPUT
+          }
+
+      - name: Set Environment Variables
+        shell: pwsh
+        run: |
+          $env:PYAPP_PROJECT_NAME = "redfetch"
+          $env:PYAPP_PROJECT_VERSION = "${{ env.VERSION }}"
+          $env:PYAPP_EXEC_MODULE = "redfetch.main"
+          $env:PYAPP_PASS_LOCATION = '1'
+          $env:BUILD_TRIGGER = "${{ steps.trigger_type.outputs.trigger }}"
+
+          if ($env:BUILD_TRIGGER -eq 'develop_push') {
+            $env:PYAPP_PIP_EXTRA_ARGS = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+          }
+          else {
+            $env:PYAPP_PIP_EXTRA_ARGS = ""
+          }
+
+          Write-Host "Environment variables set."
+          Write-Host "PYAPP_PROJECT_VERSION: $($env:PYAPP_PROJECT_VERSION)"
+          Write-Host "BUILD_TRIGGER: $env:BUILD_TRIGGER"
+
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Get Version
+        shell: pwsh
+        run: |
+          $version = (hatch version)
+          Write-Host "Version: $version"
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Set Up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install 7-Zip
+        run: choco install 7zip --no-progress -y
+
+      - name: Download PyApp Source
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/ofek/pyapp/releases/latest/download/source.zip -OutFile pyapp-source.zip
+          7z x pyapp-source.zip -o"./pyapp-source"
+          $dir = Get-ChildItem -Path .\pyapp-source\ -Directory | Select-Object -First 1
+          Rename-Item -Path $dir.FullName -NewName pyapp-latest
+
+      - name: Build PyApp Executable
+        working-directory: pyapp-latest
+        run: cargo build --release
+
+      - name: Rename and Move Executable
+        shell: pwsh
+        run: |
+          Rename-Item .\pyapp-latest\target\release\pyapp.exe redfetch.exe
+
+      - name: Upload Executable Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: redfetch.exe
+          path: redfetch.exe

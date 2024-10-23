@@ -40,3 +40,4 @@ Thumbs.db
 *.swp
 *.backup
 *.egg-info
+.github/workflows/samplepypi.yml
