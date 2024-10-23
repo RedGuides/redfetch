@@ -10,8 +10,9 @@ import requests
 import keyring  # for storing tokens
 from keyring.errors import NoKeyringError
 
-# Constants for keyring
+# Constants
 KEYRING_SERVICE_NAME = 'RedFetch'  # Name of your application/service
+BASE_URL = "https://www.redguides.com/devtestbaby"
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -34,7 +35,7 @@ def first_authorization(client_id, client_secret):
         'redirect_uri': 'http://127.0.0.1:62897/',
         'scope': 'read'
     }
-    auth_url = f"https://www.redguides.com/devtestbaby/account/authorize?{urlencode(params)}"
+    auth_url = f"{BASE_URL}/account/authorize?{urlencode(params)}"
 
     # Attempt to open the URL in the default web browser
     try:
@@ -54,7 +55,7 @@ def first_authorization(client_id, client_secret):
     authorization_code = run_server()
 
     # Step 2: Exchange the authorization code for an access token
-    token_url = "https://www.redguides.com/devtestbaby/redapi/index.php?oauth/token"
+    token_url = f"{BASE_URL}/redapi/index.php?oauth/token"
     payload = {
         'grant_type': 'authorization_code',
         'code': authorization_code,
@@ -81,7 +82,7 @@ def first_authorization(client_id, client_secret):
 def get_client_credentials():
     # Yes this is crap, but it's not sensitive. Replacing soon as proper oauth2 finally available in xf 2.3.
     version = 'redfetch'
-    response = requests.get(f'https://www.redguides.com/devtestbaby/redapi/credentials.php?version={version}')
+    response = requests.get(f'{BASE_URL}/redapi/credentials.php?version={version}')
     if response.status_code == 200:
         data = response.json()
         return data['client_id'], data['client_secret']
@@ -123,7 +124,8 @@ def run_server():
     return httpd.code
 
 def fetch_username(api_key):
-    url = "https://www.redguides.com/devtestbaby/api/me/"
+    """This is duplicate code from api.py, but leaving it here for now."""
+    url = f"{BASE_URL}/api/me/"
     headers = {
         'XF-Api-Key': api_key
     }
@@ -146,7 +148,7 @@ def store_tokens_in_keyring(data):
     keyring.set_password(KEYRING_SERVICE_NAME, 'user_id', str(data['user_id']))
 
 def get_xenforo_api_key(access_token, user_id):
-    api_url = f"https://www.redguides.com/devtestbaby/redapi/index.php/users/{user_id}/api"
+    api_url = f"{BASE_URL}/redapi/index.php/users/{user_id}/api"
     headers = {
         'Authorization': f'Bearer {access_token}'
     }
@@ -163,7 +165,7 @@ def get_xenforo_api_key(access_token, user_id):
 
 def refresh_token(data, client_id, client_secret):
     refresh_token = keyring.get_password(KEYRING_SERVICE_NAME, 'refresh_token')
-    token_url = "https://www.redguides.com/devtestbaby/redapi/index.php?oauth/token"
+    token_url = f"{BASE_URL}/redapi/index.php?oauth/token"
     payload = {
         'grant_type': 'refresh_token',
         'refresh_token': refresh_token,
@@ -219,13 +221,21 @@ def get_cached_tokens():
 
 def logout():
     """Clear stored credentials from keyring."""
-    keyring.delete_password(KEYRING_SERVICE_NAME, 'access_token')
-    keyring.delete_password(KEYRING_SERVICE_NAME, 'refresh_token')
-    keyring.delete_password(KEYRING_SERVICE_NAME, 'expires_at')
-    keyring.delete_password(KEYRING_SERVICE_NAME, 'api_key')
-    keyring.delete_password(KEYRING_SERVICE_NAME, 'username')
-    keyring.delete_password(KEYRING_SERVICE_NAME, 'user_id')
-    print("You have been logged out successfully.")
+    credentials = ['access_token', 'refresh_token', 'expires_at', 'api_key', 'username', 'user_id']
+    credentials_deleted = False
+
+    for credential in credentials:
+        try:
+            keyring.delete_password(KEYRING_SERVICE_NAME, credential)
+            credentials_deleted = True
+        except keyring.errors.PasswordDeleteError:
+            # Credential not found, nothing to delete
+            pass
+
+    if credentials_deleted:
+        print("You have been logged out successfully.")
+    else:
+        print("No active session found. You were not logged in.")
 
 def initialize_keyring():
     try:

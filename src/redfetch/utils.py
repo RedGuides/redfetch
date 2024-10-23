@@ -286,8 +286,8 @@ def parse_resource_id(input_string):
 
     # Check if it's a redguides.com URL
     if not parsed_url.netloc.endswith('redguides.com'):
-        print(f"Invalid URL: Not a redguides.com URL")
-        raise ValueError("Invalid URL: Not a redguides.com URL")
+        print(f"Invalid URL: Neither a redguides.com URL nor a valid resource id")
+        raise ValueError("Invalid URL: Neither a redguides.com URL nor a valid resource id")
 
     # Check if it's a thread URL
     if 'threads' in parsed_url.path:

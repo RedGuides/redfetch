@@ -3,7 +3,7 @@ name = "redfetch"
 description = "Download and publish EverQuest scripts and software using the RedGuides API"
 readme = "README.md"
 license = "GPL-3.0-or-later"
-dynamic = ["version"]
+dynamic = ["version", "urls"]
 authors = [
     { name = "Redbot", email = "ask@redguides.com" }
 ]
@@ -30,29 +30,28 @@ dependencies = [
     "platformdirs",
     "rich",
     "md2bbcode",
-    "keepachangelog"
+    "keepachangelog",
+    "rich-argparse"
 ]
 
 [project.scripts]
 redfetch = "redfetch.main:main"
-redpush = "redfetch.push:main"
 
-[project.urls]
+[tool.hatch.metadata.hooks.vcs.urls]
 Homepage = "https://www.redguides.com"
-Documentation = "https://readthedocs.org"
-Repository = "https://github.com/me/spam.git"
-Issues = "https://github.com/me/spam/issues"
-Changelog = "https://github.com/me/spam/blob/master/CHANGELOG.md"
+Documentation = "https://www.redguides.com/community/resources/redfetch.3177/"
+Repository = "https://github.com/RedGuides/redfetch"
+Issues = "https://github.com/RedGuides/redfetch/issues"
+Changelog = "https://github.com/RedGuides/redfetch/blob/main/CHANGELOG.md"
+source_archive = "https://github.com/RedGuides/redfetch/archive/{commit_hash}.zip"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
-[tool.pytest.ini_options]
-addopts = "-v"
-
 [tool.hatch.version]
-path = "src/redfetch/__about__.py"
+source = "vcs"
+version-file = "src/redfetch/__about__.py"
 
 [tool.hatch.build.targets.sdist]
 include = ["README.md", "LICENSE", "src/redfetch/*.py", "src/redfetch/settings.toml", "src/redfetch/terminal_ui.tcss"]

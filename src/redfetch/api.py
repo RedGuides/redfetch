@@ -1,6 +1,7 @@
 # third-party
 import requests
 import keyring
+import os
 
 # local
 from redfetch.auth import KEYRING_SERVICE_NAME, authorize
@@ -9,13 +10,24 @@ from redfetch.auth import KEYRING_SERVICE_NAME, authorize
 BASE_URL = 'https://www.redguides.com/devtestbaby/api'
 
 def get_api_headers():
-
     """Fetches API details and returns the constructed headers for requests."""
-    api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
-    user_id = keyring.get_password(KEYRING_SERVICE_NAME, 'user_id')
-    if not api_key or not user_id:
-        raise Exception("API key or User ID not found in keyring.")
-    return {"XF-Api-Key": api_key, "XF-Api-User": str(user_id)}
+    api_key = os.environ.get('REDGUIDES_API_KEY')
+    if api_key:
+        headers = {'XF-Api-Key': api_key}
+        user_id = os.environ.get('REDGUIDES_USER_ID')
+        if not user_id:
+            user_id = fetch_user_id_from_api(api_key)
+            if not user_id:
+                raise Exception("Unable to retrieve user ID using the provided API key.")
+        headers['XF-Api-User'] = str(user_id)
+        return headers
+    else:
+        # Import keyring only when needed
+        api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
+        user_id = keyring.get_password(KEYRING_SERVICE_NAME, 'user_id')
+        if not api_key or not user_id:
+            raise Exception("API key or User ID not found in keyring.")
+        return {"XF-Api-Key": api_key, "XF-Api-User": str(user_id)}
     
 def fetch_all_resources(headers):
     # fetch all resources from the API
@@ -124,13 +136,59 @@ def fetch_versions_info(resource_id, headers):
     response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
     return response.json()
 
+def fetch_user_id_from_api(api_key):
+    """Fetches the user ID from the API using the provided API key."""
+    url = f'{BASE_URL}/me'
+    headers = {'XF-Api-Key': api_key}
+    response = requests.get(url, headers=headers)
+    if response.ok:
+        user_id = response.json()['me']['user_id']
+        return user_id
+    else:
+        print("Failed to retrieve user ID.")
+        print(response.text)
+        return None
+
+def fetch_username(api_key, cache=True):
+    """Fetches the username from the API using the provided API key."""
+    url = f'{BASE_URL}/me'
+    headers = {'XF-Api-Key': api_key}
+    response = requests.get(url, headers=headers)
+    if response.ok:
+        username = response.json()['me']['username']
+        if cache:
+            keyring.set_password(KEYRING_SERVICE_NAME, 'username', username)
+        return username
+    else:
+        print("Failed to retrieve username.")
+        print(response.text)
+        return "Unknown"
+
 def get_username():
-    """Fetches the username from the keyring or initiates authorization if not found."""
+    """Fetches the username from the environment variable, keyring, or API."""
+    # Priority 1: Environment Variable
+    username = os.environ.get('REDFETCH_USERNAME')
+    if username:
+        return username
+
+    # Priority 2: Keyring
+    username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
+    if username:
+        return username
+
+    # Priority 3: API Call
+    api_key = os.environ.get('REDGUIDES_API_KEY')
+    if api_key:
+        username = fetch_username(api_key)
+        if username != "Unknown":
+            return username
+        else:
+            raise Exception("Unable to retrieve username using the provided API key.")
+
+    # Priority 4: Authorization Process
+    print("Username not found in environment or keyring. Initiating authorization process...")
+    authorize()  # This will trigger the authorization process
     username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
     if not username:
-        print("Username not found. Initiating authorization process...")
-        authorize()  # This will trigger the authorization process
-        username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
-        if not username:
-            raise Exception("Authorization failed. Unable to retrieve username.")
+        raise Exception("Authorization failed. Unable to retrieve username.")
     return username

@@ -174,7 +174,7 @@ def update_setting(setting_path, setting_value, env=None):
             current_data[key] = tomlkit.table()
         current_data = current_data[key]
 
-    print(f"Setting path: {'.'.join(setting_path)}")
+    #print(f"Setting path: {'.'.join(setting_path)}")
     print(f"Old Value: {current_data.get(setting_path[-1], 'Not set')}")
 
     # Update the setting in the TOML data structure
@@ -186,9 +186,10 @@ def update_setting(setting_path, setting_value, env=None):
     settings.set('.'.join(setting_path), setting_value)
 
     print(f"New Value: {setting_value}")
-    print(f"Setting path: settings.{'.'.join(setting_path)}")
+    #print(f"Setting path: settings.{'.'.join(setting_path)}")
 
     save_config(config_file, config_data)
+    settings.reload()
 
     print("Configuration saved.")
     #print("update_setting post-configuration:", settings.as_dict())

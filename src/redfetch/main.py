@@ -1,13 +1,15 @@
-# standard
+# standard imports
 import argparse
 import sys
+import os
 
-# third-party
+# third-party imports
 from dynaconf import ValidationError
 from rich import print as rprint
 from rich.prompt import Confirm
+from rich_argparse import RichHelpFormatter
 
-# local
+# local imports
 from redfetch import api
 from redfetch import auth
 from redfetch import config
@@ -15,30 +17,35 @@ from redfetch import meta
 from redfetch import db
 from redfetch import download
 from redfetch import utils
-
-# Global constant
-CATEGORY_MAP = config.CATEGORY_MAP
+from redfetch import push
 
 def parse_arguments():
-    # Initialize the parser for operational arguments
-    parser = argparse.ArgumentParser(description="RedFetch CLI.")
-    
-    # Operational arguments
+    parser = argparse.ArgumentParser(description="RedFetch CLI.", formatter_class=RichHelpFormatter)
+
     parser.add_argument('--logout', action='store_true', help='Log out and clear cached token.')
-    parser.add_argument('--download-resource', help='Force download a resource by its ID.')
+    parser.add_argument('--download-resource', metavar='RESOURCE_ID | URL', help='Download a resource by its ID or URL', type=utils.parse_resource_id)
     parser.add_argument('--download-watched', action='store_true', help='Download all watched & special resources.')
     parser.add_argument('--force-download', action='store_true', help='Force download all watched resources.')
     parser.add_argument('--list-resources', action='store_true', help='List all resources in the cache.')
     parser.add_argument('--serve', action='store_true', help='Run as a server to handle download requests.')
-    parser.add_argument('--update-setting', nargs=2, metavar=('SETTING_PATH', 'VALUE'), help='Update a setting by specifying the path and value. Path should be dot-separated.')
-    parser.add_argument('--switch-env', metavar='ENVIRONMENT', help='Chage the server type. Live, Test, Emu.')
+    parser.add_argument('--update-setting', nargs='+', metavar=('SETTING_PATH VALUE [ENVIRONMENT]'), help='Update a setting by specifying the path and value. Path should be dot-separated. Environment is optional. Example: --update-setting SPECIAL_RESOURCES.1974.opt_in false LIVE')
+    parser.add_argument('--switch-env', metavar='ENVIRONMENT', help='Change the server type. LIVE, TEST, EMU.')
     parser.add_argument('--version', action='version', version=f'RedFetch {meta.get_current_version()}')
     parser.add_argument('--uninstall', action='store_true', help='Uninstall RedFetch and clean up data.')
 
-    # Parse the arguments
-    args = parser.parse_args()
+    # Subparsers for commands (Only for 'push')
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
-    return args
+    # Push Command Parser
+    push_parser = subparsers.add_parser('push', help='Publish resources on RedGuides Xenforo Resource Manager', formatter_class=parser.formatter_class)
+    push_parser.add_argument('resource_id', type=int, help='The ID of the resource to update. Must already exist on RedGuides.')
+    push_parser.add_argument('--description', metavar='README.md', help='Path to a description file (e.g. README.md) which will become the "overview" description of your resource.')
+    push_parser.add_argument('--version', help='New version number (e.g., v1.0.1)')
+    push_parser.add_argument('--message', metavar='FILE | MESSAGE', help='Version update message or path to CHANGELOG.md in "keep a changelog" format. Requires --version.')
+    push_parser.add_argument('--file', metavar='FILE.zip', help='Path to the your zipped release file')
+    push_parser.add_argument('--domain', help='If using a description or message file, this is the domain to prepend to relative URLs (e.g., https://raw.githubusercontent.com/yourusername/yourrepo/main/)')
+
+    return parser.parse_args()
 
 def validate_settings():
     try:
@@ -64,9 +71,18 @@ def get_special_resource_status(resource_ids=None):
 def process_resources(cursor, resources):
     current_ids = set()
     for resource in resources:
+        if not resource:
+            continue  # Skip None resources
         current_ids.add((None, resource['resource_id']))  # Add to current IDs
-        if resource['Category']['parent_category_id'] in CATEGORY_MAP:
-            db.insert_prepared_resource(cursor, resource, is_special=False, is_dependency=False, parent_id=None, license_details=None)
+        if resource['Category']['parent_category_id'] in config.CATEGORY_MAP:
+            db.insert_prepared_resource(
+                cursor,
+                resource,
+                is_special=False,
+                is_dependency=False,
+                parent_id=None,
+                license_details=None
+            )
     return current_ids
 
 def process_licensed_resources(cursor, licensed_resources):
@@ -79,7 +95,7 @@ def process_licensed_resources(cursor, licensed_resources):
             'end_date': license_info.get('end_date'),
             'license_id': license_info['license_id']
         }
-        if resource['Category']['parent_category_id'] in CATEGORY_MAP:
+        if resource['Category']['parent_category_id'] in config.CATEGORY_MAP:
             db.insert_prepared_resource(cursor, resource, is_special=False, is_dependency=False, parent_id=None, license_details=license_details)
             current_ids.add((None, resource['resource_id']))  # Add to current IDs
     return current_ids
@@ -105,7 +121,6 @@ def process_special_resources(cursor, special_resource_status, special_resources
     return current_ids
 
 def fetch_from_api(headers, resource_ids=None):
-
     if resource_ids is None:
         # Fetch all watched resources if no specific IDs are provided
         watched_resources = api.fetch_watched_resources(headers)
@@ -137,33 +152,48 @@ def store_fetched_data(cursor, fetched_data):
 def handle_resource_download(cursor, headers, resource):
     try:
         resource_id, parent_category_id, remote_version, local_version, parent_resource_id, download_url, filename = resource
-        # Convert resource_id to string
         resource_id = str(resource_id)
-        # Convert parent_resource_id to string if it's not None
         if parent_resource_id is not None:
             parent_resource_id = str(parent_resource_id)
 
         if local_version is None or local_version < remote_version:
             print(f"Downloading updates for resource {resource_id}.")
-            success = download.download_resource(resource_id, parent_category_id, download_url, filename, headers, is_dependency=bool(parent_resource_id), parent_resource_id=parent_resource_id)
+            success = download.download_resource(
+                resource_id,
+                parent_category_id,
+                download_url,
+                filename,
+                headers,
+                is_dependency=bool(parent_resource_id),
+                parent_resource_id=parent_resource_id,
+            )
             if success:
-                db.update_download_date(resource_id, remote_version, bool(parent_resource_id), parent_resource_id, cursor) # Update database after successful download
-                return True
+                db.update_download_date(
+                    resource_id,
+                    remote_version,
+                    bool(parent_resource_id),
+                    parent_resource_id,
+                    cursor,
+                )
+                return 'downloaded'  # Indicate successful download
             else:
                 print(f"Error occurred while downloading resource {resource_id}.")
-                return False
+                return 'error'  # Indicate download error
         else:
             print(f"Skipping download for resource {resource_id} - no new updates since last download.")
-            return True  # Consider skipping as a success
+            return 'skipped'  # Indicate resource was up-to-date
     except KeyboardInterrupt:
         print(f"\nDownload of resource {resource_id} cancelled by user.")
-        return 'cancelled'
+        return 'cancelled'  # Indicate download was cancelled
 
-def synchronize_db_and_download(cursor, headers, resource_ids=None):
+def synchronize_db_and_download(cursor, headers, resource_ids=None, worker=None):
     # Save the original resource IDs to download the correct dependencies
     original_resource_ids = resource_ids[:] if resource_ids is not None else None
-    # Fetch latest from RG plus local special resources
+    # Fetch latest from RG plus locally-defined special resources
     fetched_data = fetch_from_api(headers, resource_ids)
+    if resource_ids and not fetched_data['watched_resources']:
+        print(f"No valid resources found for IDs: {resource_ids}")
+        return False
     # Store fetched data in the database
     current_ids = store_fetched_data(cursor, fetched_data)
     
@@ -184,38 +214,94 @@ def synchronize_db_and_download(cursor, headers, resource_ids=None):
     download_results = []
     try:
         for resource in resource_data:
+            # Check if the worker has been cancelled
+            if worker and worker.is_cancelled:
+                print("\nCancelling remaining downloads.")
+                return False  # Exit the function gracefully
             result = handle_resource_download(cursor, headers, resource)
             if result == 'cancelled':
-                print("\nCancelling remaining downloads...")
+                print("\nCancelling remaining downloads.")
                 return False
-            download_results.append(result)
+            download_results.append((resource[0], result))  # Store resource_id and result
     except KeyboardInterrupt:
         print("\nDownload process was cancelled by user.")
         return False
     
-    if all(download_results):
+    # Separate resources based on the result
+    downloaded_resources = [res_id for res_id, res in download_results if res == 'downloaded']
+    skipped_resources = [res_id for res_id, res in download_results if res == 'skipped']
+    errored_resources = [res_id for res_id, res in download_results if res == 'error']
+
+    if errored_resources:
+        print("One or more resources failed to download.")
+        print(f"Failed resources: {errored_resources}")
+        return False
+    elif downloaded_resources:
         print("All resources downloaded successfully.")
         return True
     else:
-        print("One or more resources failed to download.")
-        failed_resources = [resource[0] for resource, result in zip(resource_data, download_results) if not result]
-        print(f"Failed resources: {failed_resources}")
-        return False
+        print("All resources are up-to-date; no downloads were necessary.")
+        return True
 
-def main():
-    update_available = meta.check_for_update()
-    args = parse_arguments()
-    if args.uninstall:
-        meta.uninstall()
+def handle_push(args):
+    API_KEY = os.environ.get('REDGUIDES_API_KEY')
+    # Ensure the user is authorized
+    if not API_KEY:
+        auth.initialize_keyring()
+        auth.authorize()
+    else:
+        print("Using API key from environment variable. Skipping OAuth.")
+
+    if not any([args.description, args.version, args.message, args.file]):
+        print("At least one option (--description, --version, --message, or --file) must be specified.")
         return
-    auth.initialize_keyring()
-    auth.authorize()
+
+    if args.domain and not (args.description or args.message):
+        print("The --domain option requires either --description or --message to be specified.")
+        return
+
+    if args.message and not args.version:
+        print("The --message option requires --version to be specified.")
+        return
+
+    try:
+        resource = push.get_resource_details(args.resource_id)
+
+        if args.description:
+            push.update_description(args.resource_id, args.description, domain=args.domain)
+
+        if args.version and args.message:
+            message = push.generate_version_message(args)
+            version_info = {'version_string': args.version, 'message': message}
+            push.update_resource(resource, version_info, args.file)
+        elif args.file:
+            push.add_xf_attachment(resource, args.file, None)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+def handle_fetch(args):
+    API_KEY = os.environ.get('REDGUIDES_API_KEY')
+
+    update_available = meta.check_for_update()
 
     if args.logout:
-        auth.logout()
-        print("Logged out successfully.")
+        if not API_KEY:
+            # Initialize keyring to ensure access to stored credentials
+            auth.initialize_keyring()
+            auth.logout()
+            print("Logged out successfully.")
+        else:
+            print("Cannot logout when using API key from environment variable.")
         return
-    
+
+    if not API_KEY:
+        # Only initialize keyring and authorize if API_KEY not provided
+        auth.initialize_keyring()
+        auth.authorize()
+    else:
+        print("Using API key from environment variable. Skipping OAuth.")
+
     validate_settings()
 
     if args.switch_env:
@@ -226,10 +312,18 @@ def main():
         return
 
     if args.update_setting:
-        setting_path, value = args.update_setting
+        num_args = len(args.update_setting)
+        if num_args == 2:
+            setting_path, value = args.update_setting
+            env = None
+        elif num_args == 3:
+            setting_path, value, env = args.update_setting
+        else:
+            print("Error: --update-setting requires 2 or 3 arguments: SETTING_PATH VALUE [ENVIRONMENT]")
+            return
         setting_path_list = setting_path.split('.')
-        config.update_setting(setting_path_list, value)
-        print(f"Updated setting {setting_path} to {value}.")
+        config.update_setting(setting_path_list, value, env)
+        print(f"Updated setting {setting_path} to {value}{' in environment ' + env if env else ''}.")
         return
 
     if args.serve or args.download_resource or args.download_watched or args.force_download or args.list_resources:
@@ -243,7 +337,7 @@ def main():
 
     if args.serve:
         from .listener import run_server
-        run_server(config.settings, db_name, headers, special_resources, CATEGORY_MAP)
+        run_server(config.settings, db_name, headers, special_resources, config.CATEGORY_MAP)
         return
 
     if not any(vars(args).values()):
@@ -272,6 +366,21 @@ def main():
                     print("Download cancelled by user.")
                     return False
             synchronize_db_and_download(cursor, headers)
+
+def main():
+    args = parse_arguments()
+
+    # Handle uninstall command early if needed
+    if args.uninstall:
+        meta.uninstall()
+        return
+
+    # Check if the push command was called
+    if args.command == 'push':
+        handle_push(args)
+    else:
+        # Proceed with fetch-related operations
+        handle_fetch(args)
 
 if __name__ == "__main__":
     main()

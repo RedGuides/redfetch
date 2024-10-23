@@ -93,7 +93,7 @@ class RedFetchCommands(Provider):
         yield DiscoveryHit(
             "Manage Account",
             lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_account"))),
-            help="Manage your RedGuides Level 2 subscription"
+            help="Manage your RedGuides 'Level 2' subscription"
         )
 
 # the main app class
@@ -172,11 +172,11 @@ class RedFetch(App):
             with TabPane("Shortcuts", id="shortcuts"):
                 with ScrollableContainer(id="shortcuts_grid"):
                     yield Label("⚡ Run Executables ⚡")
-                    yield Button("Very Vanilla MQ 🍦", id="run_macroquest", classes="executable", tooltip="run MacroQuest.exe, the legendary add-on platform for EverQuest.")
+                    yield Button("Very Vanilla MQ 🍦", id="run_macroquest", classes="executable", tooltip="Run MacroQuest, the legendary add-on platform for EverQuest.")
                     yield Button("MeshUpdater 🌐", id="run_meshupdater", classes="executable", tooltip="Update EQ zone meshes, needed for MQNav.")
-                    yield Button("EQBCS 💬", id="run_eqbcs", classes="executable", tooltip="run EQBCs.exe, the server for eq box chat.")
-                    yield Button("EQ LaunchPad 🐲", id="launch_everquest", classes="executable", tooltip="run LaunchPad.exe, the launcher and updater for EverQuest.")
-                    yield Button("EQGame 🐲🩹", id="launch_everquest_client", classes="executable", tooltip="run eqgame.exe patchme, which runs the EverQuest client without updating.")
+                    yield Button("EQBCS 💬", id="run_eqbcs", classes="executable", tooltip="run EQBCs.exe, the server for EQ Box Chat (MQ2EQBC).")
+                    yield Button("EQ LaunchPad 🐲", id="launch_everquest", classes="executable", tooltip="The official launcher and updater for EverQuest.")
+                    yield Button("EQGame 🐲🩹", id="launch_everquest_client", classes="executable", tooltip="The EverQuest client *WITHOUT* updating.")
                     yield Button("IonBC 💻", id="run_ionbc", classes="executable", tooltip="run IonBC.exe, a self-contained EQ box chat server for multiple computers that doesn't use MacroQuest.")
                     yield Button("MySEQ 📍", id="run_myseq", classes="executable", tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.")
                     
@@ -211,10 +211,14 @@ class RedFetch(App):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
 
-        # fetch
         if event.button.id == "update_watched":
-            event.button.variant = "primary"
-            self.handle_update_watched()
+            if not self.is_updating:
+                event.button.variant = "primary"
+                self.handle_update_watched()
+            else:
+                # Cancel the update
+                self.is_updating = False
+                self.cancel_update_watched()
         elif event.button.id == "update_resource_id":
             event.button.variant = "default"
             self.handle_update_resource_id()
@@ -405,11 +409,20 @@ class RedFetch(App):
 
     @work(exclusive=True, thread=True, group="generic_group")
     def action_quit(self) -> None:
+        """Handle the quit action by canceling ongoing workers and exiting the application."""
+        # Check if the RedGuides Interface is running and cancel it if necessary
         if self.interface_running:
             self.interface_running = False
-
             cancel_complete = self.cancel_redguides_interface()
-            cancel_complete.wait()  # Wait for the cancellation to complete
+            cancel_complete.wait()  # Wait for the interface cancellation to complete
+
+        # Check if an update is in progress and cancel it if necessary
+        if self.is_updating:
+            # Change the button label to indicate cancellation is in progress
+            update_watched_button = self.query_one("#update_watched", Button)
+            self.cancel_update_watched()
+
+        # Exit the application
         self.exit()
 
     #
@@ -621,18 +634,11 @@ class RedFetch(App):
             self.notify("MySEQ path not found.", severity="error")
 
     def update_widget_states(self):
-        """ for updating buttons when a worker is running. """
+        """Update the state of widgets based on application state."""
 
-        # Inputs!
-        resource_input = self.query_one("#resource_id_input", Input)
-        resource_input.disabled = self.is_updating or self.interface_running
-        self.query_one("#eq_path_input", Input).disabled = self.is_updating or self.interface_running
-        self.query_one("#dl_path_input", Input).disabled = self.is_updating or self.interface_running
-        self.query_one("#vvmq_path_input", Input).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
-
-        # Buttons!
+        # Fetch the update_watched_button
         update_watched_button = self.query_one("#update_watched", Button)
-        # Use self.mq_down to determine the button state
+
         if self.mq_down is None:
             # MQ status not yet known; disable the button or set to a default state
             update_watched_button.label = "Checking MQ status...📞"
@@ -646,18 +652,31 @@ class RedFetch(App):
             update_watched_button.disabled = True
             update_watched_button.variant = "default"
         else:
-            update_watched_button.label = "Update Watched & [i]Special[/i] Resources 🍦"
-            update_watched_button.tooltip = (
-                "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ. "
-                "(Manage watched resources on the website, and edit 'special' resources in settings.local.toml)"
-            )
-            update_watched_button.variant = "primary"
-            # Also consider other conditions to disable the button
-            update_watched_button.disabled = (
-                self.is_updating or self.interface_running or not bool(self.download_folder)
-            )
-        #this changes the size of the button
-        update_watched_button.refresh(layout=True)
+            if self.is_updating:
+                update_watched_button.label = "Stop Update 🛑"
+                update_watched_button.tooltip = "Update in progress. Click to cancel."
+                update_watched_button.disabled = False
+            else:
+                update_watched_button.label = "Update Watched & [i]Special[/i] Resources 🍦"
+                update_watched_button.tooltip = (
+                    "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ. "
+                    "(Manage watched resources on the website, and edit 'special' resources in settings.local.toml)"
+                )
+                update_watched_button.variant = "primary"
+                update_watched_button.disabled = (
+                    self.is_updating or self.interface_running or not bool(self.download_folder)
+                )
+            # Refresh the button layout to reflect changes
+            update_watched_button.refresh(layout=True)
+
+        # Inputs!
+        resource_input = self.query_one("#resource_id_input", Input)
+        resource_input.disabled = self.is_updating or self.interface_running
+        self.query_one("#eq_path_input", Input).disabled = self.is_updating or self.interface_running
+        self.query_one("#dl_path_input", Input).disabled = self.is_updating or self.interface_running
+        self.query_one("#vvmq_path_input", Input).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
+
+        # Buttons!
         self.query_one("#update_resource_id", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder) or not bool(resource_input.value)
         redguides_interface_button = self.query_one("#redguides_interface", Button)
         if self.interface_running:
@@ -793,20 +812,29 @@ class RedFetch(App):
         """Set the mq_down reactive variable."""
         self.mq_down = mq_down
 
-    @work(exclusive=True, thread=True, group="generic_group")
+    @work(exclusive=True, thread=True, group="update_watched_group")
     def handle_update_watched(self) -> None:
+        """Handle the update process for watched resources."""
         self.notify("Updating watched resources...")
         print(f"Starting update of all watched & special resources, please wait...")
         self.is_updating = True
         result = self.run_synchronization()
         self.is_updating = False
         return result 
+    
+    def cancel_update_watched(self):
+        cancelled_workers = self.workers.cancel_group(self, "update_watched_group")
+        if cancelled_workers:
+            self.notify("Update canceled.", severity="warning")
+        self.is_updating = False
+        self.update_widget_states()
 
     def run_synchronization(self, resource_ids=None):
         try:
             # Get the current environment from the server_type Select widget
             server_type_select = self.query_one("#server_type", Select)
             current_env = server_type_select.value
+            worker = get_current_worker()
 
             db_name = f"{current_env}_resources.db"
             db.initialize_db(db_name)
@@ -821,7 +849,7 @@ class RedFetch(App):
                             print(f"Failed to reset download date for resource ID: {resource_id}")
                             return False
                 # Proceed with synchronization and download
-                result = synchronize_db_and_download(cursor, headers, resource_ids=resource_ids)
+                result = synchronize_db_and_download(cursor, headers, resource_ids=resource_ids, worker=worker)
                 return result
         except Exception as e:
             print(f"Error in run_synchronization: {e}")
@@ -848,7 +876,7 @@ class RedFetch(App):
                 self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
         else:
             button.variant = "error"
-            print(f"Some resources failed to update. You probably forgot to close MacroQuest or eqbcs.exe.")
+            print(f"Some resources failed to update.")
             self.notify("Failed to update some resources.", severity="error")
 
     @work(exclusive=True, thread=True, group="generic_group")
@@ -891,6 +919,7 @@ class RedFetch(App):
 
     def cancel_redguides_interface(self):
         cancelled_workers = self.workers.cancel_group(self, "generic_group")
+        self.interface_running = False
         #print(f"Cancelled {len(cancelled_workers)} workers in the 'redguides_interface' group.")
         
         # Trigger shutdown
