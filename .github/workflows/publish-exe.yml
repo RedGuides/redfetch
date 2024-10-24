@@ -3,6 +3,9 @@ name: Publish Executable
 on:
   workflow_run:
     workflows: ["Publish Python"]
+    branches:
+      - develop
+      - main     # Matches tags starting with 'v', e.g., 'v1.0.0'
     types:
       - completed
   workflow_dispatch:
@@ -16,6 +19,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0  # Ensure full Git history is available for versioning
 
       - name: Determine Trigger Type
@@ -71,10 +75,10 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Set Up Rust
-        uses: actions/setup-rust@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          rust-version: stable
-          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
 
       - name: Install 7-Zip
         run: choco install 7zip --no-progress -y
