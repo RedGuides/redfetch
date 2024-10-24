@@ -1,4 +1,4 @@
-name: Build PyApp Executable
+name: Publish Executable
 
 on:
   workflow_run:
@@ -21,10 +21,13 @@ jobs:
         id: trigger_type
         shell: pwsh
         run: |
-          if (${{ github.event.workflow_run.head_branch }} -eq 'develop') {
+          $branch = "${{ github.event.workflow_run.head_branch }}"
+          $ref = "${{ github.event.workflow_run.head_ref }}"
+          
+          if ($branch -eq 'develop') {
             Write-Output "trigger=develop_push" | Out-File -Encoding ascii -FilePath $env:GITHUB_OUTPUT
           }
-          elseif (${{ startsWith(github.event.workflow_run.head_ref, 'refs/tags/v') }}) {
+          elseif ($ref.StartsWith('refs/tags/v')) {
             Write-Output "trigger=production_tag" | Out-File -Encoding ascii -FilePath $env:GITHUB_OUTPUT
           }
           else {
@@ -37,9 +40,16 @@ jobs:
           $env:PYAPP_PROJECT_NAME = "redfetch"
           $env:PYAPP_PROJECT_VERSION = "${{ env.VERSION }}"
           $env:PYAPP_EXEC_MODULE = "redfetch.main"
-          $env:PYAPP_PIP_EXTRA_ARGS = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
           $env:PYAPP_PASS_LOCATION = '1'
           $env:BUILD_TRIGGER = "${{ steps.trigger_type.outputs.trigger }}"
+
+          if ($env:BUILD_TRIGGER -eq 'develop_push') {
+            $env:PYAPP_PIP_EXTRA_ARGS = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+          }
+          else {
+            $env:PYAPP_PIP_EXTRA_ARGS = ""
+          }
+
           Write-Host "Environment variables set."
           Write-Host "PYAPP_PROJECT_VERSION: $($env:PYAPP_PROJECT_VERSION)"
           Write-Host "BUILD_TRIGGER: $env:BUILD_TRIGGER"
