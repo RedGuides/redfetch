@@ -118,15 +118,15 @@ jobs:
           Move-Item -Path $dir.FullName -Destination pyapp-latest
 
       - name: Build PyApp Executable
-        run: cargo build --release
-        working-directory: pyapp-latest
+        run: |
+          $env:PYAPP_PROJECT_NAME = "${{ env.PYAPP_PROJECT_NAME }}"
+          $env:PYAPP_EXEC_MODULE = "${{ env.PYAPP_EXEC_MODULE }}"
+          $env:PYAPP_PASS_LOCATION = "${{ env.PYAPP_PASS_LOCATION }}"
+          $env:PYAPP_PIP_EXTRA_ARGS = "${{ env.PYAPP_PIP_EXTRA_ARGS }}"
+          $env:PYAPP_PROJECT_VERSION = "${{ env.PYAPP_PROJECT_VERSION }}"
+          cargo build --release
+        working-directory: .\pyapp-latest
         shell: pwsh
-        env:
-          PYAPP_PROJECT_NAME: ${{ env.PYAPP_PROJECT_NAME }}
-          PYAPP_EXEC_MODULE: ${{ env.PYAPP_EXEC_MODULE }}
-          PYAPP_PASS_LOCATION: ${{ env.PYAPP_PASS_LOCATION }}
-          PYAPP_PIP_EXTRA_ARGS: ${{ env.PYAPP_PIP_EXTRA_ARGS }}
-          PYAPP_PROJECT_VERSION: ${{ env.PYAPP_PROJECT_VERSION }}
 
       - name: Rename and Move Executable
         shell: pwsh
