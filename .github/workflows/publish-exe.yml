@@ -5,6 +5,7 @@ on:
     workflows: ["Publish Python"]
     types:
       - completed
+  workflow_dispatch:
 
 jobs:
   build-pyapp:
