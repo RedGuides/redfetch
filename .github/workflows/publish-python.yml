@@ -77,9 +77,9 @@ jobs:
         shell: pwsh
         run: |
           # Set static environment variables
-          Write-Host "PYAPP_PROJECT_NAME=redfetch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "PYAPP_EXEC_MODULE=redfetch.main" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "PYAPP_PASS_LOCATION=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PYAPP_PROJECT_NAME=redfetch" >> $env:GITHUB_ENV
+          "PYAPP_EXEC_MODULE=redfetch.main" >> $env:GITHUB_ENV
+          "PYAPP_PASS_LOCATION=1" >> $env:GITHUB_ENV
 
           # Conditionally set PYAPP_PIP_EXTRA_ARGS based on the branch or tag
           if ($env:GITHUB_REF -eq 'refs/heads/develop') {
@@ -87,7 +87,10 @@ jobs:
           } else {
             $pipArgs = ""
           }
-          Write-Host "PYAPP_PIP_EXTRA_ARGS=$pipArgs" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PYAPP_PIP_EXTRA_ARGS=$pipArgs" >> $env:GITHUB_ENV
+
+          # Output the values for verification
+          Get-Content $env:GITHUB_ENV
 
       - name: Set Up Python
         uses: actions/setup-python@v5
@@ -98,7 +101,9 @@ jobs:
         run: pip install hatch
 
       - name: Set PYAPP_PROJECT_VERSION
-        run: echo "PYAPP_PROJECT_VERSION=${{ needs.build-and-publish-python.outputs.package-version }}" >> $GITHUB_ENV
+        run: |
+          "PYAPP_PROJECT_VERSION=${{ needs.build-and-publish-python.outputs.package-version }}" >> $env:GITHUB_ENV
+        shell: pwsh
 
       - name: Set Up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -124,6 +129,13 @@ jobs:
           $env:PYAPP_PASS_LOCATION = "${{ env.PYAPP_PASS_LOCATION }}"
           $env:PYAPP_PIP_EXTRA_ARGS = "${{ env.PYAPP_PIP_EXTRA_ARGS }}"
           $env:PYAPP_PROJECT_VERSION = "${{ env.PYAPP_PROJECT_VERSION }}"
+          
+          Write-Host "PYAPP_PROJECT_NAME: $env:PYAPP_PROJECT_NAME"
+          Write-Host "PYAPP_EXEC_MODULE: $env:PYAPP_EXEC_MODULE"
+          Write-Host "PYAPP_PASS_LOCATION: $env:PYAPP_PASS_LOCATION"
+          Write-Host "PYAPP_PIP_EXTRA_ARGS: $env:PYAPP_PIP_EXTRA_ARGS"
+          Write-Host "PYAPP_PROJECT_VERSION: $env:PYAPP_PROJECT_VERSION"
+          
           cargo build --release
         working-directory: .\pyapp-latest
         shell: pwsh
