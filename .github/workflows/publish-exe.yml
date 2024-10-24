@@ -71,10 +71,10 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Set Up Rust
-        uses: actions/setup-rust@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          rust-version: stable
-          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
 
       - name: Install 7-Zip
         run: choco install 7zip --no-progress -y
