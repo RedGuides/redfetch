@@ -170,16 +170,27 @@ jobs:
           $pfxBytes = [System.Convert]::FromBase64String($pfxBase64)
           [System.IO.File]::WriteAllBytes("certificate.pfx", $pfxBytes)
 
-      - name: Install Windows SDK
-        run: choco install windows-sdk-10.1 --no-progress -y
+      - name: Find signtool.exe
+        id: signtool_path
+        shell: pwsh
+        run: |
+          $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
+          Write-Host "Signtool found at: $signtool"
+          "path=$signtool" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
 
       - name: Sign Executable
+        shell: pwsh
         run: |
-          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+          $signtool = "${{ steps.signtool_path.outputs.path }}"
           $pfxPath = "certificate.pfx"
           $pfxPass = "${{ secrets.CERTIFICATE_PFX_PASSWORD }}"
-          & $signtool sign /f $pfxPath /p $pfxPass /tr http://timestamp.digicert.com /td sha256 /fd sha256 redfetch.exe
-        shell: pwsh
+          & "$signtool" sign `
+            /f $pfxPath `
+            /p $pfxPass `
+            /tr http://timestamp.digicert.com `
+            /td sha256 `
+            /fd sha256 `
+            redfetch.exe
 
       - name: Upload Executable Artifact
         uses: actions/upload-artifact@v4
