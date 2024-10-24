@@ -163,6 +163,24 @@ jobs:
             --set-version-string "InternalName" "redfetch" `
             --set-icon "redfetch.ico"
 
+      - name: Decode and Save PFX Certificate
+        shell: pwsh
+        run: |
+          $pfxBase64 = "${{ secrets.CERTIFICATE_PFX }}"
+          $pfxBytes = [System.Convert]::FromBase64String($pfxBase64)
+          [System.IO.File]::WriteAllBytes("certificate.pfx", $pfxBytes)
+
+      - name: Install Windows SDK
+        run: choco install windows-sdk-10.1 --no-progress -y
+
+      - name: Sign Executable
+        run: |
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+          $pfxPath = "certificate.pfx"
+          $pfxPass = "${{ secrets.CERTIFICATE_PFX_PASSWORD }}"
+          & $signtool sign /f $pfxPath /p $pfxPass /tr http://timestamp.digicert.com /td sha256 /fd sha256 redfetch.exe
+        shell: pwsh
+
       - name: Upload Executable Artifact
         uses: actions/upload-artifact@v4
         with:
