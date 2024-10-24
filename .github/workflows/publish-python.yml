@@ -145,8 +145,26 @@ jobs:
         run: |
           Move-Item .\pyapp-latest\target\release\pyapp.exe redfetch.exe
 
+      - name: Download rcedit
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/electron/rcedit/releases/latest/download/rcedit-x64.exe -OutFile rcedit.exe
+
+      - name: Modify Executable Properties
+        shell: pwsh
+        run: |
+          .\rcedit.exe redfetch.exe `
+            --set-version-string "ProductName" "RedFetch" `
+            --set-version-string "FileDescription" "Download and publish EverQuest scripts and software using the RedGuides API" `
+            --set-file-version "${{ env.PYAPP_PROJECT_VERSION }}" `
+            --set-product-version "${{ env.PYAPP_PROJECT_VERSION }}" `
+            --set-version-string "LegalCopyright" "© RedGuides, LLC" `
+            --set-version-string "OriginalFilename" "redfetch.exe" `
+            --set-version-string "InternalName" "redfetch" `
+            --set-icon "redfetch.ico"
+
       - name: Upload Executable Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: redfetch.exe
           path: redfetch.exe
