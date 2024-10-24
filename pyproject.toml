@@ -11,7 +11,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: OS Independent",
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: End Users/Desktop",
     "Topic :: Utilities"
 ]
@@ -37,28 +37,29 @@ dependencies = [
 [project.scripts]
 redfetch = "redfetch.main:main"
 
-[tool.hatch.metadata.hooks.vcs.urls]
-Homepage = "https://www.redguides.com"
-Documentation = "https://www.redguides.com/community/resources/redfetch.3177/"
-Repository = "https://github.com/RedGuides/redfetch"
-Issues = "https://github.com/RedGuides/redfetch/issues"
-Changelog = "https://github.com/RedGuides/redfetch/blob/main/CHANGELOG.md"
-source_archive = "https://github.com/RedGuides/redfetch/archive/{commit_hash}.zip"
-
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+
+[tool.hatch.build.hooks.vcs]
 version-file = "src/redfetch/__about__.py"
+
+[tool.hatch.metadata.hooks.vcs.urls]
+Homepage = "https://www.redguides.com"
+Documentation = "https://www.redguides.com/community/resources/redfetch.3177/"
+Repository = "https://github.com/RedGuides/redfetch"
+Issues = "https://github.com/RedGuides/redfetch/issues"
+Changelog = "https://github.com/RedGuides/redfetch/blob/main/CHANGELOG.md"
+Source_archive = "https://github.com/RedGuides/redfetch/archive/{commit_hash}.zip"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/redfetch"]
-
-[tool.hatch.envs.default]
-# remove this before release.
-pip-extra-args = ["--index-url", "https://test.pypi.org/simple/", "--extra-index-url", "https://pypi.org/simple/"]
 
 [tool.hatch.envs.dev]
 dependencies = [
