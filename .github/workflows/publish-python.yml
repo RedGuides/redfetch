@@ -23,6 +23,8 @@ permissions:
 jobs:
   build-and-publish-python:
     runs-on: ubuntu-latest
+    outputs:
+      package-version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -44,6 +46,10 @@ jobs:
       - name: Build Package
         run: |
           hatch build
+
+      - name: Get Version
+        id: get_version
+        run: echo "version=$(hatch version)" >> $GITHUB_OUTPUT
 
       - name: Publish to TestPyPI
         if: github.ref == 'refs/heads/develop'
@@ -67,21 +73,21 @@ jobs:
           fetch-depth: 0  # Ensure full Git history is available for versioning
 
       - name: Set Environment Variables
+        id: set_env_vars
         shell: pwsh
         run: |
-          $env:PYAPP_PROJECT_NAME = "redfetch"
-          $env:PYAPP_EXEC_MODULE = "redfetch.main"
-          $env:PYAPP_PASS_LOCATION = '1'
+          # Set static environment variables
+          Write-Host "PYAPP_PROJECT_NAME=redfetch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "PYAPP_EXEC_MODULE=redfetch.main" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "PYAPP_PASS_LOCATION=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          if (${{ github.ref == 'refs/heads/develop' }}) {
-            $env:PYAPP_PIP_EXTRA_ARGS = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+          # Conditionally set PYAPP_PIP_EXTRA_ARGS based on the branch or tag
+          if ($env:GITHUB_REF -eq 'refs/heads/develop') {
+            $pipArgs = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+          } else {
+            $pipArgs = ""
           }
-          else {
-            $env:PYAPP_PIP_EXTRA_ARGS = ""
-          }
-
-          Write-Host "Environment variables set."
-          Write-Host "PYAPP_PIP_EXTRA_ARGS: $env:PYAPP_PIP_EXTRA_ARGS"
+          Write-Host "PYAPP_PIP_EXTRA_ARGS=$pipArgs" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set Up Python
         uses: actions/setup-python@v5
@@ -112,8 +118,15 @@ jobs:
           Move-Item -Path $dir.FullName -Destination pyapp-latest
 
       - name: Build PyApp Executable
-        working-directory: pyapp-latest
         run: cargo build --release
+        working-directory: pyapp-latest
+        shell: pwsh
+        env:
+          PYAPP_PROJECT_NAME: ${{ env.PYAPP_PROJECT_NAME }}
+          PYAPP_EXEC_MODULE: ${{ env.PYAPP_EXEC_MODULE }}
+          PYAPP_PASS_LOCATION: ${{ env.PYAPP_PASS_LOCATION }}
+          PYAPP_PIP_EXTRA_ARGS: ${{ env.PYAPP_PIP_EXTRA_ARGS }}
+          PYAPP_PROJECT_VERSION: ${{ env.PYAPP_PROJECT_VERSION }}
 
       - name: Rename and Move Executable
         shell: pwsh
