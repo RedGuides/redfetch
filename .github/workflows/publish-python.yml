@@ -6,7 +6,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: Publish Python
+name: Publish
 
 on:
   push:
@@ -21,7 +21,7 @@ permissions:
   id-token: write  # Required for PyPI Trusted Publishing
 
 jobs:
-  build-and-publish:
+  build-and-publish-python:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -50,7 +50,78 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          
+
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/v')
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  build-and-publish-exe:
+    needs: build-and-publish-python
+    if: needs.build-and-publish-python.result == 'success'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure full Git history is available for versioning
+
+      - name: Set Environment Variables
+        shell: pwsh
+        run: |
+          $env:PYAPP_PROJECT_NAME = "redfetch"
+          $env:PYAPP_EXEC_MODULE = "redfetch.main"
+          $env:PYAPP_PASS_LOCATION = '1'
+
+          if (${{ github.ref == 'refs/heads/develop' }}) {
+            $env:PYAPP_PIP_EXTRA_ARGS = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+          }
+          else {
+            $env:PYAPP_PIP_EXTRA_ARGS = ""
+          }
+
+          Write-Host "Environment variables set."
+          Write-Host "PYAPP_PIP_EXTRA_ARGS: $env:PYAPP_PIP_EXTRA_ARGS"
+
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Set PYAPP_PROJECT_VERSION
+        run: echo "PYAPP_PROJECT_VERSION=${{ needs.build-and-publish-python.outputs.package-version }}" >> $GITHUB_ENV
+
+      - name: Set Up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install 7-Zip
+        run: choco install 7zip --no-progress -y
+
+      - name: Download PyApp Source
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/ofek/pyapp/releases/latest/download/source.zip -OutFile pyapp-source.zip
+          7z x pyapp-source.zip -o"./pyapp-source"
+          $dir = Get-ChildItem -Path .\pyapp-source\ -Directory | Select-Object -First 1
+          Move-Item -Path $dir.FullName -Destination pyapp-latest
+
+      - name: Build PyApp Executable
+        working-directory: pyapp-latest
+        run: cargo build --release
+
+      - name: Rename and Move Executable
+        shell: pwsh
+        run: |
+          Move-Item .\pyapp-latest\target\release\pyapp.exe redfetch.exe
+
+      - name: Upload Executable Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: redfetch.exe
+          path: redfetch.exe
