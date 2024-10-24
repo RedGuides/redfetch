@@ -170,14 +170,6 @@ jobs:
           $pfxBytes = [System.Convert]::FromBase64String($pfxBase64)
           [System.IO.File]::WriteAllBytes("certificate.pfx", $pfxBytes)
 
-      - name: Find signtool.exe
-        id: signtool_path
-        shell: pwsh
-        run: |
-          $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
-          Write-Host "Signtool found at: $signtool"
-          "path=$signtool" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
-
       - name: Code Sign Executable
         uses: skymatic/code-sign-action@v3.0.0
         with:
