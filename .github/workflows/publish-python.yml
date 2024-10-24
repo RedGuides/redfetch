@@ -170,17 +170,42 @@ jobs:
           $pfxBytes = [System.Convert]::FromBase64String($pfxBase64)
           [System.IO.File]::WriteAllBytes("certificate.pfx", $pfxBytes)
 
-      - name: Code Sign Executable
-        uses: skymatic/code-sign-action@v3.0.0
-        with:
-          certificate: '${{ secrets.CERTIFICATE_PFX }}'
-          password: '${{ secrets.CERTIFICATE_PFX_PASSWORD }}'
-          certificatesha1: '${{ secrets.CERTIFICATE_SHA1 }}'
-          description: 'RedFetch Application'
-          timestampUrl: 'http://timestamp.digicert.com'
-          folder: '.'
-          files: 'redfetch.exe'
-          recursive: false
+      - name: Download Visual Studio Build Tools
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vs_buildtools.exe' -OutFile 'vs_buildtools.exe'
+
+      - name: Install signtool.exe via Visual Studio Build Tools
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "vs_buildtools.exe" -ArgumentList '--quiet', '--wait', '--norestart', '--nocache', '--installPath', 'C:\BuildTools', '--add', 'Microsoft.VisualStudio.Component.Windows10SDK.19041', '--add', 'Microsoft.VisualStudio.Component.Group.NativeDesktop.Win81Signing', '--includeRecommended', '--includeOptional' -Wait
+          Write-Host "Visual Studio Build Tools installation completed."
+
+      - name: Find signtool.exe
+        id: signtool_path
+        shell: pwsh
+        run: |
+          $signtool = Get-ChildItem -Path 'C:\BuildTools\' -Filter 'signtool.exe' -Recurse | Select-Object -ExpandProperty FullName | Select-Object -First 1
+          if (-Not $signtool) {
+              Write-Error "signtool.exe not found."
+              exit 1
+          }
+          Write-Host "Signtool found at: $signtool"
+          "path=$signtool" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Sign Executable
+        shell: pwsh
+        run: |
+          $signtool = "${{ steps.signtool_path.outputs.path }}"
+          $pfxPath = "certificate.pfx"
+          $pfxPass = "${{ secrets.CERTIFICATE_PFX_PASSWORD }}"
+          & "$signtool" sign `
+            /f $pfxPath `
+            /p $pfxPass `
+            /tr http://timestamp.digicert.com `
+            /td sha256 `
+            /fd sha256 `
+            redfetch.exe
 
       - name: Upload Executable Artifact
         uses: actions/upload-artifact@v4
