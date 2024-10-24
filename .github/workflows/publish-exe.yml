@@ -40,9 +40,16 @@ jobs:
           $env:PYAPP_PROJECT_NAME = "redfetch"
           $env:PYAPP_PROJECT_VERSION = "${{ env.VERSION }}"
           $env:PYAPP_EXEC_MODULE = "redfetch.main"
-          $env:PYAPP_PIP_EXTRA_ARGS = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
           $env:PYAPP_PASS_LOCATION = '1'
           $env:BUILD_TRIGGER = "${{ steps.trigger_type.outputs.trigger }}"
+
+          if ($env:BUILD_TRIGGER -eq 'develop_push') {
+            $env:PYAPP_PIP_EXTRA_ARGS = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+          }
+          else {
+            $env:PYAPP_PIP_EXTRA_ARGS = ""
+          }
+
           Write-Host "Environment variables set."
           Write-Host "PYAPP_PROJECT_VERSION: $($env:PYAPP_PROJECT_VERSION)"
           Write-Host "BUILD_TRIGGER: $env:BUILD_TRIGGER"
