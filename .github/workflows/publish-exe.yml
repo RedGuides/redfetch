@@ -70,11 +70,10 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Set Up Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions/setup-rust@v1
         with:
+          rust-version: stable
           profile: minimal
-          toolchain: stable
-          override: true
 
       - name: Install 7-Zip
         run: choco install 7zip --no-progress -y
@@ -83,7 +82,7 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/ofek/pyapp/releases/latest/download/source.zip -OutFile pyapp-source.zip
-          7z x pyapp-source.zip -o./pyapp-source
+          7z x pyapp-source.zip -o"./pyapp-source"
           $dir = Get-ChildItem -Path .\pyapp-source\ -Directory | Select-Object -First 1
           Rename-Item -Path $dir.FullName -NewName pyapp-latest
 
