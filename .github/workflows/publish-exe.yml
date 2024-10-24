@@ -105,4 +105,3 @@ jobs:
         with:
           name: redfetch.exe
           path: redfetch.exe
-          
