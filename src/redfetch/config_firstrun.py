@@ -97,6 +97,14 @@ def is_first_run(default_config_dir):
 def first_run_setup():
     default_config_dir = user_config_dir("RedFetch", "RedGuides")
     
+    # Check if running in a CI environment
+    if os.environ.get('CI') == 'true':
+        # Assume setup is complete and use the default config directory
+        config_dir = default_config_dir
+        os.makedirs(config_dir, exist_ok=True)
+        create_first_run_flag(default_config_dir, config_dir)
+        return config_dir
+
     if not is_first_run(default_config_dir):
         with open(os.path.join(default_config_dir, 'first_run_complete'), 'r') as f:
             config_dir = f.read().strip()
