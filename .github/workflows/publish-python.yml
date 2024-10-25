@@ -6,7 +6,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: Publish Python
+name: Publish
 
 on:
   push:
@@ -21,8 +21,10 @@ permissions:
   id-token: write  # Required for PyPI Trusted Publishing
 
 jobs:
-  build-and-publish:
+  build-and-publish-python:
     runs-on: ubuntu-latest
+    outputs:
+      package-version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -45,12 +47,133 @@ jobs:
         run: |
           hatch build
 
+      - name: Get Version
+        id: get_version
+        run: echo "version=$(hatch version)" >> $GITHUB_OUTPUT
+
       - name: Publish to TestPyPI
         if: github.ref == 'refs/heads/develop'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          
+
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/v')
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  build-and-publish-exe:
+    needs: build-and-publish-python
+    if: needs.build-and-publish-python.result == 'success'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure full Git history is available for versioning
+
+      - name: Set Environment Variables
+        id: set_env_vars
+        shell: pwsh
+        run: |
+          # Set static environment variables
+          "PYAPP_PROJECT_NAME=redfetch" >> $env:GITHUB_ENV
+          "PYAPP_EXEC_MODULE=redfetch.main" >> $env:GITHUB_ENV
+          "PYAPP_PASS_LOCATION=1" >> $env:GITHUB_ENV
+
+          # Conditionally set PYAPP_PIP_EXTRA_ARGS based on the branch or tag
+          if ($env:GITHUB_REF -eq 'refs/heads/develop') {
+            $pipArgs = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+          } else {
+            $pipArgs = ""
+          }
+          "PYAPP_PIP_EXTRA_ARGS=$pipArgs" >> $env:GITHUB_ENV
+
+          # Output the values for verification
+          Get-Content $env:GITHUB_ENV
+
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Set PYAPP_PROJECT_VERSION
+        run: |
+          "PYAPP_PROJECT_VERSION=${{ needs.build-and-publish-python.outputs.package-version }}" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Set Up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Install 7-Zip
+        run: choco install 7zip --no-progress -y
+
+      - name: Download PyApp Source
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/ofek/pyapp/releases/latest/download/source.zip -OutFile pyapp-source.zip
+          7z x pyapp-source.zip -o"./pyapp-source"
+          $dir = Get-ChildItem -Path .\pyapp-source\ -Directory | Select-Object -First 1
+          Move-Item -Path $dir.FullName -Destination pyapp-latest
+
+      - name: Build PyApp Executable
+        run: |
+          $env:PYAPP_PROJECT_NAME = "${{ env.PYAPP_PROJECT_NAME }}"
+          $env:PYAPP_EXEC_MODULE = "${{ env.PYAPP_EXEC_MODULE }}"
+          $env:PYAPP_PASS_LOCATION = "${{ env.PYAPP_PASS_LOCATION }}"
+          $env:PYAPP_PIP_EXTRA_ARGS = "${{ env.PYAPP_PIP_EXTRA_ARGS }}"
+          $env:PYAPP_PROJECT_VERSION = "${{ env.PYAPP_PROJECT_VERSION }}"
+          
+          Write-Host "PYAPP_PROJECT_NAME: $env:PYAPP_PROJECT_NAME"
+          Write-Host "PYAPP_EXEC_MODULE: $env:PYAPP_EXEC_MODULE"
+          Write-Host "PYAPP_PASS_LOCATION: $env:PYAPP_PASS_LOCATION"
+          Write-Host "PYAPP_PIP_EXTRA_ARGS: $env:PYAPP_PIP_EXTRA_ARGS"
+          Write-Host "PYAPP_PROJECT_VERSION: $env:PYAPP_PROJECT_VERSION"
+          
+          cargo build --release
+        working-directory: .\pyapp-latest
+        shell: pwsh
+
+      - name: Rename and Move Executable
+        shell: pwsh
+        run: |
+          Move-Item .\pyapp-latest\target\release\pyapp.exe redfetch.exe
+
+      - name: Download rcedit
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/electron/rcedit/releases/latest/download/rcedit-x64.exe -OutFile rcedit.exe
+
+      - name: Modify Executable Properties
+        shell: pwsh
+        run: |
+          .\rcedit.exe redfetch.exe `
+            --set-version-string "ProductName" "RedFetch" `
+            --set-version-string "FileDescription" "Download and publish EverQuest scripts and software using the RedGuides API" `
+            --set-file-version "${{ env.PYAPP_PROJECT_VERSION }}" `
+            --set-product-version "${{ env.PYAPP_PROJECT_VERSION }}" `
+            --set-version-string "LegalCopyright" "© RedGuides, LLC" `
+            --set-version-string "OriginalFilename" "redfetch.exe" `
+            --set-version-string "InternalName" "redfetch" `
+            --set-icon "redfetch.ico"
+
+      - name: Sign Executable
+        uses: dlemstra/code-sign-action@v1
+        with:
+          certificate: '${{ secrets.CERTIFICATE_PFX }}'
+          password: '${{ secrets.CERTIFICATE_PFX_PASSWORD }}'
+          files: |
+            redfetch.exe
+          description: 'RedFetch Executable'
+
+      - name: Upload Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: redfetch.exe
+          path: redfetch.exe
