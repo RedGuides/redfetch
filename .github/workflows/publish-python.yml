@@ -149,7 +149,7 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/electron/rcedit/releases/latest/download/rcedit-x64.exe -OutFile rcedit.exe
-`
+
       - name: Modify Executable Properties
         shell: pwsh
         run: |
