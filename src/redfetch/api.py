@@ -7,7 +7,7 @@ import os
 from redfetch.auth import KEYRING_SERVICE_NAME, authorize
 
 # Constants
-BASE_URL = 'https://www.redguides.com/devtestbaby/api'
+BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
 
 def get_api_headers():
     """Fetches API details and returns the constructed headers for requests."""
@@ -35,7 +35,7 @@ def fetch_all_resources(headers):
     all_resources = []
 
     while True:
-        response = requests.get(f'{BASE_URL}/resources/?page={page}', headers=headers)
+        response = requests.get(f'{BASE_URL}/api/resources/?page={page}', headers=headers)
         if response.ok:
             data = response.json()
             resources = data['resources']

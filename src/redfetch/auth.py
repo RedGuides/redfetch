@@ -9,10 +9,11 @@ from urllib.parse import urlparse, parse_qs, urlencode
 import requests
 import keyring  # for storing tokens
 from keyring.errors import NoKeyringError
+import os
 
 # Constants
 KEYRING_SERVICE_NAME = 'RedFetch'  # Name of your application/service
-BASE_URL = "https://www.redguides.com/devtestbaby"
+BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
