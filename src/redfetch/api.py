@@ -51,7 +51,7 @@ def fetch_all_resources(headers):
 
 def fetch_watched_resources(headers):
     """Fetches watched resources from the API with pagination."""
-    url = f'{BASE_URL}/rgwatched'
+    url = f'{BASE_URL}/api/rgwatched'
     page = 1
     rgwatched_resources = []
 
@@ -76,7 +76,7 @@ def fetch_watched_resources(headers):
 
 def fetch_licenses(headers):
     """Fetches user licenses from the API with pagination, only including licenses for downloadable resources."""
-    url = f'{BASE_URL}/user-licenses'
+    url = f'{BASE_URL}/api/user-licenses'
     page = 1
     all_licenses = []
 
@@ -101,7 +101,7 @@ def fetch_licenses(headers):
 
 def fetch_single_resource(resource_id, headers):
     """Fetches a single resource from the API, ensuring it is downloadable and has files."""
-    url = f'{BASE_URL}/resources/{resource_id}'
+    url = f'{BASE_URL}/api/resources/{resource_id}'
     response = requests.get(url, headers=headers)
     if response.ok:
         resource_data = response.json()
@@ -126,19 +126,19 @@ def fetch_single_resource_batch(resource_ids, headers):
 
 def is_kiss_downloadable(headers):
     """Checks for level 2 access, since XF doesn't expose secondary_groups to non-admin api"""
-    resource = fetch_single_resource(6, headers)
+    resource = fetch_single_resource(4, headers)
     return resource is not None and resource.get('can_download', False)
     
 def fetch_versions_info(resource_id, headers):
     # fetch individual resource data from the API
-    url = f'{BASE_URL}/resources/{resource_id}/versions'
+    url = f'{BASE_URL}/api/resources/{resource_id}/versions'
     response = requests.get(url, headers=headers)
     response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
     return response.json()
 
 def fetch_user_id_from_api(api_key):
     """Fetches the user ID from the API using the provided API key."""
-    url = f'{BASE_URL}/me'
+    url = f'{BASE_URL}/api/me'
     headers = {'XF-Api-Key': api_key}
     response = requests.get(url, headers=headers)
     if response.ok:
@@ -151,7 +151,7 @@ def fetch_user_id_from_api(api_key):
 
 def fetch_username(api_key, cache=True):
     """Fetches the username from the API using the provided API key."""
-    url = f'{BASE_URL}/me'
+    url = f'{BASE_URL}/api/me'
     headers = {'XF-Api-Key': api_key}
     response = requests.get(url, headers=headers)
     if response.ok:
