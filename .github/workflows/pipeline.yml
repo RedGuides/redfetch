@@ -30,6 +30,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Ensure full Git history is available for versioning
+          fetch-tags: true
 
       - name: Set Up Python
         uses: actions/setup-python@v5
