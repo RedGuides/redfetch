@@ -7,7 +7,8 @@ from md2bbcode.main import process_readme  # For markdown to BBCode conversion
 from redfetch.api import get_api_headers
 
 # Constants
-XF_API_URL = 'https://www.redguides.com/devtestbaby/api'
+BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
+XF_API_URL = f'{BASE_URL}/api'
 URI_MESSAGE = f'{XF_API_URL}/resource-updates'
 URI_ATTACHMENT = f'{XF_API_URL}/attachments/new-key'
 URI_RESPONSE = f'{XF_API_URL}/resource-versions'

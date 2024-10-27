@@ -36,6 +36,12 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Set Environment Variables
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            echo "REDFETCH_BASE_URL=https://www.redguides.com/devtestbaby" >> $GITHUB_ENV
+          fi
+
       - name: Install Hatch
         uses: pypa/hatch@install
 
@@ -171,6 +177,19 @@ jobs:
           files: |
             redfetch.exe
           description: 'RedFetch Executable'
+
+      - name: Redguides Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: RedGuides/redguides-publish@v1
+        env:
+            REDGUIDES_API_KEY: ${{ secrets.REDGUIDES_API_KEY }}
+        with:
+          resource_id: '3177'
+          description: 'README.md'
+          version: ${{ env.PYAPP_PROJECT_VERSION }}
+          message: 'CHANGELOG.md'
+          file: 'redfetch.exe'
+          domain: 'https://raw.githubusercontent.com/RedGuides/redfetch/main/'
 
       - name: Upload Executable Artifact
         uses: actions/upload-artifact@v4
