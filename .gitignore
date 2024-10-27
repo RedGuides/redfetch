@@ -20,6 +20,9 @@ dist/
 # Local configuration
 *.local.toml
 
+# Version file
+__about__.py
+
 # Database files
 *.db
 
