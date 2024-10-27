@@ -56,7 +56,10 @@ jobs:
 
       - name: Get Version
         id: get_version
-        run: echo "version=$(hatch version)" >> $GITHUB_OUTPUT
+        run: |
+          VERSION=$(hatch version)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Set version to: ${VERSION}"
 
       - name: Publish to TestPyPI
         if: github.ref == 'refs/heads/develop'
@@ -111,8 +114,10 @@ jobs:
       - name: Set PYAPP_PROJECT_VERSION
         id: set_version
         run: |
-          "PYAPP_PROJECT_VERSION=${{ needs.build-and-publish-python.outputs.package-version }}" >> $env:GITHUB_ENV
-          echo "version=${{ needs.build-and-publish-python.outputs.package-version }}" >> $GITHUB_OUTPUT
+          $version = "${{ needs.build-and-publish-python.outputs.package-version }}"
+          echo "Setting version to: $version"
+          "PYAPP_PROJECT_VERSION=$version" >> $env:GITHUB_ENV
+          "version=$version" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Set Up Rust
