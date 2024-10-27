@@ -180,7 +180,7 @@ jobs:
 
       - name: Redguides Publish
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: RedGuides/redguides-publish@v1.0.0
+        uses: RedGuides/redguides-publish@v1
         env:
             REDGUIDES_API_KEY: ${{ secrets.REDGUIDES_API_KEY }}
         with:
