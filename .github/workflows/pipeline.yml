@@ -178,6 +178,19 @@ jobs:
             redfetch.exe
           description: 'RedFetch Executable'
 
+      - name: Push to RedGuides
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: RedGuides/redguides-publish@v1
+        env:
+            REDGUIDES_API_KEY: ${{ secrets.REDGUIDES_API_KEY }}
+        with:
+          resource_id: '3177'
+          description: 'README.md'
+          version: ${{ env.PYAPP_PROJECT_VERSION }}
+          message: 'CHANGELOG.md'
+          file: 'redfetch.exe'
+          domain: 'https://raw.githubusercontent.com/RedGuides/redfetch/main/'
+
       - name: Upload Executable Artifact
         uses: actions/upload-artifact@v4
         with:
