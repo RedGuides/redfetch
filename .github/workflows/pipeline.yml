@@ -72,7 +72,8 @@ jobs:
     needs: build-and-publish-python
     if: needs.build-and-publish-python.result == 'success'
     runs-on: windows-latest
-
+    outputs:
+      project-version: ${{ steps.set_version.outputs.version }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -108,8 +109,10 @@ jobs:
         run: pip install hatch
 
       - name: Set PYAPP_PROJECT_VERSION
+        id: set_version
         run: |
           "PYAPP_PROJECT_VERSION=${{ needs.build-and-publish-python.outputs.package-version }}" >> $env:GITHUB_ENV
+          echo "version=${{ needs.build-and-publish-python.outputs.package-version }}" >> $GITHUB_OUTPUT
         shell: pwsh
 
       - name: Set Up Rust
@@ -188,24 +191,22 @@ jobs:
   publish-to-redguides:
     needs: build-and-publish-exe
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest  # Change to Linux runner
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        
       - name: Download Executable Artifact
         uses: actions/download-artifact@v4
         with:
           name: redfetch.exe
-
       - name: Redguides Publish
         uses: RedGuides/redguides-publish@v1
         env:
-            REDGUIDES_API_KEY: ${{ secrets.REDGUIDES_API_KEY }}
+          REDGUIDES_API_KEY: ${{ secrets.REDGUIDES_API_KEY }}
         with:
           resource_id: '3177'
           description: 'README.md'
-          version: ${{ env.PYAPP_PROJECT_VERSION }}
+          version: ${{ needs.build-and-publish-exe.outputs.project-version }}
           message: 'CHANGELOG.md'
           file: 'redfetch.exe'
           domain: 'https://raw.githubusercontent.com/RedGuides/redfetch/main/'

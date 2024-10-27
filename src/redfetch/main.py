@@ -19,6 +19,10 @@ from redfetch import download
 from redfetch import utils
 from redfetch import push
 
+class RedFetchError(Exception):
+    """Custom exception for RedFetch-related errors."""
+    pass
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description="RedFetch CLI.", formatter_class=RichHelpFormatter)
 
@@ -51,8 +55,7 @@ def validate_settings():
     try:
         config.settings.validators.validate()
     except ValidationError as e:
-        print(f"Validation error: {e}")
-        sys.exit(1)
+        raise RedFetchError(f"Validation error: {e}")
     print("Server:", config.settings.current_env)
 
 def get_special_resource_status(resource_ids=None):
@@ -292,7 +295,7 @@ def handle_fetch(args):
             auth.logout()
             print("Logged out successfully.")
         else:
-            print("Cannot logout when using API key from environment variable.")
+            raise RedFetchError("Cannot logout when using API key from environment variable.")
         return
 
     if not API_KEY:
@@ -313,14 +316,13 @@ def handle_fetch(args):
 
     if args.update_setting:
         num_args = len(args.update_setting)
+        if num_args not in [2, 3]:
+            raise RedFetchError("Error: --update-setting requires 2 or 3 arguments: SETTING_PATH VALUE [ENVIRONMENT]")
         if num_args == 2:
             setting_path, value = args.update_setting
             env = None
         elif num_args == 3:
             setting_path, value, env = args.update_setting
-        else:
-            print("Error: --update-setting requires 2 or 3 arguments: SETTING_PATH VALUE [ENVIRONMENT]")
-            return
         setting_path_list = setting_path.split('.')
         config.update_setting(setting_path_list, value, env)
         print(f"Updated setting {setting_path} to {value}{' in environment ' + env if env else ''}.")
@@ -371,17 +373,19 @@ def main():
     args = parse_arguments()
     config.initialize_config()
 
-    # Handle uninstall command early if needed
-    if args.uninstall:
-        meta.uninstall()
-        return
+    try:
+        # Handle uninstall command early if needed
+        if args.uninstall:
+            meta.uninstall()
+            return
 
-    # Check if the push command was called
-    if args.command == 'push':
-        handle_push(args)
-    else:
-        # Proceed with fetch-related operations
-        handle_fetch(args)
+        if args.command == 'push':
+            handle_push(args)
+        else:
+            handle_fetch(args)
+    except Exception as e:
+        print(f"An error occurred: {e}", file=sys.stderr)
+        sys.exit(1)  # Exit with non-zero code to indicate failure
 
 if __name__ == "__main__":
     main()
