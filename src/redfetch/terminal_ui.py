@@ -30,10 +30,21 @@ from redfetch import listener
 from redfetch.main import synchronize_db_and_download
 from redfetch.__about__ import __version__
 
-
 # for dev mode, from root dir:
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
+
+def running_under_cmd():
+    if sys.platform != 'win32':
+        print("Not running on Windows (win32)")
+        return False
+    prompt = os.environ.get('PROMPT', None)
+    if prompt:
+        print(f"Detected PROMPT environment variable: {prompt}")
+        return True
+    else:
+        print("PROMPT environment variable not found.")
+        return False
 
 class RedFetchCommands(Provider):
     """Command provider for RedFetch application."""
@@ -114,6 +125,8 @@ class RedFetch(App):
 
 
     def compose(self) -> ComposeResult:
+        # Determine input verb based on terminal
+        input_verb = "Enter" if running_under_cmd() else "Paste"
         # this function and the tcss file make up the button placement and styling
         yield Header()
         yield Footer()
@@ -125,7 +138,7 @@ class RedFetch(App):
                     with Center(id="center_watched"):
                         yield Button("Checking if Very Vanilla MQ is up. 🍦", id="update_watched", variant="default", tooltip="is MQ down?")
                     yield Button("Update Single Resource", id="update_resource_id", variant="default", disabled=True, tooltip="Update a single resource by its ID or URL.")
-                    yield Input(placeholder="Paste resource URL or ID", id="resource_id_input", tooltip="Update a single resource by its ID or URL.")
+                    yield Input(placeholder=f"{input_verb} resource URL or ID", id="resource_id_input", tooltip="Update a single resource by its ID or URL.")
                     yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="default", tooltip="Access an interface for this script on the website.")
                     yield Button("Copy Log", id="copy_log", variant="default", tooltip="Copy the entire log to your clipboard")
                     yield PrintCapturingLog(id="fetch_log", classes="fetch_log")
@@ -142,14 +155,14 @@ class RedFetch(App):
                         tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
                     )
                     yield Button("Download Folder", id="select_dl_path", variant="default", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
-                    yield Input(value=config.settings.from_env(self.current_env).DOWNLOAD_FOLDER, placeholder="Paste a basic download directory", id="dl_path_input", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
+                    yield Input(value=config.settings.from_env(self.current_env).DOWNLOAD_FOLDER, placeholder=f"{input_verb} a basic download directory", id="dl_path_input", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
                     yield Button("EverQuest Folder", id="select_eq_path", variant="default", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.")
-                    yield Input(value=config.settings.from_env(self.current_env).EQPATH, placeholder="Paste your EverQuest directory", id="eq_path_input", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.", valid_empty=True)
+                    yield Input(value=config.settings.from_env(self.current_env).EQPATH, placeholder=f"{input_verb} your EverQuest directory", id="eq_path_input", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.", valid_empty=True)
 
                     yield Button("Very Vanilla MQ Folder", id="select_vvmq_path", variant="default", tooltip="Your MacroQuest folder.")
                     vvmq_path = utils.get_vvmq_path()
                     if vvmq_path:
-                        yield Input(value=vvmq_path, placeholder="Paste your Very Vanilla MQ directory", id="vvmq_path_input", tooltip="The default should be fine, but if you already have a VVMQ install you can select that here.")
+                        yield Input(value=vvmq_path, placeholder=f"{input_verb} your Very Vanilla MQ directory", id="vvmq_path_input", tooltip="The default should be fine, but if you already have a VVMQ install you can select that here.")
                     else:
                         yield Input(value="VVMQ not available for current environment", id="vvmq_path_input", disabled=True)
                     yield Label("Select EQ Map(s):", classes="left_middle")
