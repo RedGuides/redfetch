@@ -31,7 +31,8 @@ dependencies = [
     "rich",
     "md2bbcode",
     "keepachangelog",
-    "rich-argparse"
+    "rich-argparse",
+    "psutil"
 ]
 
 [project.scripts]

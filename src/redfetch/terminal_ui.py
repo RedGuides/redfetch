@@ -11,6 +11,7 @@ import pyperclip
 import requests
 from dynaconf import ValidationError
 from textual_fspicker import SelectDirectory
+from rich.console import detect_legacy_windows
 
 # textual framework
 from textual import work
@@ -34,24 +35,6 @@ from redfetch.__about__ import __version__
 # for dev mode, from root dir:
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
-
-def running_under_cmd():
-    if sys.platform != 'win32':
-        print("Not running on Windows (win32)")
-        return False
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE = -10
-    mode = ctypes.c_ulong()
-    if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-        print("Not running in a console.")
-        return False
-    ENABLE_QUICK_EDIT_MODE = 0x0040
-    if mode.value & ENABLE_QUICK_EDIT_MODE:
-        print("Quick Edit Mode is enabled.")
-        return True
-    else:
-        print("Quick Edit Mode is disabled.")
-        return False
 
 class RedFetchCommands(Provider):
     """Command provider for RedFetch application."""
@@ -129,11 +112,9 @@ class RedFetch(App):
         ("ctrl+q", "quit", "Quit")
     ]
 
-
-
     def compose(self) -> ComposeResult:
         # Determine input verb based on terminal
-        input_verb = "Paste" if running_under_cmd() else "Enter"
+        input_verb = "Enter" if detect_legacy_windows() else "Paste"
         # this function and the tcss file make up the button placement and styling
         yield Header()
         yield Footer()
