@@ -284,8 +284,6 @@ def handle_push(args):
 def handle_fetch(args):
     API_KEY = os.environ.get('REDGUIDES_API_KEY')
 
-    update_available = meta.check_for_update()
-
     if args.logout:
         if not API_KEY:
             # Initialize keyring to ensure access to stored credentials
@@ -376,6 +374,9 @@ def main():
     if args.uninstall:
         meta.uninstall()
         return
+
+    # Check for updates
+    update_available = meta.check_for_update()
 
     # Check if the push command was called
     if args.command == 'push':
