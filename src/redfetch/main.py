@@ -375,8 +375,10 @@ def main():
         meta.uninstall()
         return
 
-    # Check for updates
-    update_available = meta.check_for_update()
+    # Skip update check in CI environment
+    if os.environ.get('CI') != 'true':
+        # Check for updates
+        update_available = meta.check_for_update()
 
     # Check if the push command was called
     if args.command == 'push':

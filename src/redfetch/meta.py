@@ -18,15 +18,15 @@ from rich.prompt import Confirm
 # Local
 from redfetch.__about__ import __version__
 
-TEST_PYPI_URL = "https://test.pypi.org/pypi/redfetch/json"
+PYPI_URL = "https://pypi.org/pypi/redfetch/json"
 
 console = Console()
 
 def get_current_version():
     return __version__
 
-def fetch_latest_version_from_test_pypi():
-    response = requests.get(TEST_PYPI_URL)
+def fetch_latest_version_from_pypi():
+    response = requests.get(PYPI_URL)
     response.raise_for_status()
     data = response.json()
     return data['info']['version']
@@ -39,7 +39,7 @@ def check_for_update():
     current_version = get_current_version()
     
     try:
-        latest_version = fetch_latest_version_from_test_pypi()
+        latest_version = fetch_latest_version_from_pypi()
         
         if version.parse(latest_version) > version.parse(current_version):
             version_info = Panel(
@@ -67,8 +67,6 @@ def check_for_update():
                     'pip', 
                     'install', 
                     '--upgrade', 
-                    '--index-url', 'https://test.pypi.org/simple/', 
-                    '--extra-index-url', 'https://pypi.org/simple/',  # remove for production
                     'redfetch'
                 ]
                 
@@ -136,7 +134,7 @@ def self_update():
         console.print("[bold]Performing self-update...[/bold]")
 
         current_version = get_current_version()
-        latest_version = fetch_latest_version_from_test_pypi()
+        latest_version = fetch_latest_version_from_pypi()
         console.print(f"Current version: {current_version}")
         console.print(f"Latest version: {latest_version}")
 
