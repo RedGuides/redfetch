@@ -13,8 +13,8 @@ from rich.box import DOUBLE
 console = Console()
 
 def setup_directories():
-    default_config_dir = user_config_dir("RedFetch", "RedGuides")
-    windows_public_dir = os.path.expandvars(r'%PUBLIC%\RedFetch') if platform.system() == "Windows" else None
+    default_config_dir = user_config_dir("redfetch", "RedGuides")
+    windows_public_dir = os.path.expandvars(r'%PUBLIC%\redfetch') if platform.system() == "Windows" else None
     
     options = []
     if windows_public_dir:
@@ -95,7 +95,7 @@ def is_first_run(default_config_dir):
     return not os.path.exists(first_run_flag)
 
 def first_run_setup():
-    default_config_dir = user_config_dir("RedFetch", "RedGuides")
+    default_config_dir = user_config_dir("redfetch", "RedGuides")
     
     # Check if running in a CI environment
     if os.environ.get('CI') == 'true':

@@ -36,16 +36,14 @@ from redfetch.__about__ import __version__
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
 
-class RedFetchCommands(Provider):
-    """Command provider for RedFetch application."""
-
+class RedfetchCommands(Provider):
+    '''this is textual's command palette, it's how you search for commands from the top-right corner button'''
     async def startup(self) -> None:
-        """Called once when the command palette is opened."""
         pass
 
     async def search(self, query: str) -> Hits:
         app = self.app
-        assert isinstance(app, RedFetch)
+        assert isinstance(app, Redfetch)
 
         matcher = self.matcher(query)
 
@@ -73,8 +71,9 @@ class RedFetchCommands(Provider):
                 )
 
     async def discover(self) -> Hits:
+        '''this is a sticky list of commands that are shown on first opening the command palette'''
         app = self.app
-        assert isinstance(app, RedFetch)
+        assert isinstance(app, Redfetch)
 
         yield DiscoveryHit(
             "Update Watched",
@@ -98,7 +97,7 @@ class RedFetchCommands(Provider):
         )
 
 # the main app class
-class RedFetch(App):
+class Redfetch(App):
     interface_running = False
     is_updating = reactive(False)
     mq_down = reactive(None)
@@ -107,7 +106,7 @@ class RedFetch(App):
     download_folder = config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
     eq_path = config.settings.from_env(config.settings.ENV).EQPATH
 
-    COMMANDS = {RedFetchCommands} | App.COMMANDS
+    COMMANDS = {RedfetchCommands} | App.COMMANDS
     BINDINGS = [
         ("ctrl+q", "quit", "Quit")
     ]
@@ -168,7 +167,7 @@ class RedFetch(App):
                     yield Label("IonBC:", classes="left_middle")
                     yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
                     yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="This clears a record of what has been downloaded. (it doesn't delete any actual downloads.)")
-                    yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall RedFetch and guide through manual cleanup.")
+                    yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall redfetch and guide through manual cleanup.")
                 
             with TabPane("Shortcuts", id="shortcuts"):
                 with ScrollableContainer(id="shortcuts_grid"):
@@ -182,14 +181,14 @@ class RedFetch(App):
                     yield Button("MySEQ 📍", id="run_myseq", classes="executable", tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.")
                     
                     yield Label("📂 Open Folders 📂")
-                    yield Button("Downloads 🥏🐕", id="open_dl_folder", classes="folder", tooltip="Open RedFetch downloads folder")
+                    yield Button("Downloads 🥏🐕", id="open_dl_folder", classes="folder", tooltip="Open redfetch downloads folder")
                     yield Button("Very Vanilla MQ 🍦", id="open_vvmq_folder", classes="folder", tooltip="Open MacroQuest folder")
                     yield Button("EverQuest 🐲", id="open_eq_folder", classes="folder", tooltip="Open EverQuest game folder")
                     yield Button("IonBC 💻", id="open_ionbc_folder", classes="folder", tooltip="Open IonBC folder")
                     yield Button("MySEQ 📍", id="open_myseq_folder", classes="folder", tooltip="Open MySEQ folder")
 
                     yield Label("📎 Open Files 📎")
-                    yield Button("settings.local.toml 🥏🐕", id="open_redfetch_config", classes="file", tooltip="Open the RedFetch config file.")
+                    yield Button("settings.local.toml 🥏🐕", id="open_redfetch_config", classes="file", tooltip="Open the redfetch config file.")
                     yield Button("MacroQuest.ini 🍦", id="open_mq_config", classes="file", tooltip="Open VV MQ's config file.")
                     yield Button("eqclient.ini 🐲", id="open_eq_config", classes="file", tooltip="Open EverQuest's config file.")
                     yield Button("eqhost.txt 🐲", id="open_eq_host", classes="file", tooltip="Open EverQuest's eqhost.txt, which is useful for emulators.")
@@ -998,10 +997,10 @@ class RedFetch(App):
     def on_mount(self) -> None:
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
-        log.write_line(f"RedFetch v{__version__} allows you to download EQ resources from RedGuides")
+        log.write_line(f"redfetch v{__version__} allows you to download EQ resources from RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
-        self.title = "🥏 RedFetch 🐕"
+        self.title = "🥏 redfetch 🐕"
         self.load_user_level()  # background task for welcome message
         self.check_mq_status_worker()
 
@@ -1022,7 +1021,7 @@ class PrintCapturingLog(Log):
         self.write(event.text)
 
 def run_textual_ui():
-    app = RedFetch()
+    app = Redfetch()
     app.run()
 
 if __name__ == "__main__":

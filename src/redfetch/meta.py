@@ -44,7 +44,7 @@ def check_for_update():
         if version.parse(latest_version) > version.parse(current_version):
             version_info = Panel(
                 Text.assemble(
-                    ("An update for RedFetch is available! 🚡\n\n", "bold green"),
+                    ("An update for redfetch is available! 🚡\n\n", "bold green"),
                     ("Local version: ", "dim"),
                     (f"{current_version}\n", "cyan"),
                     ("Latest version: ", "dim"),
@@ -89,7 +89,7 @@ def pip_update_redfetch(update_command, latest_version):
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        console.print(f"\n[bold]Updating RedFetch to version {latest_version} in {script_dir}[/bold]")
+        console.print(f"\n[bold]Updating redfetch to version {latest_version} in {script_dir}[/bold]")
         
         with Progress(
             SpinnerColumn(),
@@ -99,7 +99,7 @@ def pip_update_redfetch(update_command, latest_version):
             TimeRemainingColumn(),
             console=console
         ) as progress:
-            update_task = progress.add_task("[cyan]Updating RedFetch...", total=100)
+            update_task = progress.add_task("[cyan]Updating redfetch...", total=100)
             
             process = subprocess.Popen(
                 update_command,
@@ -118,11 +118,11 @@ def pip_update_redfetch(update_command, latest_version):
             returncode = process.poll()
         
         if returncode == 0:
-            console.print("[bold green]RedFetch has been successfully updated. 🫎[/bold green]")
+            console.print("[bold green]redfetch has been successfully updated. 🫎[/bold green]")
             return True
         else:
             error_output = process.stderr.read()
-            console.print(f"[bold red]Error updating RedFetch:[/bold red] {error_output}")
+            console.print(f"[bold red]Error updating redfetch:[/bold red] {error_output}")
             return False
     except Exception as e:
         console.print(f"[bold red]Error during update process:[/bold red] {e}")
@@ -275,13 +275,13 @@ def uninstall():
                     printed_paths.add(path)
 
     # Also inform about the configuration directory
-    config_dir = os.environ.get('REDFETCH_CONFIG_DIR', '')
+    config_dir = os.environ.get('redfetch_CONFIG_DIR', '')
     if config_dir and os.path.exists(config_dir) and should_print_path(config_dir):
         existing_paths.add(config_dir)
         printed_paths.add(config_dir)
 
     if existing_paths:
-        console.print("The following directories may contain files downloaded by RedFetch:")
+        console.print("The following directories may contain files downloaded by redfetch:")
         for path in sorted(existing_paths):
             console.print(f" - [cyan]{path}[/cyan]")
 
@@ -296,14 +296,14 @@ def uninstall():
 
     if executable_path:
         # Ask the user if they want to proceed with self-uninstall
-        if Confirm.ask("Would you like to uninstall RedFetch's little python environment?"):
+        if Confirm.ask("Would you like to uninstall redfetch's little python environment?"):
             # Now, perform self-remove
             self_remove()
         else:
             console.print("[yellow]Uninstallation canceled.[/yellow]")
     else:
         # If executable_path is not set, guide the user to uninstall via pip
-        console.print("\n[bold]To uninstall RedFetch, please run the following command:[/bold]")
+        console.print("\n[bold]To uninstall redfetch, please run the following command:[/bold]")
         console.print("  [cyan]pip uninstall redfetch[/cyan]")
         # Optionally, exit the program
         sys.exit(0)
@@ -339,7 +339,7 @@ def write_commands_to_file(commands, paths):
     file_path = os.path.join(os.path.expanduser("~"), "redfetch_removal_commands.txt")
     with open(file_path, 'w') as file:
         file.write("Manual Cleanup Instructions:\n")
-        file.write("The following directories may contain files downloaded by RedFetch. You can remove them manually if you want:\n")
+        file.write("The following directories may contain files downloaded by redfetch. You can remove them manually if you want:\n")
         for path in sorted(paths):
             file.write(f" - {path}\n")
         file.write("\nMake sure there's nothing you want in them. When ready to delete, you can use:\n\n")

@@ -20,7 +20,7 @@ from redfetch import utils
 from redfetch import push
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="RedFetch CLI.", formatter_class=RichHelpFormatter)
+    parser = argparse.ArgumentParser(description="redfetch CLI.", formatter_class=RichHelpFormatter)
 
     parser.add_argument('--logout', action='store_true', help='Log out and clear cached token.')
     parser.add_argument('--download-resource', metavar='RESOURCE_ID | URL', help='Download a resource by its ID or URL', type=utils.parse_resource_id)
@@ -30,8 +30,8 @@ def parse_arguments():
     parser.add_argument('--serve', action='store_true', help='Run as a server to handle download requests.')
     parser.add_argument('--update-setting', nargs='+', metavar=('SETTING_PATH VALUE [ENVIRONMENT]'), help='Update a setting by specifying the path and value. Path should be dot-separated. Environment is optional. Example: --update-setting SPECIAL_RESOURCES.1974.opt_in false LIVE')
     parser.add_argument('--switch-env', metavar='ENVIRONMENT', help='Change the server type. LIVE, TEST, EMU.')
-    parser.add_argument('--version', action='version', version=f'RedFetch {meta.get_current_version()}')
-    parser.add_argument('--uninstall', action='store_true', help='Uninstall RedFetch and clean up data.')
+    parser.add_argument('--version', action='version', version=f'redfetch {meta.get_current_version()}')
+    parser.add_argument('--uninstall', action='store_true', help='Uninstall redfetch and clean up data.')
 
     # Subparsers for commands (Only for 'push')
     subparsers = parser.add_subparsers(dest='command', help='Available commands')

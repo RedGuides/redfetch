@@ -12,7 +12,7 @@ from keyring.errors import NoKeyringError
 import os
 
 # Constants
-KEYRING_SERVICE_NAME = 'RedFetch'  # Name of your application/service
+KEYRING_SERVICE_NAME = 'redfetch'  # Name of your application/service
 BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
