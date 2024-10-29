@@ -15,7 +15,7 @@ pip install redfetch
 
 ## Usage
 
-From the command line,
+To update everything you've watched from the command line,
 
 ```bash
 redfetch.exe --download-watched
@@ -26,9 +26,9 @@ or if you installed with pip,
 redfetch --download-watched
 ```
 
-This will update MacroQuest and any of its scripts or plugins you have [watched on RedGuides](https://www.redguides.com/community/watched/resources), as well as scripts recommended by staff.
+This will update *Very Vanilla MacroQuest* and any of its scripts or plugins you have [watched on RedGuides](https://www.redguides.com/community/watched/resources), your licensed resources, and scripts recommended by staff.
 
-To add more MacroQuest scripts, you can "watch" them on RedGuides. 
+To add more MacroQuest scripts, "watch" them on RedGuides. 
 
 ![a screenshot showing the watch button on a resource page](./images/watch.png)
 
@@ -59,7 +59,7 @@ redfetch.exe --serve
 - `--update-setting <SETTING_PATH> <VALUE> [ENVIRONMENT]`: Updates a configuration setting. The setting path should be dot-separated. Environment is optional.
 - `--switch-env <ENVIRONMENT>`: Changes the server type (`LIVE`, `TEST`, `EMU`).
 - `--logout`: Logs out and clears cached tokens.
-- `--uninstall`: Uninstalls redfetch and cleans up data.
+- `--uninstall`: Uninstalls redfetch and outputs a text guide for cleaning up downloaded data.
 - `--version`: Displays the current version of redfetch.
 - `push <resource_id> [options]`: Update you or your team's resource. [There's also a github action for this.](https://github.com/marketplace/actions/redguides-publish) Options include:
   - `--description <README.md>`: Path to a description file which will become the resource's overview description.
@@ -70,7 +70,7 @@ redfetch.exe --serve
 
 ## Settings
 
-`settings.local.toml` is found in your configuration directory, which by default is `c:\Users\Public\redfetch\settings.local.toml`. It will override the default [`settings.toml`](./src/redfetch/settings.toml).
+`settings.local.toml` is found in your configuration directory, which by default is `c:\Users\Public\redfetch\settings.local.toml`. Any keys you add will override their default values in [`settings.toml`](./src/redfetch/settings.toml).
 
 All settings are prefixed with the environment,
 
@@ -115,7 +115,7 @@ or edit the `settings.local.toml` file directly:
 [LIVE.SPECIAL_RESOURCES.1974]
 opt_in = false
 ```
-Then assign the "Very Vanilla MQ" path to your self-compiled MacroQuest.
+Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 
 ## Known Issues
 - Directory selectors can't change drive letters yet. To change the drive letter in a path, you'll need to type the new drive letter in the input field.
