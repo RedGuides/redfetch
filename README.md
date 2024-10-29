@@ -4,7 +4,7 @@ redfetch is for downloading EverQuest software and scripts that you "[watch](htt
 
 ## Installation
 
-On Windows the easiest way to install redfetch is to download and run `redfetch.exe`
+On Windows the easiest way to install redfetch is to [download and run `redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download)
 
 ### Alternative: Python
 If you have a recent version of Python, you can install redfetch with pip,
@@ -32,7 +32,7 @@ To add more MacroQuest scripts, "watch" them on RedGuides.
 
 ![a screenshot showing the watch button on a resource page](./images/watch.png)
 
-If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the [local settings file](#settings). 
+If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the local settings file.
 
 ## Alternative Interfaces
 
