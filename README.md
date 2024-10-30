@@ -1,4 +1,4 @@
-# redfetch
+![redfetch logo with a dog terrorizing a park](https://www.redguides.com/images/redfetchdog.png)
 
 redfetch is for downloading EverQuest software and scripts that you "[watch](https://www.redguides.com/community/watched/resources)" on RedGuides. 
 
@@ -30,7 +30,7 @@ This will update *Very Vanilla MacroQuest* and any of its scripts or plugins you
 
 To add more MacroQuest scripts, "watch" them on RedGuides. 
 
-![a screenshot showing the watch button on a resource page](./images/watch.png)
+![a screenshot showing the watch button on a resource page](https://www.redguides.com/images/watch.png)
 
 If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the local settings file.
 
@@ -39,7 +39,7 @@ If there are non-MQ resources you'd like to keep in sync with redfetch, you can 
 ### Terminal UI
 Run the script without any arguments to access the terminal UI. If you have a modern terminal like [Windows Terminal](https://apps.microsoft.com/store/detail/windows-terminal/9N0DX20HK701), it will look like this:
 
-![redfetch Terminal UI, showing the settings tab](./images/terminal-ui.png)
+![redfetch Terminal UI, showing the settings tab](https://www.redguides.com/images/terminal-ui.png)
 
 ### Web UI
 Another UI option! Run this command and then browse https://www.redguides.com/community/resources
@@ -47,7 +47,7 @@ Another UI option! Run this command and then browse https://www.redguides.com/co
 redfetch.exe --serve
 ```
 
-![redfetch Web UI, with a hastily drawn circle around the install button](./images/webui.png)
+![redfetch Web UI, with a hastily drawn circle around the install button](https://www.redguides.com/images/webui.png)
 
 ## Command-Line Options
 
