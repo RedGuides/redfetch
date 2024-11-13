@@ -276,9 +276,18 @@ def uninstall():
 
     # Also inform about the configuration directory
     config_dir = os.environ.get('redfetch_CONFIG_DIR', '')
-    if config_dir and os.path.exists(config_dir) and should_print_path(config_dir):
-        existing_paths.add(config_dir)
-        printed_paths.add(config_dir)
+    if config_dir and os.path.exists(config_dir):
+        # Delete .env file if it exists
+        env_file = os.path.join(config_dir, '.env')
+        if os.path.exists(env_file):
+            try:
+                os.remove(env_file)
+            except Exception as e:
+                console.print(f"[red]Failed to delete {env_file}: {e}[/red]")
+        
+        if should_print_path(config_dir):
+            existing_paths.add(config_dir)
+            printed_paths.add(config_dir)
 
     if existing_paths:
         console.print("The following directories may contain files downloaded by redfetch:")
