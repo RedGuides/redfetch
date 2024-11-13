@@ -37,7 +37,7 @@ def parse_arguments():
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
     # Push Command Parser
-    push_parser = subparsers.add_parser('push', help='Publish resources on RedGuides Xenforo Resource Manager', formatter_class=parser.formatter_class)
+    push_parser = subparsers.add_parser('push', help='Publish resources on RedGuides. (see also the github action for this)', formatter_class=parser.formatter_class)
     push_parser.add_argument('resource_id', type=int, help='The ID of the resource to update. Must already exist on RedGuides.')
     push_parser.add_argument('--description', metavar='README.md', help='Path to a description file (e.g. README.md) which will become the "overview" description of your resource.')
     push_parser.add_argument('--version', help='New version number (e.g., v1.0.1)')
