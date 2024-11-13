@@ -4,6 +4,7 @@ import os
 import sys
 import subprocess
 import webbrowser
+import winreg
 from pathlib import Path
 
 # third-party
@@ -500,21 +501,36 @@ class Redfetch(App):
             self.notify(f"Directory does not exist: {path}", severity="error")
 
     def open_file(self, file_path: str, file_name: str) -> None:
-        """Open a file in the default application."""
+        """Open a file using the default program, falling back to Notepad on Windows or browser elsewhere."""
         full_path = os.path.join(file_path, file_name)
-        if os.path.isfile(full_path):
+        if not os.path.isfile(full_path):
+            self.notify(f"File not found: {full_path}", severity="error")
+            return
+
+        if sys.platform == 'win32':
+            file_ext = os.path.splitext(file_name)[1].lower()
             try:
-                if sys.platform == 'win32':
+                # Check if extension has a registered application
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, file_ext) as key:
+                    winreg.QueryValue(key, "")
                     os.startfile(full_path)
-                elif sys.platform == 'darwin':
+                    self.notify(f"{file_name} opened with default program.")
+            except WindowsError:
+                # No registered application found, use Notepad
+                subprocess.Popen(['notepad.exe', full_path])
+                self.notify(f"{file_name} opened with Notepad.")
+        else:
+            # Non-Windows platforms - try native opener, fall back to browser
+            try:
+                if sys.platform == 'darwin':
                     subprocess.Popen(['open', full_path])
                 else:
                     subprocess.Popen(['xdg-open', full_path])
-                self.notify(f"{file_name} opened in default text editor.")
+                self.notify(f"{file_name} opened.")
             except Exception as e:
-                self.notify(f"Failed to open {file_name}: {e}", severity="error")
-        else:
-            self.notify(f"File not found: {full_path}", severity="error")
+                file_uri = Path(full_path).as_uri()
+                webbrowser.open(file_uri)
+                self.notify(f"{file_name} opened in browser.")
 
     def open_redfetch_config(self) -> None:
         """Open the settings.local.toml file."""
