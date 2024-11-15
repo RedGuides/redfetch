@@ -213,9 +213,15 @@ def uninstall():
     # Import required modules when necessary
     from . import config
 
+    # Import the logout function from auth module
+    from .auth import logout
+
     console = Console()
 
     console.print("\n[bold]Uninstallation Process:[/bold]")
+
+    # Call the logout function to clear stored credentials
+    logout()
 
     # Inform the user of directories that may contain data
     console.print("\n[bold]Manual Cleanup Instructions:[/bold]\n")
@@ -277,13 +283,22 @@ def uninstall():
     # Also inform about the configuration directory
     config_dir = os.environ.get('redfetch_CONFIG_DIR', '')
     if config_dir and os.path.exists(config_dir):
-        # Delete .env file if it exists
-        env_file = os.path.join(config_dir, '.env')
-        if os.path.exists(env_file):
-            try:
-                os.remove(env_file)
-            except Exception as e:
-                console.print(f"[red]Failed to delete {env_file}: {e}[/red]")
+        # Delete configuration files
+        files_to_delete = [
+            os.path.join(config_dir, '.env'),
+            os.path.join(config_dir, 'settings.local.toml')
+        ]
+        
+        # Add any .db files
+        db_files = [f for f in os.listdir(config_dir) if f.endswith('.db')]
+        files_to_delete.extend([os.path.join(config_dir, f) for f in db_files])
+        
+        for file_path in files_to_delete:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    console.print(f"[red]Failed to delete {file_path}: {e}[/red]")
         
         if should_print_path(config_dir):
             existing_paths.add(config_dir)
