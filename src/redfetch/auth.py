@@ -83,15 +83,30 @@ def first_authorization(client_id, client_secret):
 def get_client_credentials():
     # Yes this is crap, but it's not sensitive. Replacing soon as proper oauth2 finally available in xf 2.3.
     version = 'redfetch'
-    response = requests.get(f'{BASE_URL}/redapi/credentials.php?version={version}')
-    if response.status_code == 200:
+    try:
+        response = requests.get(f'{BASE_URL}/redapi/credentials.php?version={version}')
+        response.raise_for_status()  # Raises HTTPError if the response was unsuccessful
         data = response.json()
         return data['client_id'], data['client_secret']
-    else:
-        raise Exception('Failed to retrieve client credentials')
+    except requests.exceptions.HTTPError as http_err:
+        if response.status_code == 401:
+            raise Exception("Authentication failed. The server might be protected by htaccess.") from None
+        else:
+            raise Exception(f"HTTP error occurred while trying to retrieve client credentials: {http_err}") from None
+    except requests.exceptions.ConnectionError:
+        raise Exception("Failed to connect to the server. It might be down or unreachable.") from None
+    except requests.exceptions.RequestException as err:
+        raise Exception(f"An error occurred while trying to retrieve client credentials: {err}") from None
+    except Exception as e:
+        raise Exception(f"An unexpected error occurred: {e}") from None
 
 def authorize():
-    client_id, client_secret = get_client_credentials()
+    try:
+        client_id, client_secret = get_client_credentials()
+    except Exception as e:
+        print(f"Error during authorization: {e}")
+        sys.exit(1)
+
     data = get_cached_tokens()  # Load existing tokens from keyring
     if data.get('api_key') and api_is_valid(data['api_key']):
         return  # Exit if the API key is valid and cached
