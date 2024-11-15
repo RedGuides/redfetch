@@ -65,7 +65,7 @@ def get_special_resource_status(resource_ids=None):
             'is_dependency': is_dependency,
             'parent_ids': set(parent_ids)
         }
-    print(f"special_resource_status: {special_resource_status}")
+    #print(f"special_resource_status: {special_resource_status}")
     return special_resource_status
 
 def process_resources(cursor, resources):
@@ -73,7 +73,7 @@ def process_resources(cursor, resources):
     for resource in resources:
         if not resource:
             continue  # Skip None resources
-        current_ids.add((None, resource['resource_id']))  # Add to current IDs
+        # Only add to the db if it's in an MQ category
         if resource['Category']['parent_category_id'] in config.CATEGORY_MAP:
             db.insert_prepared_resource(
                 cursor,
@@ -83,6 +83,7 @@ def process_resources(cursor, resources):
                 parent_id=None,
                 license_details=None
             )
+            current_ids.add((None, resource['resource_id']))  # Add to current IDs
     return current_ids
 
 def process_licensed_resources(cursor, licensed_resources):
@@ -96,7 +97,14 @@ def process_licensed_resources(cursor, licensed_resources):
             'license_id': license_info['license_id']
         }
         if resource['Category']['parent_category_id'] in config.CATEGORY_MAP:
-            db.insert_prepared_resource(cursor, resource, is_special=False, is_dependency=False, parent_id=None, license_details=license_details)
+            db.insert_prepared_resource(
+                cursor,
+                resource,
+                is_special=False,
+                is_dependency=False,
+                parent_id=None,
+                license_details=license_details
+            )
             current_ids.add((None, resource['resource_id']))  # Add to current IDs
     return current_ids
 
@@ -187,7 +195,7 @@ def handle_resource_download(cursor, headers, resource):
         return 'cancelled'  # Indicate download was cancelled
 
 def synchronize_db_and_download(cursor, headers, resource_ids=None, worker=None):
-    # Save the original resource IDs to download the correct dependencies
+    # Save the original resource_ids (if provided) to download their correct dependencies
     original_resource_ids = resource_ids[:] if resource_ids is not None else None
     # Fetch latest from RG plus locally-defined special resources
     fetched_data = fetch_from_api(headers, resource_ids)
