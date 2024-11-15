@@ -200,6 +200,10 @@ def update_setting(setting_path, setting_value, env=None):
     # print(f"Setting path: {'.'.join(setting_path)}")
     print(f"Old Value: {current_data.get(setting_path[-1], 'Not set')}")
 
+    # Convert 'true'/'false' strings to Boolean values
+    if isinstance(setting_value, str) and setting_value.lower() in ('true', 'false'):
+        setting_value = setting_value.lower() == 'true'
+
     # Update the setting in the TOML data structure
     current_data[setting_path[-1]] = setting_value
 
