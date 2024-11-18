@@ -101,6 +101,7 @@ class RedfetchCommands(Provider):
 
 # the main app class
 class Redfetch(App):
+    DEFAULT_THEME = "textual-dark"
     interface_running = False
     is_updating = reactive(False)
     mq_down = reactive(None)
@@ -414,10 +415,12 @@ class Redfetch(App):
 
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
-        try:
-            config.update_setting(['THEME'], theme)
-        except Exception as e:
-            self.notify(f"Failed to save theme preference: {e}", severity="error")
+        current_theme = config.settings.get('THEME', self.DEFAULT_THEME)
+        if theme != current_theme:
+            try:
+                config.update_setting(['THEME'], theme)
+            except Exception as e:
+                self.notify(f"Failed to save theme preference: {e}", severity="error")
 
     #
     # action handlers (called by textual framework)
@@ -1063,9 +1066,10 @@ class Redfetch(App):
     def on_mount(self) -> None:
         # Create the theme cycle from available themes when the app starts
         self.themes = cycle(self.available_themes.keys())
-        # Load saved theme preference, default to "textual-dark" if not set
-        saved_theme = config.settings.get('THEME', "textual-dark")
-        self.theme = saved_theme
+        
+        # Load saved theme preference
+        saved_theme = config.settings.get('THEME', self.DEFAULT_THEME)
+        self.theme = saved_theme  # Use internal attribute to bypass watcher
         
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
@@ -1088,7 +1092,6 @@ class Redfetch(App):
         """Cycle to the next theme."""
         new_theme = next(self.themes)
         self.theme = new_theme
-        config.update_setting(['THEME'], new_theme)
         self.notify(f"Theme changed to: {new_theme}")
 
 # display print statements in the log widget
