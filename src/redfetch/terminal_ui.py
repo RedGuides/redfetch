@@ -1,11 +1,11 @@
 # standard
-import ctypes
 import os
 import sys
 import subprocess
 import webbrowser
 import winreg
 from pathlib import Path
+from itertools import cycle
 
 # third-party
 import pyperclip
@@ -20,9 +20,11 @@ from textual.app import App, ComposeResult
 from textual.command import Provider, Hit, Hits, DiscoveryHit
 from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log
 from textual.events import Print
-from textual.containers import ScrollableContainer, Center, Container
+from textual.containers import ScrollableContainer, Center, Container, Grid
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState, get_current_worker
+from textual.screen import ModalScreen
+from textual.theme import Theme
 
 # local
 from redfetch import db
@@ -106,11 +108,15 @@ class Redfetch(App):
     current_env = config.settings.ENV 
     download_folder = config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
     eq_path = config.settings.from_env(config.settings.ENV).EQPATH
+    has_switched_tab = False  # Track if we've switched tabs this session
+
+    # Add the theme cycling binding
+    BINDINGS = [
+        ("ctrl+q", "quit", "Quit"),
+        ("ctrl+t", "cycle_theme", "Theme")
+    ]
 
     COMMANDS = {RedfetchCommands} | App.COMMANDS
-    BINDINGS = [
-        ("ctrl+q", "quit", "Quit")
-    ]
 
     def compose(self) -> ComposeResult:
         # Determine input verb based on terminal
@@ -127,7 +133,7 @@ class Redfetch(App):
                         yield Button("Checking if Very Vanilla MQ is up. 🍦", id="update_watched", variant="default", tooltip="is MQ down?")
                     yield Button("Update Single Resource", id="update_resource_id", variant="default", disabled=True, tooltip="Update a single resource by its ID or URL.")
                     yield Input(placeholder=f"{input_verb} resource URL or ID", id="resource_id_input", tooltip="Update a single resource by its ID or URL.")
-                    yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="default", tooltip="Access an interface for this script on the website.")
+                    yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="primary", tooltip="Access an interface for this script on the website.")
                     yield Button("Copy Log", id="copy_log", variant="default", tooltip="Copy the entire log to your clipboard")
                     yield PrintCapturingLog(id="fetch_log", classes="fetch_log")
 
@@ -167,6 +173,12 @@ class Redfetch(App):
                     yield Switch(id="myseq", value=config.settings.from_env(self.current_env).SPECIAL_RESOURCES.get(myseq_id, {}).get('opt_in', False), tooltip="Adds MySEQ to your 'special resources', with maps and offsets for your selected server type.")
                     yield Label("IonBC:", classes="left_middle")
                     yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
+                    yield Label("Start MQ on update:", classes="left_middle")
+                    yield Switch(
+                        id="auto_run_vvmq", 
+                        value=config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', False),
+                        tooltip="Automatically run Very Vanilla MQ after successful updates."
+                    )
                     yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="This clears a record of what has been downloaded. (it doesn't delete any actual downloads.)")
                     yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall redfetch and guide through manual cleanup.")
                 
@@ -304,6 +316,8 @@ class Redfetch(App):
             self.handle_toggle_myseq(event.value)
         elif event.switch.id == "ionbc":
             self.handle_toggle_ionbc(event.value)
+        elif event.switch.id == "auto_run_vvmq":
+            self.handle_toggle_auto_run_vvmq(event.value)
 
     def handle_toggle_dark(self) -> None:
         self.dark = not self.dark  
@@ -398,6 +412,13 @@ class Redfetch(App):
     def watch_is_updating(self, old_value: bool, new_value: bool) -> None:
         self.update_widget_states()
 
+    def watch_theme(self, theme: str) -> None:
+        """Save theme preference when it changes."""
+        try:
+            config.update_setting(['THEME'], theme)
+        except Exception as e:
+            self.notify(f"Failed to save theme preference: {e}", severity="error")
+
     #
     # action handlers (called by textual framework)
     #
@@ -477,6 +498,9 @@ class Redfetch(App):
         # pass the button id and variant to reset
         button = self.query_one(f"#{button_id}", Button)
         button.variant = variant
+        if button_id == "update_watched":
+            vvmq_button = self.query_one("#run_macroquest", Button)
+            vvmq_button.styles.border = None
 
     def get_current_eq_maps_value(self) -> str:
         if not self.eq_path:
@@ -578,6 +602,11 @@ class Redfetch(App):
             state = "enabled" if value else "disabled"
             self.notify(f"IonBC is now {state}")
 
+    def handle_toggle_auto_run_vvmq(self, value: bool) -> None:
+        config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
+        state = "enabled" if value else "disabled"
+        self.notify(f"Auto-run VVMQ is now {state}")
+
     def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
         """Run an executable from a specified folder."""
         if not sys.platform.startswith('win'):
@@ -652,6 +681,11 @@ class Redfetch(App):
     def update_widget_states(self):
         """Update the state of widgets based on application state."""
 
+        # Check if the current screen is the main screen
+        if self.screen != self.screen_stack[0]:
+            # If not the main screen, don't update widget states
+            return
+
         # Fetch the update_watched_button
         update_watched_button = self.query_one("#update_watched", Button)
 
@@ -673,12 +707,14 @@ class Redfetch(App):
                 update_watched_button.tooltip = "Update in progress. Click to cancel."
                 update_watched_button.disabled = False
             else:
-                update_watched_button.label = "Update Watched & [i]Special[/i] Resources 🍦"
+                update_watched_button.label = "Easy Update Button 🍦"
                 update_watched_button.tooltip = (
-                    "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ. "
-                    "(Manage watched resources on the website, and edit 'special' resources in settings.local.toml)"
+                    "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ and other staff picks. "
+                    "(Manage watched resources on the website, and opt-in or out of any 'special' resources in settings.local.toml)"
                 )
-                update_watched_button.variant = "primary"
+                # Only set variant to 'primary' if it's not already 'success' or 'error'
+                if update_watched_button.variant not in ["success", "error"]:
+                    update_watched_button.variant = "primary"
                 update_watched_button.disabled = (
                     self.is_updating or self.interface_running or not bool(self.download_folder)
                 )
@@ -735,6 +771,7 @@ class Redfetch(App):
         # Switches!
         self.query_one("#myseq", Switch).disabled = self.is_updating or self.interface_running or not bool(utils.get_current_myseq_id())
         self.query_one("#ionbc", Switch).disabled = self.is_updating or self.interface_running
+        self.query_one("#auto_run_vvmq", Switch).disabled = self.is_updating or self.interface_running
 
     #
     # setting updaters
@@ -883,13 +920,26 @@ class Redfetch(App):
         if result:
             button.variant = "success"
             self.notify("All resources updated successfully.")
-            #clear resource_id_input on success
+            # Clear resource_id_input on success
             if button.id == "update_resource_id":
                 input_widget = self.query_one("#resource_id_input", Input)
                 input_widget.value = ""
                 self.set_timer(6, lambda: self.reset_button("update_resource_id", "default"))
             elif button.id == "update_watched":
-                self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                # Check auto-run preference before showing modal
+                auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+                if auto_run is True:
+                    # Automatically run VVMQ
+                    self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+                    self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                elif auto_run is False:
+                    # Don't show modal or run VVMQ
+                    self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                else:
+                    # Show the modal popup if no preference is set
+                    def after_modal(_: bool | None) -> None:
+                        self.reset_button("update_watched", "primary")
+                    self.push_screen(RunVVMQScreen(), after_modal)
         else:
             button.variant = "error"
             print(f"Some resources failed to update.")
@@ -1011,12 +1061,18 @@ class Redfetch(App):
     #
 
     def on_mount(self) -> None:
+        # Create the theme cycle from available themes when the app starts
+        self.themes = cycle(self.available_themes.keys())
+        # Load saved theme preference, default to "textual-dark" if not set
+        saved_theme = config.settings.get('THEME', "textual-dark")
+        self.theme = saved_theme
+        
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
         log.write_line(f"redfetch v{__version__} allows you to download EQ resources from RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
-        self.title = "🥏 redfetch 🐕"
+        self.title = "redfetch"
         self.load_user_level()  # background task for welcome message
         self.check_mq_status_worker()
 
@@ -1028,6 +1084,13 @@ class Redfetch(App):
         self.interface_running = False
         self.workers.cancel_all()
 
+    def action_cycle_theme(self) -> None:
+        """Cycle to the next theme."""
+        new_theme = next(self.themes)
+        self.theme = new_theme
+        config.update_setting(['THEME'], new_theme)
+        self.notify(f"Theme changed to: {new_theme}")
+
 # display print statements in the log widget
 class PrintCapturingLog(Log):
     def on_mount(self) -> None:
@@ -1035,6 +1098,42 @@ class PrintCapturingLog(Log):
 
     def on_print(self, event: Print) -> None:
         self.write(event.text)
+
+class RunVVMQScreen(ModalScreen):
+    """A modal screen to ask if the user wants to run Very Vanilla MQ."""
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label("Run Very Vanilla MQ?", id="question"),
+            Button("Yes", variant="primary", id="yesmq"),
+            Button("No", variant="default", id="nomq"),
+            Center(Button("Always", variant="primary", id="alwaysmq")),
+            Center(Button("Never", variant="default", id="nevermq")),
+            id="dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "yesmq":
+            # Run the executable
+            self.app.run_executable(
+                utils.get_vvmq_path(), 
+                "MacroQuest.exe"
+            )
+            self.dismiss()
+        elif event.button.id == "alwaysmq":
+            # Save the preference and run VVMQ
+            config.update_setting(['AUTO_RUN_VVMQ'], True, env=self.app.current_env)
+            self.app.run_executable(
+                utils.get_vvmq_path(), 
+                "MacroQuest.exe"
+            )
+            self.dismiss()
+        elif event.button.id == "nevermq":
+            # Save the preference to never run
+            config.update_setting(['AUTO_RUN_VVMQ'], False, env=self.app.current_env)
+            self.dismiss()
+        else:  # "nomq"
+            self.dismiss()
 
 def run_textual_ui():
     app = Redfetch()
