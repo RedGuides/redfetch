@@ -3,6 +3,7 @@ import os
 import json
 import re
 from urllib.parse import urlparse
+import subprocess
 
 # Third-party
 import requests
@@ -301,3 +302,48 @@ def parse_resource_id(input_string):
     else:
         print(f"Could not find a valid resource ID in the URL")
         raise ValueError("Could not find a valid resource ID in the URL")
+
+def are_executables_running_in_folder(folder_path):
+    """
+    Check if any .exe files in the specified folder are currently running processes.
+
+    Returns True if any executables in the folder are running, False otherwise.
+    """
+    try:
+        exe_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.exe')]
+        if not exe_files:
+            print(f"No executable files found in {folder_path}")
+            return False
+
+        # Get the list of running processes
+        output = subprocess.check_output(['tasklist'], universal_newlines=True)
+        for exe_file in exe_files:
+            if exe_file in output:
+                print(f"Process '{exe_file}' is currently running.")
+                return True
+        return False
+    except Exception as e:
+        print(f"An error occurred while checking running processes: {e}")
+        return False
+
+def terminate_executables_in_folder(folder_path):
+    """
+    Attempt to terminate any running .exe files in the specified folder.
+    """
+    try:
+        exe_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.exe')]
+        if not exe_files:
+            print(f"No executable files found in {folder_path}")
+            return
+
+        # Get the list of running processes
+        output = subprocess.check_output(['tasklist'], universal_newlines=True)
+        for exe_file in exe_files:
+            if exe_file in output:
+                # Terminate the process
+                subprocess.check_output(['taskkill', '/F', '/IM', exe_file], universal_newlines=True)
+                print(f"Terminated process '{exe_file}'.")
+            else:
+                print(f"Process '{exe_file}' is not running.")
+    except Exception as e:
+        print(f"An error occurred while terminating processes: {e}")

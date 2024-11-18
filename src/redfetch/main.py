@@ -368,9 +368,18 @@ def handle_fetch(args):
         elif args.download_watched: 
             if utils.is_mq_down():
                 rprint("[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work.")
-                continue_download = Confirm.ask("Do you want to continue with the download?")
+                continue_download = Confirm.ask("Do you want to continue with the download?", default=False)
                 if not continue_download:
                     print("Download cancelled by user.")
+                    return False
+            mq_folder = utils.get_base_path()
+            # Check if MQ or any other exe is running
+            if utils.are_executables_running_in_folder(mq_folder):
+                terminate_processes = Confirm.ask("Processes are running from the folder. Attempt to close them?", default=True)
+                if terminate_processes:
+                    utils.terminate_executables_in_folder(mq_folder)
+                else:
+                    print("Cannot proceed while processes are running. Please close them manually.")
                     return False
             synchronize_db_and_download(cursor, headers)
 
