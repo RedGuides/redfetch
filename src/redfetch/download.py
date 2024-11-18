@@ -6,6 +6,7 @@ from zipfile import ZipFile
 
 # third-party
 import requests
+from rich import print as rprint
 
 # local
 from redfetch import config
@@ -127,19 +128,31 @@ def extract_zip_member(zip_ref, member, target_path):
                 shutil.copyfileobj(source, target)
             return  # Successful extraction, exit the function
         except PermissionError:
+            file_name = os.path.basename(target_path)
+            folder_path = os.path.dirname(target_path)
+            
+            error_msg = [
+                f"\nPermission Error: Unable to extract {file_name}",
+                "\nThis could be because:",
+                "1. The file is currently in use by another program (e.g., MacroQuest, EQBCS)",
+                "2. You don't have write permissions for this location",
+                "\nPossible solutions:",
+                "1. Close all EverQuest-related programs (MacroQuest, EQBCS, etc.)",
+                f"2. Change the installation directory in settings to a location you own",
+                f"3. Manually set write permissions on: {folder_path}",
+            ]
+            
             if attempt < max_retries - 1:
-                file_name = os.path.basename(target_path)
-                print(f"Warning: Unable to extract {file_name}. Did you forget to close MacroQuest?")
-                print(f"Or maybe you didn't close eqbcs.exe, or some other application?")
-                print(f"Retrying in {retry_delay} seconds... (Attempt {attempt + 1} of {max_retries})")
+                error_msg.append(f"\nRetrying in {retry_delay} seconds... (Attempt {attempt + 1} of {max_retries})")
+                print("\n".join(error_msg))
                 time.sleep(retry_delay)
             else:
-                file_name = os.path.basename(target_path)
-                print(f"Error: Failed to extract {file_name} after {max_retries} attempts.")
-                print("Please ensure all related applications are closed and try again.")
+                error_msg.append("\nMaximum retry attempts reached. Please resolve the permission issue and try again.")
+                print("\n".join(error_msg))
+                raise PermissionError(f"Failed to extract {file_name} after {max_retries} attempts.")
         except Exception as e:
             print(f"Unexpected error while extracting {os.path.basename(target_path)}: {str(e)}")
-            break
+            raise
 
     # If we've exhausted all retries or encountered an unexpected error,
     # stop the extraction by raising an exception
