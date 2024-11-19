@@ -174,11 +174,17 @@ class Redfetch(App):
                     yield Switch(id="myseq", value=config.settings.from_env(self.current_env).SPECIAL_RESOURCES.get(myseq_id, {}).get('opt_in', False), tooltip="Adds MySEQ to your 'special resources', with maps and offsets for your selected server type.")
                     yield Label("IonBC:", classes="left_middle")
                     yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
-                    yield Label("Start MQ on update:", classes="left_middle")
+                    yield Label("Start MQ post-update:", classes="left_middle")
                     yield Switch(
                         id="auto_run_vvmq", 
                         value=config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', False),
                         tooltip="Automatically run Very Vanilla MQ after successful updates."
+                    )
+                    yield Label("Close MQ pre-udpate:", classes="left_middle")
+                    yield Switch(
+                        id="auto_terminate_processes", 
+                        value=config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None),
+                        tooltip="Automatically terminate running processes before updates."
                     )
                     yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="This clears a record of what has been downloaded. (it doesn't delete any actual downloads.)")
                     yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall redfetch and guide through manual cleanup.")
@@ -319,6 +325,8 @@ class Redfetch(App):
             self.handle_toggle_ionbc(event.value)
         elif event.switch.id == "auto_run_vvmq":
             self.handle_toggle_auto_run_vvmq(event.value)
+        elif event.switch.id == "auto_terminate_processes":
+            self.handle_toggle_auto_terminate_processes(event.value)
 
     def handle_toggle_dark(self) -> None:
         self.dark = not self.dark  
@@ -610,27 +618,20 @@ class Redfetch(App):
         state = "enabled" if value else "disabled"
         self.notify(f"Auto-run VVMQ is now {state}")
 
+    def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
+        config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
+        state = "enabled" if value else "disabled"
+        self.notify(f"Auto-terminate processes is now {state}")
+        switch = self.query_one("#auto_terminate_processes", Switch)
+        switch.value = value
+
     def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
-        """Run an executable from a specified folder."""
-        if not sys.platform.startswith('win'):
-            self.notify("Running executables is only supported on Windows.", severity="error")
-            return
-
-        if not folder_path:
-            self.notify(f"Folder path not set for {executable_name}", severity="error")
-            return
-
-        executable_path = os.path.join(folder_path, executable_name)
-        if os.path.isfile(executable_path):
-            try:
-                if args is None:
-                    args = []
-                subprocess.Popen([executable_path] + args, cwd=folder_path)
-                self.notify(f"{executable_name} started successfully.")
-            except Exception as e:
-                self.notify(f"Failed to start {executable_name}: {e}", severity="error")
+        """Run an executable and show appropriate notifications."""
+        success = utils.run_executable(folder_path, executable_name, args)
+        if success:
+            self.notify(f"{executable_name} started successfully.")
         else:
-            self.notify(f"{executable_name} not found in the specified folder.", severity="error")
+            self.notify(f"Failed to start {executable_name}", severity="error")
 
     def open_myseq_folder(self) -> None:
         """Open the MySEQ folder if available."""
@@ -775,6 +776,7 @@ class Redfetch(App):
         self.query_one("#myseq", Switch).disabled = self.is_updating or self.interface_running or not bool(utils.get_current_myseq_id())
         self.query_one("#ionbc", Switch).disabled = self.is_updating or self.interface_running
         self.query_one("#auto_run_vvmq", Switch).disabled = self.is_updating or self.interface_running
+        self.query_one("#auto_terminate_processes", Switch).disabled = self.is_updating or self.interface_running
 
     #
     # setting updaters
@@ -873,10 +875,36 @@ class Redfetch(App):
         """Handle the update process for watched resources."""
         self.notify("Updating watched resources...")
         print(f"Starting update of all watched & special resources, please wait...")
+        
+        # Check for running processes
+        mq_folder = utils.get_base_path()
+        running_executables = utils.are_executables_running_in_folder(mq_folder)
+        if running_executables:
+            auto_terminate = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
+            if auto_terminate is True:
+                utils.terminate_executables_in_folder(mq_folder)
+            elif auto_terminate is False:
+                self.notify("Continuing update without closing processes...", severity="warning")
+            else:
+                # We need to switch to the main thread to show the modal
+                response = self.call_from_thread(
+                    self.push_screen_wait, 
+                    ProcessTerminationScreen(running_executables=running_executables)
+                )
+                
+                if response in [ProcessTerminationScreen.RESPONSE_TERMINATE, ProcessTerminationScreen.RESPONSE_ALWAYS]:
+                    if response == ProcessTerminationScreen.RESPONSE_ALWAYS:
+                        self.call_from_thread(self.handle_toggle_auto_terminate_processes, True)
+                    utils.terminate_executables_in_folder(mq_folder)
+                elif response == ProcessTerminationScreen.RESPONSE_NEVER:
+                    self.call_from_thread(self.handle_toggle_auto_terminate_processes, False)
+                else:  # RESPONSE_SKIP
+                    self.notify("Continuing update without closing processes...", severity="warning")
+
         self.is_updating = True
         result = self.run_synchronization()
         self.is_updating = False
-        return result 
+        return result
     
     def cancel_update_watched(self):
         cancelled_workers = self.workers.cancel_group(self, "update_watched_group")
@@ -932,17 +960,23 @@ class Redfetch(App):
                 # Check auto-run preference before showing modal
                 auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
                 if auto_run is True:
-                    # Automatically run VVMQ
                     self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
                     self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
                 elif auto_run is False:
-                    # Don't show modal or run VVMQ
                     self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
                 else:
-                    # Show the modal popup if no preference is set
-                    def after_modal(_: bool | None) -> None:
+                    def handle_vvmq_response(response: str) -> None:
+                        if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
+                            if response == RunVVMQScreen.RESPONSE_ALWAYS:
+                                config.update_setting(['AUTO_RUN_VVMQ'], True, env=self.current_env)
+                                self.query_one("#auto_run_vvmq", Switch).value = True
+                            self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+                        elif response == RunVVMQScreen.RESPONSE_NEVER:
+                            config.update_setting(['AUTO_RUN_VVMQ'], False, env=self.current_env)
+                            self.query_one("#auto_run_vvmq", Switch).value = False
                         self.reset_button("update_watched", "primary")
-                    self.push_screen(RunVVMQScreen(), after_modal)
+                    
+                    self.push_screen(RunVVMQScreen(), handle_vvmq_response)
         else:
             button.variant = "error"
             print(f"Some resources failed to update.")
@@ -1076,7 +1110,8 @@ class Redfetch(App):
         log.write_line(f"redfetch v{__version__} allows you to download EQ resources from RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
-        self.title = "redfetch"
+        # two spaces to make up for tcss padding of tabbedcontent and tabpane
+        self.title = "  redfetch"
         self.load_user_level()  # background task for welcome message
         self.check_mq_status_worker()
 
@@ -1105,6 +1140,11 @@ class PrintCapturingLog(Log):
 class RunVVMQScreen(ModalScreen):
     """A modal screen to ask if the user wants to run Very Vanilla MQ."""
 
+    RESPONSE_RUN = "run"
+    RESPONSE_ALWAYS = "always"
+    RESPONSE_NEVER = "never"
+    RESPONSE_SKIP = "skip"
+
     def compose(self) -> ComposeResult:
         yield Grid(
             Label("Run Very Vanilla MQ?", id="question"),
@@ -1117,26 +1157,57 @@ class RunVVMQScreen(ModalScreen):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "yesmq":
-            # Run the executable
-            self.app.run_executable(
-                utils.get_vvmq_path(), 
-                "MacroQuest.exe"
-            )
-            self.dismiss()
+            self.dismiss(self.RESPONSE_RUN)
         elif event.button.id == "alwaysmq":
-            # Save the preference and run VVMQ
-            config.update_setting(['AUTO_RUN_VVMQ'], True, env=self.app.current_env)
-            self.app.run_executable(
-                utils.get_vvmq_path(), 
-                "MacroQuest.exe"
-            )
-            self.dismiss()
+            self.dismiss(self.RESPONSE_ALWAYS)
         elif event.button.id == "nevermq":
-            # Save the preference to never run
-            config.update_setting(['AUTO_RUN_VVMQ'], False, env=self.app.current_env)
-            self.dismiss()
+            self.dismiss(self.RESPONSE_NEVER)
         else:  # "nomq"
-            self.dismiss()
+            self.dismiss(self.RESPONSE_SKIP)
+
+class ProcessTerminationScreen(ModalScreen):
+    """A modal screen to ask if user wants to terminate running processes."""
+
+    RESPONSE_TERMINATE = "terminate"
+    RESPONSE_ALWAYS = "always"
+    RESPONSE_NEVER = "never"
+    RESPONSE_SKIP = "skip"
+
+    def __init__(self, running_executables: list[str]):
+        super().__init__()
+        self.running_executables = running_executables
+
+    def compose(self) -> ComposeResult:
+        # Check if any process contains "crashpad"
+        if any("crashpad" in exe.lower() for exe in self.running_executables):
+            message = "MacroQuest is running, which may interfere with updates."
+        else:
+            # Create a string of the running executables
+            processes_str = ", ".join(self.running_executables)
+            message = (
+                f"These processes may interfere with updates:\n"
+                f"[italic]{processes_str}[/italic]"
+            )
+
+        yield Grid(
+            Label(message, id="process_message"),
+            Label("Close before updating?", id="close_them"),
+            Button("Yes", variant="primary", id="yesterminate"),
+            Button("No", variant="default", id="noterminate"),
+            Center(Button("Always", variant="primary", id="alwaysterminate")),
+            Center(Button("Never", variant="default", id="neverterminate")),
+            id="process_dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "yesterminate":
+            self.dismiss(self.RESPONSE_TERMINATE)
+        elif event.button.id == "alwaysterminate":
+            self.dismiss(self.RESPONSE_ALWAYS)
+        elif event.button.id == "neverterminate":
+            self.dismiss(self.RESPONSE_NEVER)
+        else:  # "noterminate"
+            self.dismiss(self.RESPONSE_SKIP)
 
 def run_textual_ui():
     app = Redfetch()

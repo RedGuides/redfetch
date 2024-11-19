@@ -6,6 +6,8 @@
 
 Header {
     color: $error-lighten-1;
+    text-align: center;
+    content-align: center middle;
 }
 
 TabbedContent {
@@ -52,10 +54,8 @@ Label {
 }
 #center_welcome {
     column-span: 3;
-    text-align: right;
 }
 #welcome_label {
-    width: 1fr;
     content-align: center middle;
 }
 #center_watched {
@@ -105,7 +105,7 @@ Label {
     grid-rows: auto;        
     grid-gutter: 1;   
 }
-#dl_path_input, #eq_path_input, #vvmq_path_input, #server_type, #eq_maps, #myseq, #ionbc, #auto_run_vvmq {
+#dl_path_input, #eq_path_input, #vvmq_path_input, #server_type, #eq_maps, #myseq, #ionbc, #auto_run_vvmq, #auto_terminate_processes {
     column-span: 2;
 }
 
@@ -208,20 +208,23 @@ Label {
     max-width: 50%;
 }
 
-/* "Run VVMQ" Popup */
+/* modalscreen popups */
 
 RunVVMQScreen {
     align: center top;
     background: $background-darken-2 70%; 
 }
 
+RunVVMQScreen Button {
+    width: 100%;
+}
+
 #dialog {
     grid-size: 2;
     grid-gutter: 1 2;
-    grid-rows: 1fr 3;
     margin: 4 1;
     padding: 0 1;
-    width: 60;
+    width: 50;
     height: 12;
     border: thick $primary-background-darken-3;
     background: $surface;
@@ -261,7 +264,64 @@ RunVVMQScreen {
     border-top: tall $error 15%;
 }
 
-/* Make buttons in the modal fill their space */
-RunVVMQScreen Button {
+ProcessTerminationScreen {
+    align: center top;
+    background: $background-darken-2 70%; 
+}
+
+ProcessTerminationScreen Button {
     width: 100%;
+}
+
+#process_dialog {
+    grid-size: 2;
+    grid-gutter: 0 1;
+    margin: 2 1;
+    padding: 0 1;
+    width: 50;
+    height: 19;
+    border: thick $primary-background-darken-3;
+    background: $surface;
+}
+
+#process_message {
+    color: $text-primary;
+    column-span: 2;
+    height: 40;
+    width: 100%;
+    content-align: center middle;
+}
+
+#close_them {
+    column-span: 2;
+    color: $text-error;
+    width: 100%;
+    content-align: center middle;
+}
+
+#noterminate:hover {
+    background: $surface-darken-1;
+    border-top: tall $surface;
+}
+#alwaysterminate {
+    background: $primary 15%;
+    border-top: tall $primary-lighten-3 15%;
+    border-bottom: tall $primary-darken-3 15%;
+    color: $text-muted;
+    width: 17;
+}
+#alwaysterminate:hover {
+    background: $primary-darken-2 15%;
+    border-top: tall $primary 15%;
+}
+#neverterminate {
+    background: $error 15%;
+    border-top: tall $error-lighten-1 15%;
+    border-bottom: tall $error-darken-1 15%;
+    color: $text-muted;
+    width: 17;
+}
+#neverterminate:hover {
+    background: $error-darken-1 15%;
+    border-top: tall $error 15%;
 }

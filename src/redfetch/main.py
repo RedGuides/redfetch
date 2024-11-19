@@ -6,7 +6,7 @@ import os
 # third-party imports
 from dynaconf import ValidationError
 from rich import print as rprint
-from rich.prompt import Confirm
+from rich.prompt import Confirm, InvalidResponse
 from rich_argparse import RichHelpFormatter
 
 # local imports
@@ -365,23 +365,88 @@ def handle_fetch(args):
         if args.download_resource:
             print(f"Downloading resource {args.download_resource}.")
             synchronize_db_and_download(cursor, headers, [args.download_resource])
-        elif args.download_watched: 
-            if utils.is_mq_down():
-                rprint("[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work.")
-                continue_download = Confirm.ask("Do you want to continue with the download?", default=False)
-                if not continue_download:
-                    print("Download cancelled by user.")
-                    return False
-            mq_folder = utils.get_base_path()
-            # Check if MQ or any other exe is running
-            if utils.are_executables_running_in_folder(mq_folder):
-                terminate_processes = Confirm.ask("Processes are running from the folder. Attempt to close them?", default=True)
-                if terminate_processes:
+        elif args.download_watched:
+            handle_download_watched(cursor, headers)
+
+def handle_download_watched(cursor, headers):
+    if utils.is_mq_down():
+        rprint("[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work.")
+        continue_download = Confirm.ask("Do you want to continue with the download?", default=False)
+        if not continue_download:
+            print("Download cancelled by user.")
+            return False
+
+    mq_folder = utils.get_base_path()
+    # Check if MQ or any other executable is running
+    if utils.are_executables_running_in_folder(mq_folder):
+        # Check auto-terminate setting
+        auto_terminate = config.settings.from_env(config.settings.ENV).get('AUTO_TERMINATE_PROCESSES', None)
+        if auto_terminate:
+            utils.terminate_executables_in_folder(mq_folder)
+        else:
+            # Use the custom prompt
+            try:
+                user_choice = utils.TerminationPrompt.ask(
+                    "Processes are running from the folder. Attempt to close them? [yes/no/always/never]",
+                    default="yes"
+                )
+                if user_choice == "yes":
                     utils.terminate_executables_in_folder(mq_folder)
-                else:
-                    print("Cannot proceed while processes are running. Please close them manually.")
-                    return False
-            synchronize_db_and_download(cursor, headers)
+                elif user_choice == "always":
+                    utils.terminate_executables_in_folder(mq_folder)
+                    config.update_setting(['AUTO_TERMINATE_PROCESSES'], True)
+                    print("Updated settings to always terminate processes.")
+                elif user_choice == "never":
+                    print("Continuing update without closing processes...")
+                    config.update_setting(['AUTO_TERMINATE_PROCESSES'], False)
+                    print("Updated settings to never terminate processes.")
+                else:  # user_choice == "no"
+                    print("Continuing update without closing processes...")
+            except InvalidResponse:
+                print("Invalid input. Continuing update without closing processes...")
+
+    # Perform the download
+    success = synchronize_db_and_download(cursor, headers)
+    if success:
+        handle_auto_run_macroquest()
+
+def handle_auto_run_macroquest():
+    auto_run = config.settings.from_env(config.settings.ENV).get('AUTO_RUN_VVMQ', None)
+    if auto_run is None:
+        # Use the custom prompt
+        try:
+            user_choice = utils.TerminationPrompt.ask(
+                "Do you want to start MacroQuest now? [yes/no/always/never]",
+                default="yes"
+            )
+            if user_choice == "yes":
+                pass  # Proceed to run MacroQuest
+            elif user_choice == "always":
+                config.update_setting(['AUTO_RUN_VVMQ'], True)
+                print("Updated settings to always run MacroQuest after updates.")
+            elif user_choice == "never":
+                config.update_setting(['AUTO_RUN_VVMQ'], False)
+                print("Updated settings to never run MacroQuest after updates.")
+                return  # Do not run MQ
+            else:  # user_choice == "no"
+                print("Not starting MacroQuest.")
+                return  # Do not run MQ
+        except InvalidResponse:
+            print("Invalid input. Not starting MacroQuest.")
+            return  # Do not run MQ
+    elif auto_run:
+        pass  # Proceed to run MacroQuest
+    else:
+        # AUTO_RUN_VVMQ is False; do not run MacroQuest
+        return
+
+    # Proceed to run MacroQuest
+    mq_path = utils.get_vvmq_path()
+    if mq_path:
+        exe_name = "MacroQuest.exe"
+        utils.run_executable(mq_path, exe_name)
+    else:
+        print("MacroQuest path not found. Please check your configuration.")
 
 def main():
     args = parse_arguments()

@@ -4,12 +4,35 @@ import json
 import re
 from urllib.parse import urlparse
 import subprocess
+import sys
 
 # Third-party
 import requests
+from rich.prompt import Prompt, InvalidResponse
 
 # Local
 from redfetch import config
+
+class TerminationPrompt(Prompt):
+    """Custom prompt to ask the user about terminating processes, including 'Always' and 'Never' options."""
+    response_type = str
+    validate_error_message = "[prompt.invalid]Please enter yes, no, always, or never"
+    choices = ["yes", "no", "always", "never"]
+    complete_style = "default"
+
+    def process_response(self, value: str) -> str:
+        """Process the user's response."""
+        value = value.strip().lower()
+        if value in ['y', 'yes']:
+            return "yes"
+        elif value in ['n', 'no']:
+            return "no"
+        elif value == 'always':
+            return "always"
+        elif value == 'never':
+            return "never"
+        else:
+            raise InvalidResponse(self.validate_error_message)
 
 def is_special_or_dependency(resource_id):
     """Determine if a resource is special or a dependency, and its parent IDs."""
@@ -307,24 +330,25 @@ def are_executables_running_in_folder(folder_path):
     """
     Check if any .exe files in the specified folder are currently running processes.
 
-    Returns True if any executables in the folder are running, False otherwise.
+    Returns a list of running executables in the folder.
     """
+    running_executables = []
     try:
         exe_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.exe')]
         if not exe_files:
             print(f"No executable files found in {folder_path}")
-            return False
+            return running_executables  # Return empty list
 
         # Get the list of running processes
         output = subprocess.check_output(['tasklist'], universal_newlines=True)
         for exe_file in exe_files:
             if exe_file in output:
                 print(f"Process '{exe_file}' is currently running.")
-                return True
-        return False
+                running_executables.append(exe_file)
+        return running_executables
     except Exception as e:
         print(f"An error occurred while checking running processes: {e}")
-        return False
+        return running_executables
 
 def terminate_executables_in_folder(folder_path):
     """
@@ -347,3 +371,29 @@ def terminate_executables_in_folder(folder_path):
                 print(f"Process '{exe_file}' is not running.")
     except Exception as e:
         print(f"An error occurred while terminating processes: {e}")
+
+def run_executable(folder_path: str, executable_name: str, args=None) -> bool:
+    """Run an executable from a specified folder. Use args if you need to pass arguments to the executable."""
+    if not sys.platform.startswith('win'):
+        print("Running executables is only supported on Windows.")
+        return False
+
+    if not folder_path:
+        print(f"Folder path not set for {executable_name}")
+        return False
+
+    executable_path = os.path.join(folder_path, executable_name)
+    if os.path.isfile(executable_path):
+        try:
+            if args is None:
+                args = []
+            subprocess.Popen([executable_path] + args, cwd=folder_path)
+            print(f"{executable_name} started successfully.")
+            return True
+        except Exception as e:
+            print(f"Failed to start {executable_name}: {e}")
+            return False
+    else:
+        print(f"{executable_name} not found in the specified folder.")
+        return False
+
