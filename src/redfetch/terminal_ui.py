@@ -23,11 +23,10 @@ from textual.app import App, ComposeResult
 from textual.command import Provider, Hit, Hits, DiscoveryHit
 from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log
 from textual.events import Print
-from textual.containers import ScrollableContainer, Center, Container, Grid
+from textual.containers import ScrollableContainer, Center, Grid, ItemGrid
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState, get_current_worker
 from textual.screen import ModalScreen
-from textual.theme import Theme
 
 # local
 from redfetch import db
@@ -139,82 +138,86 @@ class Redfetch(App):
                     yield Input(placeholder=f"{input_verb} resource URL or ID", id="resource_id_input", tooltip="Update a single resource by its ID or URL.")
                     yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="primary", tooltip="Access an interface for this script on the website.")
                     yield Button("Copy Log", id="copy_log", variant="default", tooltip="Copy the entire log to your clipboard")
-                    yield PrintCapturingLog(id="fetch_log", classes="fetch_log")
+                    yield PrintCapturingLog(id="fetch_log")
 
             with TabPane("Settings", id="settings"):
-                with ScrollableContainer(id="settings_grid"):
-                    yield Label("Select Server Type:", classes="left_middle")
-                    yield Select[str](
-                        [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
-                        id="server_type",
-                        value=self.current_env,  # Use the reactive attribute
-                        prompt="Select server type",
-                        allow_blank = False,
-                        tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
-                    )
-                    yield Button("Download Folder", id="select_dl_path", variant="default", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
-                    yield Input(value=config.settings.from_env(self.current_env).DOWNLOAD_FOLDER, placeholder=f"{input_verb} a basic download directory", id="dl_path_input", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
-                    yield Button("EverQuest Folder", id="select_eq_path", variant="default", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.")
-                    yield Input(value=config.settings.from_env(self.current_env).EQPATH, placeholder=f"{input_verb} your EverQuest directory", id="eq_path_input", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.", valid_empty=True)
-
-                    yield Button("Very Vanilla MQ Folder", id="select_vvmq_path", variant="default", tooltip="Your MacroQuest folder.")
-                    vvmq_path = utils.get_vvmq_path()
-                    if vvmq_path:
-                        yield Input(value=vvmq_path, placeholder=f"{input_verb} your Very Vanilla MQ directory", id="vvmq_path_input", tooltip="The default should be fine, but if you already have a VVMQ install you can select that here.")
-                    else:
-                        yield Input(value="VVMQ not available for current environment", id="vvmq_path_input", disabled=True)
-                    yield Label("Select EQ Map(s):", classes="left_middle")
-                    yield Select(
-                        [("Brewall's Maps", "brewall"), ("Good's Maps", "good"), ("All", "all")],
-                        id="eq_maps",
-                        prompt="Select maps",
-                        allow_blank=True,
-                        value=self.get_current_eq_maps_value(),
-                        tooltip="Requires an EverQuest folder above. Adds in-game maps to your 'special resources', with brewall and good's recommended folder structure.",
-                    )
-                    yield Label("MySEQ:", classes="left_middle")
-                    myseq_id = utils.get_current_myseq_id()
-                    yield Switch(id="myseq", value=config.settings.from_env(self.current_env).SPECIAL_RESOURCES.get(myseq_id, {}).get('opt_in', False), tooltip="Adds MySEQ to your 'special resources', with maps and offsets for your selected server type.")
-                    yield Label("IonBC:", classes="left_middle")
-                    yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
-                    yield Label("Start MQ post-update:", classes="left_middle")
-                    yield Switch(
-                        id="auto_run_vvmq", 
-                        value=config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', False),
-                        tooltip="Automatically run Very Vanilla MQ after successful updates."
-                    )
-                    yield Label("Close MQ pre-udpate:", classes="left_middle")
-                    yield Switch(
-                        id="auto_terminate_processes", 
-                        value=config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None),
-                        tooltip="Automatically terminate running processes before updates."
-                    )
-                    yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="This clears a record of what has been downloaded. (it doesn't delete any actual downloads.)")
-                    yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall redfetch and guide through manual cleanup.")
+                with ScrollableContainer():
+                    with ItemGrid(id="dropdowns_grid"):
+                        yield Select[str](
+                            [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
+                            id="server_type",
+                            classes="bordertitles",
+                            value=self.current_env,  # Use the reactive attribute
+                            prompt="Select server type",
+                            allow_blank = False,
+                            tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
+                        )
+                    with ItemGrid(id="inputs_grid", classes="bordertitles"):
+                        yield Button("Download Folder", id="select_dl_path", variant="default", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
+                        yield Input(value=config.settings.from_env(self.current_env).DOWNLOAD_FOLDER, placeholder=f"{input_verb} a basic download directory", id="dl_path_input", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
+                        yield Button("EverQuest Folder", id="select_eq_path", variant="default", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.")
+                        yield Input(value=config.settings.from_env(self.current_env).EQPATH, placeholder=f"{input_verb} your EverQuest directory", id="eq_path_input", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.", valid_empty=True)
+                        yield Button("Very Vanilla MQ Folder", id="select_vvmq_path", variant="default", tooltip="Your MacroQuest folder.")
+                        vvmq_path = utils.get_vvmq_path()
+                        if vvmq_path:
+                            yield Input(value=vvmq_path, placeholder=f"{input_verb} your Very Vanilla MQ directory", id="vvmq_path_input", tooltip="The default should be fine, but if you already have a VVMQ install you can select that here.")
+                        else:
+                            yield Input(value="VVMQ not available for current environment", id="vvmq_path_input", disabled=True)
+                    with ItemGrid(id="special_resources_grid", classes="bordertitles"):
+                        yield Label("MySEQ:", classes="left_middle")
+                        myseq_id = utils.get_current_myseq_id()
+                        yield Switch(id="myseq", value=config.settings.from_env(self.current_env).SPECIAL_RESOURCES.get(myseq_id, {}).get('opt_in', False), tooltip="Adds MySEQ to your 'special resources', with maps and offsets for your selected server type.")
+                        yield Label("IonBC:", classes="left_middle")
+                        yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
+                        yield Label("Maps:", classes="left_middle")
+                        yield Select(
+                            [("Brewall's Maps", "brewall"), ("Good's Maps", "good"), ("All", "all")],
+                            id="eq_maps",
+                            prompt="Select maps",
+                            allow_blank=True,
+                            value=self.get_current_eq_maps_value(),
+                            tooltip="Requires an EverQuest folder. Adds in-game maps to your 'special resources', with brewall and good's recommended folder structure.",
+                        )
+                    with ItemGrid(id="settings_grid", classes="bordertitles"):
+                        yield Label("Close MQ pre-udpate:", classes="left_middle")
+                        yield Switch(
+                            id="auto_terminate_processes", 
+                            value=config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None),
+                            tooltip="Automatically terminate running processes before updates."
+                        )
+                        yield Label("Start MQ post-update:", classes="left_middle")
+                        yield Switch(
+                            id="auto_run_vvmq", 
+                            value=config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', False),
+                            tooltip="Automatically run Very Vanilla MQ after successful updates."
+                        )
+                    with ItemGrid(id="maintenance_grid", classes="bordertitles"):
+                        yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="This clears a record of what has been downloaded. (it doesn't delete any actual downloads.)")
+                        yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall redfetch and guide through manual cleanup.")
                 
             with TabPane("Shortcuts", id="shortcuts"):
-                with ScrollableContainer(id="shortcuts_grid"):
-                    yield Label("⚡ Run Executables ⚡")
-                    yield Button("Very Vanilla MQ 🍦", id="run_macroquest", classes="executable", tooltip="Run MacroQuest, the legendary add-on platform for EverQuest.")
-                    yield Button("MeshUpdater 🌐", id="run_meshupdater", classes="executable", tooltip="Update EQ zone meshes, needed for MQNav.")
-                    yield Button("EQBCS 💬", id="run_eqbcs", classes="executable", tooltip="run EQBCs.exe, the server for EQ Box Chat (MQ2EQBC).")
-                    yield Button("EQ LaunchPad 🐲", id="launch_everquest", classes="executable", tooltip="The official launcher and updater for EverQuest.")
-                    yield Button("EQGame 🐲🩹", id="launch_everquest_client", classes="executable", tooltip="The EverQuest client *WITHOUT* updating.")
-                    yield Button("IonBC 💻", id="run_ionbc", classes="executable", tooltip="run IonBC.exe, a self-contained EQ box chat server for multiple computers that doesn't use MacroQuest.")
-                    yield Button("MySEQ 📍", id="run_myseq", classes="executable", tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.")
+                with ScrollableContainer(id="shortcuts"):
+                    with ItemGrid(id="executables_grid"):
+                        yield Button("Very Vanilla MQ 🍦", id="run_macroquest", classes="executable", tooltip="Run MacroQuest, the legendary add-on platform for EverQuest.")
+                        yield Button("MeshUpdater 🌐", id="run_meshupdater", classes="executable", tooltip="Update EQ zone meshes, needed for MQNav.")
+                        yield Button("EQBCS 💬", id="run_eqbcs", classes="executable", tooltip="run EQBCs.exe, the server for EQ Box Chat (MQ2EQBC).")
+                        yield Button("EQ LaunchPad 🐲", id="launch_everquest", classes="executable", tooltip="The official launcher and updater for EverQuest.")
+                        yield Button("EQGame 🐲🩹", id="launch_everquest_client", classes="executable", tooltip="The EverQuest client *WITHOUT* updating.")
+                        yield Button("IonBC 💻", id="run_ionbc", classes="executable", tooltip="run IonBC.exe, a self-contained EQ box chat server for multiple computers that doesn't use MacroQuest.")
+                        yield Button("MySEQ 📍", id="run_myseq", classes="executable", tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.")
                     
-                    yield Label("📂 Open Folders 📂")
-                    yield Button("Downloads 🥏🐕", id="open_dl_folder", classes="folder", tooltip="Open redfetch downloads folder")
-                    yield Button("Very Vanilla MQ 🍦", id="open_vvmq_folder", classes="folder", tooltip="Open MacroQuest folder")
-                    yield Button("EverQuest 🐲", id="open_eq_folder", classes="folder", tooltip="Open EverQuest game folder")
-                    yield Button("IonBC 💻", id="open_ionbc_folder", classes="folder", tooltip="Open IonBC folder")
-                    yield Button("MySEQ 📍", id="open_myseq_folder", classes="folder", tooltip="Open MySEQ folder")
+                    with ItemGrid(id="folders_grid"):
+                        yield Button("Downloads 🥏🐕", id="open_dl_folder", classes="folder", tooltip="Open redfetch downloads folder")
+                        yield Button("Very Vanilla MQ 🍦", id="open_vvmq_folder", classes="folder", tooltip="Open MacroQuest folder")
+                        yield Button("EverQuest 🐲", id="open_eq_folder", classes="folder", tooltip="Open EverQuest game folder")
+                        yield Button("IonBC 💻", id="open_ionbc_folder", classes="folder", tooltip="Open IonBC folder")
+                        yield Button("MySEQ 📍", id="open_myseq_folder", classes="folder", tooltip="Open MySEQ folder")
 
-                    yield Label("📎 Open Files 📎")
-                    yield Button("settings.local.toml 🥏🐕", id="open_redfetch_config", classes="file", tooltip="Open the redfetch config file.")
-                    yield Button("MacroQuest.ini 🍦", id="open_mq_config", classes="file", tooltip="Open VV MQ's config file.")
-                    yield Button("eqclient.ini 🐲", id="open_eq_config", classes="file", tooltip="Open EverQuest's config file.")
-                    yield Button("eqhost.txt 🐲", id="open_eq_host", classes="file", tooltip="Open EverQuest's eqhost.txt, which is useful for emulators.")
+                    with ItemGrid(id="files_grid"):
+                        yield Button("settings.local.toml 🥏🐕", id="open_redfetch_config", classes="file", tooltip="Open the redfetch config file.")
+                        yield Button("MacroQuest.ini 🍦", id="open_mq_config", classes="file", tooltip="Open VV MQ's config file.")
+                        yield Button("eqclient.ini 🐲", id="open_eq_config", classes="file", tooltip="Open EverQuest's config file.")
+                        yield Button("eqhost.txt 🐲", id="open_eq_host", classes="file", tooltip="Open EverQuest's eqhost.txt, which is useful for emulators.")
                     
 
             with TabPane("Account", id="account"):
@@ -376,6 +379,9 @@ class Redfetch(App):
             eq_maps_select = self.query_one("#eq_maps", Select)
             eq_maps_select.value = self.get_current_eq_maps_value()
             eq_maps_select.disabled = not bool(self.eq_path)
+
+            new_theme = config.settings.get('THEME', self.DEFAULT_THEME)
+            self.theme = new_theme
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "resource_id_input":
@@ -626,19 +632,23 @@ class Redfetch(App):
             state = "enabled" if value else "disabled"
             self.notify(f"IonBC is now {state}")
 
-    def handle_toggle_auto_run_vvmq(self, value: bool) -> None:
-        current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
-        if current_value != value:
-            config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
-            state = "enabled" if value else "disabled"
-            self.notify(f"Auto-run VVMQ is now {state}")
-
     def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
         current_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
         if current_value != value:
             config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
             state = "enabled" if value else "disabled"
             self.notify(f"Auto-terminate processes is now {state}")
+        # Update the switch in the UI
+        self.query_one("#auto_terminate_processes", Switch).value = value
+
+    def handle_toggle_auto_run_vvmq(self, value: bool) -> None:
+        current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+        if current_value != value:
+            config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"Auto-run VVMQ is now {state}")
+        # Update the switch in the UI
+        self.query_one("#auto_run_vvmq", Switch).value = value
 
     def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
         """Run an executable and show appropriate notifications."""
@@ -986,14 +996,11 @@ class Redfetch(App):
                         def handle_vvmq_response(response: str) -> None:
                             if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
                                 if response == RunVVMQScreen.RESPONSE_ALWAYS:
-                                    config.update_setting(['AUTO_RUN_VVMQ'], True, env=self.current_env)
-                                    self.query_one("#auto_run_vvmq", Switch).value = True
+                                    self.handle_toggle_auto_run_vvmq(True)
                                 self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
                             elif response == RunVVMQScreen.RESPONSE_NEVER:
-                                config.update_setting(['AUTO_RUN_VVMQ'], False, env=self.current_env)
-                                self.query_one("#auto_run_vvmq", Switch).value = False
+                                self.handle_toggle_auto_run_vvmq(False)
                             self.reset_button("update_watched", "primary")
-                        
                         self.push_screen(RunVVMQScreen(), handle_vvmq_response)
                 else:
                     # Non-Windows platforms just reset the button
@@ -1131,11 +1138,19 @@ class Redfetch(App):
         log.write_line(f"redfetch v{__version__} allows you to download EQ resources from RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
-        # one space to make up for tcss padding of tabbedcontent and tabpane
-        self.title = " redfetch"
+        # two spaces to make up for tcss padding of tabbedcontent and tabpane
+        self.title = "  📦 redfetch 🧙‍♂️"
         self.load_user_level()  # background task for welcome message
         self.check_mq_status_worker()
-
+        # border titles
+        self.query_one("#server_type").border_title = "Select server type"
+        self.query_one("#inputs_grid").border_title = "Directories"
+        self.query_one("#settings_grid").border_title = "Settings"
+        self.query_one("#special_resources_grid").border_title = "Special Resources"
+        self.query_one("#maintenance_grid").border_title = "Maintenance"
+        self.query_one("#executables_grid").border_title = "Executables ⚡"
+        self.query_one("#folders_grid").border_title = "Folders 📁"
+        self.query_one("#files_grid").border_title = "Files 📎"
     # 
     # the end
     #

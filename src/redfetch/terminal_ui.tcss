@@ -26,13 +26,17 @@ TabbedContent Tab.-active {
     background: $surface 10%;
 }
 
+TabbedContent Tab:hover {
+    color: $text-primary;
+}
+
 Label {
     color: $text-primary;
 }
 
 .left_middle {
-    height: 1fr;
     content-align: left middle;
+    grid-gutter: 0;
 }
 
 .hidden {
@@ -64,22 +68,19 @@ Label {
 #update_watched {
     content-align: center middle;
     color: $text;
+    text-style: bold;
     padding: 1 1;
 }
-#copy_log {
-    offset: 0 1;
-    color: $text-muted;
-}
 #redguides_interface {
-    column-span: 2;
     background: $error 29%;
-    border-top: tall $error-lighten-3 29%;
-    border-bottom: tall $error-darken-3 29%;
+    border-top: tall $error-lighten-1 29%;
+    border-bottom: tall $error-darken-1 29%;
+    column-span: 2;
     color: $text-muted;
     width: 24;
 }
 #redguides_interface:hover {
-    background: $error-darken-2 29%;
+    background: $error-darken-3 29%;
     border-top: tall $error 29%;
 }
 #resource_id_input {
@@ -88,24 +89,175 @@ Label {
 #update_resource_id {
     column-span: 1;
 }
+#copy_log {
+    offset: 0 2;
+    margin: 0 6;
+    color: $text-muted;
+    outline: wide $secondary-background-darken-1;
+    outline-bottom: none;
+}
 #fetch_log {
-    border: panel $primary-background-darken-3;
+    border: round $secondary-background-darken-1;
     border-bottom: none;
-    background: $secondary-background-darken-3 19%;
+    border-right: none;
+    background: $secondary-background-darken-3 59%;
     column-span: 3;
     color: $text-muted;
 }
 
 /* Settings Grid */
-
+#settings_scroll {
+    height: 1fr;
+}
+#server_type {
+    column-span:4;
+    content-align: center middle;
+    width: 25;
+}
+#inputs_grid {
+    margin-top: 1;
+    margin-bottom: 1;
+    layout: grid;
+    grid-size: 4;  
+    grid-rows: auto;  
+    grid-gutter: 1;
+    border: round $secondary-background;      
+}
 #settings_grid {
     layout: grid;
-    grid-size: 3;  /* Two columns */
-    grid-columns: 1fr 2fr;  
+    grid-size: 4;  
+    grid-rows: auto;   
+    border: round $secondary-background;  
+    margin-bottom: 1;
+}
+#special_resources_grid {
+    layout: grid;
+    grid-size: 4;  
+    grid-rows: auto;   
+    border: round $secondary-background;  
+    margin-bottom: 1;
+}
+#maintenance_grid {
+    grid-size: 4;   
+    border: round $secondary-background;  
+}
+#dl_path_input, #eq_path_input, #vvmq_path_input, #myseq, #ionbc, #auto_terminate_processes, #auto_run_vvmq {
+    column-span: 3;
+}
+#eq_maps {
+    column-span: 2;
+}
+.bordertitles {
+    border: round $secondary-background;
+    border-title-color: $text-secondary;
+    border-title-style: bold;
+}
+#myseq, #ionbc {
+    column-span: 3;
+    grid-gutter: 0;
+}
+
+/* Shortcuts Grid */
+
+#shortcuts {
+    align: center middle;
+}
+
+#executables_grid {
+    layout: grid;
+    content-align: center middle;
+    grid-size: 3; 
     grid-rows: auto;        
     grid-gutter: 1;   
+    max-width: 120;
+    border: round $error-darken-3;
+    border-title-color: $text-accent;
+    border-title-style: bold;
+    margin-bottom: 1;
 }
-#dl_path_input, #eq_path_input, #vvmq_path_input, #server_type, #eq_maps, #myseq, #ionbc, #auto_run_vvmq, #auto_terminate_processes {
+#folders_grid {
+    layout: grid;
+    content-align: center middle;
+    grid-size: 3; 
+    grid-rows: auto;        
+    grid-gutter: 1;   
+    max-width: 120;
+    border: round $warning-darken-3;
+    border-title-color: $text-accent;
+    border-title-style: bold;
+    margin-bottom: 1;
+}
+#files_grid {
+    layout: grid;
+    content-align: center middle;
+    grid-size: 3; 
+    grid-rows: auto;        
+    grid-gutter: 1;   
+    max-width: 120;
+    border: round $primary-background-lighten-1;
+    border-title-color: $text-accent;
+    border-title-style: bold;
+}
+#shortcuts Label {
+    column-span: 3;
+    width: 100%;
+    content-align: center middle;
+    height: 3;     
+    color: $text;      
+    text-style: bold;
+    border: round $primary-background-lighten-1;     /* Adds a border with the accent color */
+}
+#shortcuts Button {
+    width: 35;
+    height: 3;
+}
+
+#nevermq {
+    background: $error 15%;
+    border-top: tall $error-lighten-1 15%;
+    border-bottom: tall $error-darken-1 15%;
+    color: $text-muted;
+    width: 17;
+}
+#nevermq:hover {
+    background: $error-darken-1 15%;
+    border-top: tall $error 15%;
+}
+
+#shortcuts Button.executable {
+    background: $error-darken-2;
+    border-top: tall $error-lighten-1 35%;
+    border-bottom: tall $error-darken-1 35%;
+    color: $text;
+}
+#shortcuts Button.executable:hover {
+    background: $error-darken-3 70%;
+    border-top: tall $error 35%;
+}
+#shortcuts Button.folder {
+    width: 35;
+    background: $warning-darken-3; /* Use a theme variable for folders */
+    border-top: tall $warning 55%;
+    border-bottom: tall $warning-darken-3 35%;
+    color: $text;
+}
+#shortcuts Button.folder:hover {
+    width: 35;
+    background: $warning-darken-3 55%;
+    border-top: tall $warning 35%;
+}
+#shortcuts Button.file {
+    background: $primary-background-lighten-1;
+    color: $text;
+}
+#shortcuts Button.file:hover {
+    background: $primary-background-darken-1;
+}
+/* The last in the row needs to span the width of the row */
+#run_myseq {
+    column-span: 3;
+}
+#open_myseq_folder {
     column-span: 2;
 }
 
@@ -146,66 +298,6 @@ Label {
 #account_grid Button:hover {
     background: $background-darken-1;
     color: $accent-lighten-1;
-}
-
-/* Shortcuts Grid */
-
-#shortcuts {
-    align: center middle;
-}
-
-#shortcuts_grid {
-    layout: grid;
-    content-align: center middle;
-    grid-size: 3; 
-    grid-rows: auto;        
-    grid-gutter: 1;   
-    max-width: 120;
-}
-#shortcuts_grid Label {
-    column-span: 3;
-    width: 100%;
-    content-align: center middle;
-    height: 3;     
-    color: $text;      
-    text-style: bold;
-    border: ascii $primary-background-lighten-1;     /* Adds a border with the accent color */
-}
-#shortcuts_grid Button {
-    width: 35;
-    height: 3;
-}
-#shortcuts_grid Button.folder {
-    width: 35;
-    background: $warning-darken-3; /* Use a theme variable for folders */
-    color: $text;
-}
-#shortcuts_grid Button.folder:hover {
-    width: 35;
-    background: $warning-darken-3 55%;
-}
-#shortcuts_grid Button.executable {
-    background: $error-darken-2;
-    color: $text;
-}
-#shortcuts_grid Button.executable:hover {
-    background: $error-darken-3 70%;
-}
-#shortcuts_grid Button.file {
-    background: $primary-background-lighten-1;
-    color: $text;
-}
-#shortcuts_grid Button.file:hover {
-    background: $primary-background-darken-1;
-}
-/* The last in the row needs to span the width of the row */
-#run_myseq {
-    column-span: 3;
-    max-width: 32%;
-}
-#open_myseq_folder {
-    column-span: 2;
-    max-width: 50%;
 }
 
 /* modalscreen popups */
