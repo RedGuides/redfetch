@@ -9,9 +9,16 @@ import sys
 # Third-party
 import requests
 from rich.prompt import Prompt, InvalidResponse
+import psutil
 
 # Local
 from redfetch import config
+
+if sys.platform == 'win32':
+    from .unloadmq import force_remote_unload
+else:
+    def force_remote_unload():
+        pass  # No operation on non-Windows platforms
 
 class TerminationPrompt(Prompt):
     """Custom prompt to ask the user about terminating processes, including 'Always' and 'Never' options."""
@@ -332,19 +339,31 @@ def are_executables_running_in_folder(folder_path):
 
     Returns a list of running executables in the folder.
     """
+    if not sys.platform == 'win32':
+        return []  # Return empty list for non-Windows platforms
+        
     running_executables = []
     try:
-        exe_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.exe')]
+        # Get the absolute, normalized path of the folder
+        folder_path = os.path.normpath(os.path.abspath(folder_path))
+        # List all .exe files in the folder
+        exe_files = [os.path.normcase(os.path.join(folder_path, f)) for f in os.listdir(folder_path) if f.lower().endswith('.exe')]
         if not exe_files:
             print(f"No executable files found in {folder_path}")
-            return running_executables  # Return empty list
+            return running_executables
 
-        # Get the list of running processes
-        output = subprocess.check_output(['tasklist'], universal_newlines=True)
-        for exe_file in exe_files:
-            if exe_file in output:
-                print(f"Process '{exe_file}' is currently running.")
-                running_executables.append(exe_file)
+        # Iterate over all running processes
+        for proc in psutil.process_iter(['pid', 'exe', 'name']):
+            try:
+                exe_path = proc.info['exe']
+                if exe_path and os.path.isfile(exe_path):
+                    # Normalize the path for comparison
+                    exe_path_normalized = os.path.normcase(os.path.normpath(exe_path))
+                    if exe_path_normalized in exe_files:
+                        print(f"Process '{exe_path}' (PID {proc.pid}) is currently running.")
+                        running_executables.append((proc.pid, exe_path))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
         return running_executables
     except Exception as e:
         print(f"An error occurred while checking running processes: {e}")
@@ -352,23 +371,42 @@ def are_executables_running_in_folder(folder_path):
 
 def terminate_executables_in_folder(folder_path):
     """
-    Attempt to terminate any running .exe files in the specified folder.
+    Attempt to unload MacroQuest and terminate any running .exe files in the specified folder.
+    Only works on Windows, does nothing on other platforms.
     """
+    if sys.platform != 'win32':
+        print("Terminating executables is only supported on Windows platforms.")
+        return
+
+    # Unload MacroQuest first
     try:
-        exe_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.exe')]
+        force_remote_unload()
+    except Exception as e:
+        print(f"Error unloading MacroQuest: {e}")
+
+    try:
+        # Get the absolute, normalized path of the folder
+        folder_path = os.path.normpath(os.path.abspath(folder_path))
+        # List all .exe files in the folder
+        exe_files = [os.path.normcase(os.path.join(folder_path, f)) for f in os.listdir(folder_path) if f.lower().endswith('.exe')]
         if not exe_files:
             print(f"No executable files found in {folder_path}")
             return
 
-        # Get the list of running processes
-        output = subprocess.check_output(['tasklist'], universal_newlines=True)
-        for exe_file in exe_files:
-            if exe_file in output:
-                # Terminate the process
-                subprocess.check_output(['taskkill', '/F', '/IM', exe_file], universal_newlines=True)
-                print(f"Terminated process '{exe_file}'.")
-            else:
-                print(f"Process '{exe_file}' is not running.")
+        # Iterate over all running processes
+        for proc in psutil.process_iter(['pid', 'exe', 'name']):
+            try:
+                exe_path = proc.info['exe']
+                if exe_path and os.path.isfile(exe_path):
+                    # Normalize the path for comparison
+                    exe_path_normalized = os.path.normcase(os.path.normpath(exe_path))
+                    if exe_path_normalized in exe_files:
+                        # Terminate the process
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                        print(f"Terminated process '{exe_path}' (PID {proc.pid}).")
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+                print(f"Could not terminate process: {e}")
     except Exception as e:
         print(f"An error occurred while terminating processes: {e}")
 

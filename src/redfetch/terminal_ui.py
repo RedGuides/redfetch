@@ -3,9 +3,12 @@ import os
 import sys
 import subprocess
 import webbrowser
-import winreg
 from pathlib import Path
 from itertools import cycle
+if sys.platform == 'win32':
+    import winreg
+else:
+    winreg = None
 
 # third-party
 import pyperclip
@@ -359,6 +362,16 @@ class Redfetch(App):
             self.update_vvmq_path_display()
             # Update MySEQ switch state
             self.update_myseq_display()
+            
+            # Update auto_run_vvmq switch
+            auto_run_vvmq_switch = self.query_one("#auto_run_vvmq", Switch)
+            auto_run_vvmq_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+            auto_run_vvmq_switch.value = auto_run_vvmq_value
+
+            # Update auto_terminate_processes switch
+            auto_terminate_switch = self.query_one("#auto_terminate_processes", Switch)
+            auto_terminate_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
+            auto_terminate_switch.value = auto_terminate_value
 
             eq_maps_select = self.query_one("#eq_maps", Select)
             eq_maps_select.value = self.get_current_eq_maps_value()
@@ -614,16 +627,18 @@ class Redfetch(App):
             self.notify(f"IonBC is now {state}")
 
     def handle_toggle_auto_run_vvmq(self, value: bool) -> None:
-        config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
-        state = "enabled" if value else "disabled"
-        self.notify(f"Auto-run VVMQ is now {state}")
+        current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+        if current_value != value:
+            config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"Auto-run VVMQ is now {state}")
 
     def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
-        config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
-        state = "enabled" if value else "disabled"
-        self.notify(f"Auto-terminate processes is now {state}")
-        switch = self.query_one("#auto_terminate_processes", Switch)
-        switch.value = value
+        current_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
+        if current_value != value:
+            config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"Auto-terminate processes is now {state}")
 
     def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
         """Run an executable and show appropriate notifications."""
@@ -741,6 +756,7 @@ class Redfetch(App):
             redguides_interface_button.disabled = False
         else:
             redguides_interface_button.label = "RedGuides Interface 🌐"
+            redguides_interface_button.tooltip = "Access an interface for this script on the website."
             redguides_interface_button.disabled = self.is_updating
         self.query_one("#select_dl_path", Button).disabled = self.is_updating or self.interface_running
         self.query_one("#select_eq_path", Button).disabled = self.is_updating or self.interface_running
@@ -957,26 +973,31 @@ class Redfetch(App):
                 input_widget.value = ""
                 self.set_timer(6, lambda: self.reset_button("update_resource_id", "default"))
             elif button.id == "update_watched":
-                # Check auto-run preference before showing modal
-                auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
-                if auto_run is True:
-                    self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-                    self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
-                elif auto_run is False:
-                    self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                # Only show MacroQuest options on Windows
+                if sys.platform == 'win32':
+                    # Check auto-run preference before showing modal
+                    auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+                    if auto_run is True:
+                        self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+                        self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                    elif auto_run is False:
+                        self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                    else:
+                        def handle_vvmq_response(response: str) -> None:
+                            if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
+                                if response == RunVVMQScreen.RESPONSE_ALWAYS:
+                                    config.update_setting(['AUTO_RUN_VVMQ'], True, env=self.current_env)
+                                    self.query_one("#auto_run_vvmq", Switch).value = True
+                                self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+                            elif response == RunVVMQScreen.RESPONSE_NEVER:
+                                config.update_setting(['AUTO_RUN_VVMQ'], False, env=self.current_env)
+                                self.query_one("#auto_run_vvmq", Switch).value = False
+                            self.reset_button("update_watched", "primary")
+                        
+                        self.push_screen(RunVVMQScreen(), handle_vvmq_response)
                 else:
-                    def handle_vvmq_response(response: str) -> None:
-                        if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
-                            if response == RunVVMQScreen.RESPONSE_ALWAYS:
-                                config.update_setting(['AUTO_RUN_VVMQ'], True, env=self.current_env)
-                                self.query_one("#auto_run_vvmq", Switch).value = True
-                            self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-                        elif response == RunVVMQScreen.RESPONSE_NEVER:
-                            config.update_setting(['AUTO_RUN_VVMQ'], False, env=self.current_env)
-                            self.query_one("#auto_run_vvmq", Switch).value = False
-                        self.reset_button("update_watched", "primary")
-                    
-                    self.push_screen(RunVVMQScreen(), handle_vvmq_response)
+                    # Non-Windows platforms just reset the button
+                    self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
         else:
             button.variant = "error"
             print(f"Some resources failed to update.")
@@ -1110,8 +1131,8 @@ class Redfetch(App):
         log.write_line(f"redfetch v{__version__} allows you to download EQ resources from RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
-        # two spaces to make up for tcss padding of tabbedcontent and tabpane
-        self.title = "  redfetch"
+        # one space to make up for tcss padding of tabbedcontent and tabpane
+        self.title = " redfetch"
         self.load_user_level()  # background task for welcome message
         self.check_mq_status_worker()
 
@@ -1173,25 +1194,25 @@ class ProcessTerminationScreen(ModalScreen):
     RESPONSE_NEVER = "never"
     RESPONSE_SKIP = "skip"
 
-    def __init__(self, running_executables: list[str]):
+    def __init__(self, running_executables: list[tuple[int, str]]):
         super().__init__()
         self.running_executables = running_executables
 
     def compose(self) -> ComposeResult:
-        # Check if any process contains "crashpad"
-        if any("crashpad" in exe.lower() for exe in self.running_executables):
+        # Check if any process contains "crashpad" in the executable path
+        if any("crashpad" in exe_path.lower() for pid, exe_path in self.running_executables):
             message = "MacroQuest is running, which may interfere with updates."
         else:
-            # Create a string of the running executables
-            processes_str = ", ".join(self.running_executables)
+            # Create a string of just the executable names
+            exe_names = ", ".join(os.path.basename(exe_path) for pid, exe_path in self.running_executables)
             message = (
                 f"These processes may interfere with updates:\n"
-                f"[italic]{processes_str}[/italic]"
+                f"[italic]{exe_names}[/italic]"
             )
 
         yield Grid(
             Label(message, id="process_message"),
-            Label("Close before updating?", id="close_them"),
+            Label("Attempt to close before updating?", id="close_them"),
             Button("Yes", variant="primary", id="yesterminate"),
             Button("No", variant="default", id="noterminate"),
             Center(Button("Always", variant="primary", id="alwaysterminate")),
