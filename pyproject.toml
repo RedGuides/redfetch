@@ -32,7 +32,8 @@ dependencies = [
     "md2bbcode",
     "keepachangelog",
     "rich-argparse",
-    "psutil"
+    "psutil",
+    "pywin32; sys_platform == 'win32'"
 ]
 
 [project.scripts]

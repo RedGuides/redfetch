@@ -281,7 +281,7 @@ def uninstall():
                     printed_paths.add(path)
 
     # Also inform about the configuration directory
-    config_dir = os.environ.get('redfetch_CONFIG_DIR', '')
+    config_dir = os.environ.get('REDFETCH_CONFIG_DIR', '')
     if config_dir and os.path.exists(config_dir):
         # Delete configuration files
         files_to_delete = [
@@ -359,21 +359,26 @@ def generate_removal_commands(paths, console):
     return commands
 
 def write_commands_to_file(commands, paths):
-    """Write the removal commands and additional information to a text file and open it."""
-    file_path = os.path.join(os.path.expanduser("~"), "redfetch_removal_commands.txt")
-    with open(file_path, 'w') as file:
-        file.write("Manual Cleanup Instructions:\n")
-        file.write("The following directories may contain files downloaded by redfetch. You can remove them manually if you want:\n")
-        for path in sorted(paths):
-            file.write(f" - {path}\n")
-        file.write("\nMake sure there's nothing you want in them. When ready to delete, you can use:\n\n")
-        
-        for command in commands:
-            file.write(command + '\n')
-    
-    # Automatically open the file with the default text editor
+    """Write the removal commands and additional information to a text file and open it on Windows."""
+    # Only write and open the file on Windows
     if platform.system() == 'Windows':
-        os.startfile(file_path)
+        file_path = os.path.join(os.path.expanduser("~"), "redfetch_removal_commands.txt")
+        with open(file_path, 'w') as file:
+            file.write("Manual Cleanup Instructions:\n")
+            file.write("The following directories may contain files downloaded by redfetch. You can remove them manually if you want:\n")
+            for path in sorted(paths):
+                file.write(f" - {path}\n")
+            file.write("\nMake sure there's nothing you want in them. When ready to delete, you can use:\n\n")
+            
+            for command in commands:
+                file.write(command + '\n')
+        
+        # Automatically open the file with the default text editor
+        try:
+            os.startfile(file_path)
+        except Exception as e:
+            console.print(f"[red]Failed to open the file: {e}[/red]")
+            console.print(f"Please open the file manually: [cyan]{file_path}[/cyan]")
     else:
-        opener = "open" if platform.system() == "Darwin" else "xdg-open"
-        subprocess.Popen([opener, file_path])
+        # On non-Windows systems, the important information is already printed to the console
+        console.print("[yellow]After that, you can remove the redfetch package.[/yellow]")

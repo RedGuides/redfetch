@@ -411,6 +411,10 @@ def handle_download_watched(cursor, headers):
         handle_auto_run_macroquest()
 
 def handle_auto_run_macroquest():
+    # Skip if we're in CI or not on Windows
+    if os.environ.get('CI') == 'true' or sys.platform != 'win32':
+        return
+
     auto_run = config.settings.from_env(config.settings.ENV).get('AUTO_RUN_VVMQ', None)
     if auto_run is None:
         # Use the custom prompt

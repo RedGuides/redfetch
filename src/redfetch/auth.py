@@ -257,11 +257,16 @@ def initialize_keyring():
     try:
         # Attempt to use the keyring to trigger any potential errors
         keyring.get_password('test_service', 'test_user')
-    except NoKeyringError:
-        print("No suitable keyring backend found.")
+    except (NoKeyringError, ModuleNotFoundError):
+        print("No suitable keyring backend found, probably because you're not on Windows.")
         print("Please install `keyrings.alt` by running:")
         print("    pip install keyrings.alt")
         print("Then restart the application.")
+        sys.exit(1)
+    except Exception as e:
+        # Catch any other exceptions that may occur and handle them gracefully
+        print(f"An error occurred while initializing keyring: {e}")
+        print("Please ensure that a suitable keyring backend is available.")
         sys.exit(1)
 
 if __name__ == "__main__":

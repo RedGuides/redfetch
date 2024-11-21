@@ -1,6 +1,16 @@
-import winreg as reg
+import sys
+
+# Only import winreg on Windows
+if sys.platform == 'win32':
+    import winreg as reg
+else:
+    reg = None
 
 def find_everquest_uninstall_location():
+    # Return None immediately if not on Windows
+    if sys.platform != 'win32':
+        return None
+        
     import os
     uninstall_path = None
     base_key = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
