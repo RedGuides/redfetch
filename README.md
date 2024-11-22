@@ -1,34 +1,40 @@
 ![redfetch logo with a dog terrorizing a park](https://www.redguides.com/images/redfetchdog.png)
 
-redfetch is for downloading EverQuest software and scripts that you "[watch](https://www.redguides.com/community/watched/resources)" on RedGuides. 
+redfetch is for updating EverQuest multiboxing software and scripts that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". 
 
-## Installation
+## Installation (Windows)
 
-On Windows the easiest way to install redfetch is to [download and run `redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download)
+On Windows the easiest way to install redfetch is to [download](https://www.redguides.com/community/resources/redfetch.3177/download) and run [`redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download). (optional: If you care how it looks, set [Windows Terminal](https://www.redguides.com/community/threads/redfetch.92998/post-634938) as your default terminal.)
 
-### Alternative: Python
+<details>
+<summary>Python / Linux</summary>
+
 If you have a recent version of Python, you can install redfetch with pip,
 
 ```bash
 pip install redfetch
 ```
 
+</details>
+
 ## Usage
 
-To update everything you've watched from the command line,
 
-```bash
-redfetch.exe --download-watched
-```
-or if you installed with pip,
+### 1) Double-click [`redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download) to run the script. 
+Take a moment to consider your configuration and the settings tab.
 
-```bash
-redfetch --download-watched
-```
+### 2) Click the big blue "Easy Update" button. 
+![a screenshot showing the easy update button](https://www.redguides.com/images/redfetchupdate.png)  
+Wait until it completes. (It's updating *Very Vanilla MQ* and any of its scripts or plugins you have [watched on RedGuides](https://www.redguides.com/community/watched/resources), your licensed resources, and scripts recommended by staff. If you're watching thousands of resources, your first run will take a long time.)
 
-This will update *Very Vanilla MacroQuest* and any of its scripts or plugins you have [watched on RedGuides](https://www.redguides.com/community/watched/resources), your licensed resources, and scripts recommended by staff.
+### 3) In the shortcuts tab, click the "Very Vanilla MQ" button
+![a screenshot showing the shortcuts tab](https://www.redguides.com/images/redfetchrunmq.png)
 
-To add more MacroQuest scripts, "watch" them on RedGuides. 
+This starts MacroQuest, and now you're ready to multibox EQ.
+
+
+## Add more MQ Scripts
+To add more MacroQuest scripts, "watch" them on RedGuides, and then run the *Easy Update* button again.
 
 ![a screenshot showing the watch button on a resource page](https://www.redguides.com/images/watch.png)
 
@@ -36,10 +42,13 @@ If there are non-MQ resources you'd like to keep in sync with redfetch, you can 
 
 ## Alternative Interfaces
 
-### Terminal UI
-Run the script without any arguments to access the terminal UI. If you have a modern terminal like [Windows Terminal](https://apps.microsoft.com/store/detail/windows-terminal/9N0DX20HK701), it will look like this:
+### Command Line
 
-![redfetch Terminal UI, showing the settings tab](https://www.redguides.com/images/terminal-ui.png)
+To update everything you've watched from the command line (as well as special resources),
+
+```bash
+redfetch.exe --download-watched
+```
 
 ### Web UI
 Another UI option! Run this command and then browse https://www.redguides.com/community/resources
@@ -121,12 +130,13 @@ Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 - Directory selectors can't change drive letters yet. To change the drive letter in a path, you'll need to type the new drive letter in the input field.
 
 ## Todo
-- Instead of keeping a record of each file downloaded and its version, we should reference the file's hash.
+- Instead of keeping a db entry for each file downloaded and its version, we should check the files on the drive.
+- Refactor download logic, now that we know our needs.
 - Re-write auth for latest Xenforo version.
 
 ## Contributing
 
-I'd love help. I'm not a developer and this is my first big python project.
+I'd love help, conceptually and technically. I'm not a developer and this is my first big python script. 
 
 To set up a [development environment](https://hatch.pypa.io/latest/environment/),
 

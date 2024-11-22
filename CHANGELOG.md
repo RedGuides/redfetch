@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2024-11-22
+
+### Added
+- A bit of flair for initial setup.
+- Detect directories from RedGuides Launcher.
+- Detect EverQuest directory.  
+- Added "themes" to the TUI. You can keep different themes for Live, Test, and Emulator. 
+- Auto unload & close MacroQuest before update. 
+
+### Changed
+- Uninstall now removes settings and cache and logs the user out.
+- Changed appearance to fit with the new theme system.
+
+## Fixed
+- true/false settings now work when set from the command line
+- opting out of special resources no longer requires a restart
+- A few fixes for linux (tested on ubuntu)
+
 ## [0.3.7] - 2024-10-29
 
 ### CHANGED
