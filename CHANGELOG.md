@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Uninstall now removes settings and cache and logs the user out.
 - Changed appearance to fit with the new theme system.
 
-## Fixed
+### Fixed
 - true/false settings now work when set from the command line
 - opting out of special resources no longer requires a restart
 - A few fixes for linux (tested on ubuntu)
