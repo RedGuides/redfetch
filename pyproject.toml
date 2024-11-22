@@ -16,23 +16,23 @@ classifiers = [
     "Topic :: Utilities"
 ]
 dependencies = [
-    "requests",
-    "dynaconf",
-    "tomlkit",
-    "flask",
-    "flask-cors",
-    "keyring",
-    "textual",
-    "pyperclip",
-    "textual-fspicker",
-    "cheroot",
-    "packaging",
-    "platformdirs",
-    "rich",
+    "requests>=2.32.3",
+    "dynaconf>=3.2.6",
+    "tomlkit>=0.13.2",
+    "flask>=3.1.0",
+    "flask-cors>=5.0.0",
+    "keyring>=25.5.0",
+    "textual==0.86.1",
+    "pyperclip>=1.9.0",
+    "textual-fspicker>=0.0.11",
+    "cheroot>=10.0.1",
+    "packaging>=24.2",
+    "platformdirs>=4.3.6",
+    "rich>=13.9.4",
     "md2bbcode",
-    "keepachangelog",
-    "rich-argparse",
-    "psutil",
+    "keepachangelog>=2.0.0",
+    "rich-argparse>=1.6.0",
+    "psutil>=6.1.0",
     "pywin32; sys_platform == 'win32'"
 ]
 
@@ -65,5 +65,5 @@ packages = ["src/redfetch"]
 
 [tool.hatch.envs.dev]
 dependencies = [
-  "textual-dev"
+  "textual-dev==1.6.1"
 ]
