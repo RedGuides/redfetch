@@ -4,7 +4,7 @@ redfetch is for updating EverQuest multiboxing software and scripts that RedGuid
 
 ## Installation (Windows)
 
-On Windows the easiest way to install redfetch is to [download](https://www.redguides.com/community/resources/redfetch.3177/download) and run [`redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download). (optional: If you care how it looks, set [Windows Terminal](https://www.redguides.com/community/threads/redfetch.92998/post-634938) as your default terminal.)
+On Windows the easiest way to install redfetch is to [download](https://www.redguides.com/community/resources/redfetch.3177/download) and run [`redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download). (optional: If you care how it looks, follow [this guide](https://www.redguides.com/community/threads/redfetch.92998/post-634938) to set [Windows Terminal](https://www.redguides.com/community/threads/redfetch.92998/post-634938) as your default terminal.)
 
 <details>
 <summary>Python / Linux</summary>

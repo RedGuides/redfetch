@@ -483,6 +483,7 @@ class Redfetch(App):
 
     def handle_input_update(self, input_id: str, input_value: str):
         if input_id == "dl_path_input":
+            # Download folder is created if it doesn't exist, no pre-validation needed
             try:
                 config.update_setting(['DOWNLOAD_FOLDER'], input_value, env=self.current_env)
                 self.download_folder = input_value
@@ -491,22 +492,23 @@ class Redfetch(App):
             except ValidationError as e:
                 self.notify(f"Invalid Download Folder: {e}", severity="error")
         elif input_id == "eq_path_input":
-            try:
-                config.update_setting(['EQPATH'], input_value, env=self.current_env)
-                self.eq_path = input_value
-                self.notify("EverQuest folder updated" if input_value else "EverQuest folder cleared")
-            except ValidationError as e:
-                self.notify(f"Invalid EverQuest Path: {e}", severity="error")
-            
-            # Update EQ maps
-            eq_maps_select = self.query_one("#eq_maps", Select)
-            eq_maps_select.disabled = not bool(input_value)
-            if input_value:
-                current_value = eq_maps_select.value
-                self.update_eq_maps_settings(current_value)
+            # Validate EverQuest path contains eqgame.exe
+            if config.validate_eq_path(input_value):
+                try:
+                    config.update_setting(['EQPATH'], input_value, env=self.current_env)
+                    self.eq_path = input_value
+                    self.notify("EverQuest folder updated" if input_value else "EverQuest folder cleared")
+                    
+                    # Update EQ maps select widget state based on path validity
+                    eq_maps_select = self.query_one("#eq_maps", Select)
+                    eq_maps_select.disabled = not bool(input_value)
+                    eq_maps_select.value = self.get_current_eq_maps_value()
+                except ValidationError as e:
+                    self.notify(f"Invalid EverQuest Path: {e}", severity="error")
             else:
-                self.update_eq_maps_settings(None)
+                self.notify("Invalid EverQuest folder: eqgame.exe not found", severity="error")
         elif input_id == "vvmq_path_input":
+            # VVMQ folder is created if it doesn't exist, no pre-validation needed
             vvmq_id = utils.get_current_vvmq_id()
             if vvmq_id:
                 try:
