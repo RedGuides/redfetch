@@ -243,18 +243,3 @@ def write_env_to_file(new_env):
     # Write the updated content back to the .env file
     with open(env_file_path, 'w') as file:
         file.writelines(lines)
-
-def validate_eq_path(path: str | None) -> bool:
-    """
-    Validate that the given path contains eqgame.exe.
-    
-    Note: Download and VVMQ paths don't need validation as they are created 
-    automatically if they don't exist.
-    """
-    if not path:  # Allow empty path
-        return True
-        
-    normalized_path = os.path.normpath(path)
-    eqgame_path = os.path.join(normalized_path, 'eqgame.exe')
-    
-    return os.path.isfile(eqgame_path)

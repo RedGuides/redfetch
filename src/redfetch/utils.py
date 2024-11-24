@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlparse
 import subprocess
 import sys
+from pathlib import Path
 
 # Third-party
 import requests
@@ -435,3 +436,15 @@ def run_executable(folder_path: str, executable_name: str, args=None) -> bool:
         print(f"{executable_name} not found in the specified folder.")
         return False
 
+def validate_file_in_path(path: str | None, filename: str) -> bool:
+    """
+    Validate that the given path contains a specific file.
+    """
+    if not path:  # If path is empty/None
+        return False
+    
+    try:
+        file_path = Path(path) / filename
+        return file_path.is_file()
+    except Exception:
+        return False

@@ -207,14 +207,14 @@ class Redfetch(App):
                         yield Button("MySEQ 📍", id="run_myseq", classes="executable", tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.")
                     
                     with ItemGrid(id="folders_grid"):
-                        yield Button("Downloads 🥏🐕", id="open_dl_folder", classes="folder", tooltip="Open redfetch downloads folder")
+                        yield Button("Downloads 📦", id="open_dl_folder", classes="folder", tooltip="Open redfetch downloads folder")
                         yield Button("Very Vanilla MQ 🍦", id="open_vvmq_folder", classes="folder", tooltip="Open MacroQuest folder")
                         yield Button("EverQuest 🐲", id="open_eq_folder", classes="folder", tooltip="Open EverQuest game folder")
                         yield Button("IonBC 💻", id="open_ionbc_folder", classes="folder", tooltip="Open IonBC folder")
                         yield Button("MySEQ 📍", id="open_myseq_folder", classes="folder", tooltip="Open MySEQ folder")
 
                     with ItemGrid(id="files_grid"):
-                        yield Button("settings.local.toml 🥏🐕", id="open_redfetch_config", classes="file", tooltip="Open the redfetch config file.")
+                        yield Button("settings.local.toml 📦", id="open_redfetch_config", classes="file", tooltip="Open the redfetch config file.")
                         yield Button("MacroQuest.ini 🍦", id="open_mq_config", classes="file", tooltip="Open VV MQ's config file.")
                         yield Button("eqclient.ini 🐲", id="open_eq_config", classes="file", tooltip="Open EverQuest's config file.")
                         yield Button("eqhost.txt 🐲", id="open_eq_host", classes="file", tooltip="Open EverQuest's eqhost.txt, which is useful for emulators.")
@@ -493,7 +493,7 @@ class Redfetch(App):
                 self.notify(f"Invalid Download Folder: {e}", severity="error")
         elif input_id == "eq_path_input":
             # Validate EverQuest path contains eqgame.exe
-            if config.validate_eq_path(input_value):
+            if config.validate_file_in_path(input_value, 'eqgame.exe'):
                 try:
                     config.update_setting(['EQPATH'], input_value, env=self.current_env)
                     self.eq_path = input_value
@@ -503,6 +503,8 @@ class Redfetch(App):
                     eq_maps_select = self.query_one("#eq_maps", Select)
                     eq_maps_select.disabled = not bool(input_value)
                     eq_maps_select.value = self.get_current_eq_maps_value()
+
+                    self.update_widget_states()
                 except ValidationError as e:
                     self.notify(f"Invalid EverQuest Path: {e}", severity="error")
             else:
@@ -774,26 +776,26 @@ class Redfetch(App):
         self.query_one("#select_eq_path", Button).disabled = self.is_updating or self.interface_running
         self.query_one("#select_vvmq_path", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
         self.query_one("#reset_downloads", Button).disabled = self.is_updating or self.interface_running
-        self.query_one("#run_macroquest", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
-        self.query_one("#run_meshupdater", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
-        self.query_one("#run_eqbcs", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
+        self.query_one("#run_macroquest", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_vvmq_path(), 'MacroQuest.exe')
+        self.query_one("#run_meshupdater", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_vvmq_path(), 'MeshUpdater.exe')
+        self.query_one("#run_eqbcs", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_vvmq_path(), 'EQBCS.exe')
         eq_path = config.settings.from_env(self.current_env).EQPATH
         eq_path_exists = bool(eq_path) and os.path.exists(eq_path)
-        self.query_one("#launch_everquest", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
-        self.query_one("#launch_everquest_client", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
+        self.query_one("#launch_everquest", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'LaunchPad.exe')
+        self.query_one("#launch_everquest_client", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'eqgame.exe')
         self.query_one("#open_eq_folder", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
         myseq_path = utils.get_myseq_path()
-        self.query_one("#run_myseq", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_myseq_path())
+        self.query_one("#run_myseq", Button).disabled = (self.is_updating or self.interface_running or not utils.validate_file_in_path(myseq_path, 'MySEQ.exe'))
         self.query_one("#open_myseq_folder", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_myseq_path())
-        self.query_one("#run_ionbc", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_ionbc_path())
+        self.query_one("#run_ionbc", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_ionbc_path(), 'IonBC.exe')
         self.query_one("#open_ionbc_folder", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_ionbc_path())
         self.query_one("#open_dl_folder", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
         self.query_one("#uninstall", Button).disabled = self.is_updating or self.interface_running
         self.query_one("#open_vvmq_folder", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
-        self.query_one("#open_redfetch_config", Button).disabled = self.is_updating or self.interface_running
-        self.query_one("#open_mq_config", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
-        self.query_one("#open_eq_config", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
-        self.query_one("#open_eq_host", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
+        self.query_one("#open_redfetch_config", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(config.config_dir, 'settings.local.toml')
+        self.query_one("#open_mq_config", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(os.path.join(utils.get_vvmq_path(), 'config'), 'MacroQuest.ini')
+        self.query_one("#open_eq_config", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'eqclient.ini')
+        self.query_one("#open_eq_host", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'eqhost.txt')
 
         # Selects!
         self.query_one("#server_type", Select).disabled = self.is_updating or self.interface_running
