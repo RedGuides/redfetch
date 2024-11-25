@@ -164,8 +164,12 @@ def handle_resource_download(cursor, headers, resource):
         if parent_resource_id is not None:
             parent_resource_id = str(parent_resource_id)
 
+        # Get the resource title if available
+        title = db.get_resource_title(cursor, resource_id)
+        resource_display = f"{title} (ID: {resource_id})" if title else f"resource {resource_id}"
+
         if local_version is None or local_version < remote_version:
-            print(f"Downloading updates for resource {resource_id}.")
+            print(f"Downloading updates for {resource_display}.")
             success = download.download_resource(
                 resource_id,
                 parent_category_id,
@@ -185,13 +189,13 @@ def handle_resource_download(cursor, headers, resource):
                 )
                 return 'downloaded'  # Indicate successful download
             else:
-                print(f"Error occurred while downloading resource {resource_id}.")
+                print(f"Error occurred while downloading {resource_display}.")
                 return 'error'  # Indicate download error
         else:
-            print(f"Skipping download for resource {resource_id} - no new updates since last download.")
+            print(f"Skipping download for {resource_display} - no new updates since last download.")
             return 'skipped'  # Indicate resource was up-to-date
     except KeyboardInterrupt:
-        print(f"\nDownload of resource {resource_id} cancelled by user.")
+        print(f"\nDownload of {resource_display} cancelled by user.")
         return 'cancelled'  # Indicate download was cancelled
 
 def synchronize_db_and_download(cursor, headers, resource_ids=None, worker=None):

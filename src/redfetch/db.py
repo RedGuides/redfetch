@@ -298,3 +298,24 @@ def list_dependencies(cursor):
     print("Dependencies:")
     for resource_id, title in dependencies:
         print(f"ID: {resource_id}, Title: {title}")
+
+def get_resource_title(cursor, resource_id):
+    """Get the title for a resource ID from either resources or dependencies table."""
+    # Try resources table first
+    cursor.execute("""
+        SELECT title FROM resources 
+        WHERE resource_id = ?
+    """, (resource_id,))
+    result = cursor.fetchone()
+    
+    if result:
+        return result[0]
+        
+    # If not found, try dependencies table
+    cursor.execute("""
+        SELECT title FROM dependencies 
+        WHERE dependency_resource_id = ?
+    """, (resource_id,))
+    result = cursor.fetchone()
+    
+    return result[0] if result else None
