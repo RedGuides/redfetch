@@ -372,18 +372,12 @@ def are_executables_running_in_folder(folder_path):
 
 def terminate_executables_in_folder(folder_path):
     """
-    Attempt to unload MacroQuest and terminate any running .exe files in the specified folder.
+    Attempt to terminate any running .exe files in the specified folder and then unload MacroQuest.
     Only works on Windows, does nothing on other platforms.
     """
     if sys.platform != 'win32':
         print("Terminating executables is only supported on Windows platforms.")
         return
-
-    # Unload MacroQuest first
-    try:
-        force_remote_unload()
-    except Exception as e:
-        print(f"Error unloading MacroQuest: {e}")
 
     try:
         # Get the absolute, normalized path of the folder
@@ -408,6 +402,13 @@ def terminate_executables_in_folder(folder_path):
                         print(f"Terminated process '{exe_path}' (PID {proc.pid}).")
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
                 print(f"Could not terminate process: {e}")
+
+        # Unload MacroQuest after terminating executables
+        try:
+            force_remote_unload()
+        except Exception as e:
+            print(f"Error unloading MacroQuest: {e}")
+
     except Exception as e:
         print(f"An error occurred while terminating processes: {e}")
 
