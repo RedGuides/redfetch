@@ -1167,7 +1167,7 @@ class Redfetch(App):
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
         # two spaces to make up for tcss padding of tabbedcontent and tabpane
-        self.title = "  📦 redfetch 🧙‍♂️"
+        self.title = "  redfetch"
         self.load_user_level()  # background task for welcome message
         self.check_mq_status_worker()
         # border titles

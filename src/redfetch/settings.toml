@@ -57,7 +57,7 @@ opt_in = false
 # TEST ENVIRONMENT SETTINGS
 # ========================================
 [TEST]
-THEME = "nord"
+THEME = "gruvbox"
 
 [TEST.PROTECTED_FILES_BY_RESOURCE]
 2218 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
@@ -96,7 +96,7 @@ opt_in = false
 # EMULATOR ENVIRONMENT SETTINGS
 # ========================================
 [EMU]
-THEME = "tokyo-night"
+THEME = "dracula"
 
 [EMU.PROTECTED_FILES_BY_RESOURCE]
 60 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]

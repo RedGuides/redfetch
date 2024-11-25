@@ -223,18 +223,6 @@ Label {
     height: 3;
 }
 
-#nevermq {
-    background: $error 15%;
-    border-top: tall $error-lighten-1 15%;
-    border-bottom: tall $error-darken-1 15%;
-    color: $text-muted;
-    width: 17;
-}
-#nevermq:hover {
-    background: $error-darken-1 15%;
-    border-top: tall $error 15%;
-}
-
 #shortcuts Button.executable {
     background: $error-darken-2;
     border-top: tall $error-lighten-1 35%;
@@ -263,13 +251,6 @@ Label {
 }
 #shortcuts Button.file:hover {
     background: $primary-background-darken-1;
-}
-/* The last in the row needs to span the width of the row */
-#run_myseq {
-    column-span: 3;
-}
-#open_myseq_folder {
-    column-span: 2;
 }
 
 /* Account Grid */
