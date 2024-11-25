@@ -103,7 +103,6 @@ class RedfetchCommands(Provider):
 
 # the main app class
 class Redfetch(App):
-    DEFAULT_THEME = "textual-dark"
     interface_running = False
     is_updating = reactive(False)
     mq_down = reactive(None)
@@ -387,7 +386,7 @@ class Redfetch(App):
             eq_maps_select.value = self.get_current_eq_maps_value()
             eq_maps_select.disabled = not bool(self.eq_path)
 
-            new_theme = config.settings.get('THEME', self.DEFAULT_THEME)
+            new_theme = config.settings.from_env(new_env).get('THEME', 'textual-dark')
             self.theme = new_theme
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -449,7 +448,7 @@ class Redfetch(App):
 
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
-        current_theme = config.settings.get('THEME', self.DEFAULT_THEME)
+        current_theme = config.settings.get('THEME', 'textual-dark')
         if theme != current_theme:
             try:
                 config.update_setting(['THEME'], theme)
@@ -698,13 +697,20 @@ class Redfetch(App):
             self.notify("IonBC path not found.", severity="error")
 
     def handle_uninstall(self) -> None:
-        from . import meta
-        try:
-            with self.suspend():
-                meta.uninstall()
-        except SystemExit:
-            print("bye bye!")
-            self.exit()
+        """Handle the uninstall button press."""
+        def handle_uninstall_response(response: str) -> None:
+            if response == UninstallScreen.RESPONSE_YES:
+                from . import meta
+                try:
+                    with self.suspend():
+                        meta.uninstall()
+                except SystemExit:
+                    print("bye bye!")
+                    self.exit()
+            else:
+                self.notify(f"{self.username} enjoys clicking things for no reason.")
+
+        self.push_screen(UninstallScreen(), handle_uninstall_response)
 
     def run_myseq_executable(self) -> None:
         """Run the MySEQ executable if available."""
@@ -735,7 +741,7 @@ class Redfetch(App):
             update_watched_button.tooltip = "Please wait while we check MQ status."
             update_watched_button.disabled = True
         elif self.mq_down:
-            update_watched_button.label = "MQ Down - Patch Day 💔"
+            update_watched_button.label = "MQ Down: Patch Day 💔"
             update_watched_button.tooltip = (
                 "Very Vanilla MQ is down for patch day, check redguides.com for current status."
             )
@@ -1126,17 +1132,17 @@ class Redfetch(App):
     
     @work(thread=True)
     def load_user_level(self):
-        username = api.get_username()
+        self.username = api.get_username()
         if api.is_kiss_downloadable(api.get_api_headers()):
-            greeting = f"[italic]Hail, [bold]{username}![/bold][/italic]"
+            greeting = f"[italic]Hail, [bold]{self.username}![/bold][/italic]"
             greetingacct = (
-                f"[italic][bold]{username}, thank you for being level 2[/bold][/italic] 🫂"
+                f"[italic][bold]{self.username}, thank you for being level 2[/bold][/italic] 🫂"
             )
             self.call_from_thread(self.show_ding_button, False)
         else:
-            greeting = f"Hey {username}, you're level 1 😞"
+            greeting = f"Hey {self.username}, you're level 1 😞"
             greetingacct = (
-                f"Hey {username}, you're level 1 😞 some resources won't be downloaded."
+                f"Hey {self.username}, you're level 1 😞 some resources won't be downloaded."
             )
             self.call_from_thread(self.show_ding_button, True)
         # Update the label on the main thread
@@ -1152,7 +1158,7 @@ class Redfetch(App):
         self.themes = cycle(self.available_themes.keys())
         
         # Load saved theme preference
-        saved_theme = config.settings.get('THEME', self.DEFAULT_THEME)
+        saved_theme = config.settings.get('THEME', 'textual-dark')
         self.theme = saved_theme  # Use internal attribute to bypass watcher
         
         # Initialize the Log widget with some content
@@ -1266,6 +1272,27 @@ class ProcessTerminationScreen(ModalScreen):
             self.dismiss(self.RESPONSE_NEVER)
         else:  # "noterminate"
             self.dismiss(self.RESPONSE_SKIP)
+
+class UninstallScreen(ModalScreen):
+    """A modal screen to confirm uninstallation."""
+
+    RESPONSE_YES = "yes"
+    RESPONSE_NO = "no"
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label("I noticed you pressed the uninstall button.", id="uninstall_message"),
+            Label("Was that on purpose?", id="confirm_uninstall"),
+            Button("Yes, uninstall redfetch", variant="error", id="yes_uninstall"),
+            Button("No, I often click things for no reason.", variant="default", id="no_uninstall"),
+            id="uninstall_dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "yes_uninstall":
+            self.dismiss(self.RESPONSE_YES)
+        else:  # "no_uninstall"
+            self.dismiss(self.RESPONSE_NO)
 
 def run_textual_ui():
     app = Redfetch()

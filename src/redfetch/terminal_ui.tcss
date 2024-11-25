@@ -428,3 +428,54 @@ ProcessTerminationScreen Button {
     background: $error-darken-1 15%;
     border-top: tall $error 15%;
 }
+UninstallScreen {
+    align: center top;
+    background: $background-darken-2 70%; 
+}
+
+UninstallScreen Button {
+    width: 100%;
+}
+
+#uninstall_dialog {
+    grid-size: 2;
+    grid-gutter: 0 1;
+    margin: 10 1;
+    padding: 0 1;
+    width: 50;
+    height: 15;
+    border: thick $error-darken-3;
+    background: $surface;
+}
+
+#uninstall_message {
+    color: $text-error;
+    column-span: 2;
+    height: 40;
+    width: 100%;
+    content-align: center middle;
+}
+
+#confirm_uninstall {
+    color: $text-error;
+    column-span: 2;
+    width: 100%;
+    content-align: center middle;
+}
+
+#yes_uninstall {
+    background: $error 65%;
+    border-top: tall $error-lighten-1 65%;
+    border-bottom: tall $error-darken-1 35%;
+    color: $text-muted;
+}
+
+#yes_uninstall:hover {
+    background: $error-darken-1 35%;
+    border-top: tall $error 35%;
+}
+
+#no_uninstall:hover {
+    background: $surface-darken-1;
+    border-top: tall $surface;
+}
