@@ -136,6 +136,13 @@ class Redfetch(App):
                         yield Button("Checking if Very Vanilla MQ is up. 🍦", id="update_watched", variant="default", tooltip="is MQ down?")
                     yield Button("Update Single Resource", id="update_resource_id", variant="default", disabled=True, tooltip="Update a single resource by its ID or URL.")
                     yield Input(placeholder=f"{input_verb} resource URL or ID", id="resource_id_input", tooltip="Update a single resource by its ID or URL.")
+                    yield Select[str](
+                        [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
+                        id="server_type_fetch",
+                        value=self.current_env,  # Use the reactive attribute
+                        allow_blank = False,
+                        tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
+                    )
                     yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="primary", tooltip="Access an interface for this script on the website.")
                     yield Button("Copy Log", id="copy_log", variant="default", tooltip="Copy the entire log to your clipboard")
                     yield PrintCapturingLog(id="fetch_log")
@@ -343,7 +350,7 @@ class Redfetch(App):
             if new_value != self.get_current_eq_maps_value():
                 self.update_eq_maps_settings(new_value)
 
-        if event.select.id == "server_type":
+        if event.select.id in ["server_type", "server_type_fetch"]:
             new_env = event.value
             if self.current_env != new_env:
                 self.current_env = new_env
@@ -798,7 +805,18 @@ class Redfetch(App):
         self.query_one("#open_eq_host", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'eqhost.txt')
 
         # Selects!
-        self.query_one("#server_type", Select).disabled = self.is_updating or self.interface_running
+        server_type = self.query_one("#server_type", Select)
+        server_type_fetch = self.query_one("#server_type_fetch", Select)
+        
+        # Set disabled state for both selects
+        server_type.disabled = self.is_updating or self.interface_running
+        server_type_fetch.disabled = self.is_updating or self.interface_running
+        
+        # Keep both server type selects in sync with current_env
+        if server_type.value != self.current_env:
+            server_type.value = self.current_env
+        if server_type_fetch.value != self.current_env:
+            server_type_fetch.value = self.current_env
         eq_maps_select = self.query_one("#eq_maps", Select)
         eq_maps_select.disabled = self.is_updating or self.interface_running or not bool(self.eq_path)
         
@@ -1147,7 +1165,7 @@ class Redfetch(App):
         self.load_user_level()  # background task for welcome message
         self.check_mq_status_worker()
         # border titles
-        self.query_one("#server_type").border_title = "Select server type"
+        self.query_one("#server_type").border_title = "Server type"
         self.query_one("#inputs_grid").border_title = "Directories"
         self.query_one("#settings_grid").border_title = "Settings"
         self.query_one("#special_resources_grid").border_title = "Special Resources"
