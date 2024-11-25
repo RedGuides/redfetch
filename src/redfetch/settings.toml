@@ -17,6 +17,9 @@ opt_in = false
 # ========================================
 # LIVE ENVIRONMENT SETTINGS
 # ========================================
+[LIVE]
+THEME = "textual-dark"
+
 [LIVE.PROTECTED_FILES_BY_RESOURCE]
 1974 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
 
@@ -53,6 +56,8 @@ opt_in = false
 # ========================================
 # TEST ENVIRONMENT SETTINGS
 # ========================================
+[TEST]
+THEME = "nord"
 
 [TEST.PROTECTED_FILES_BY_RESOURCE]
 2218 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
@@ -90,6 +95,8 @@ opt_in = false
 # ========================================
 # EMULATOR ENVIRONMENT SETTINGS
 # ========================================
+[EMU]
+THEME = "tokyo-night"
 
 [EMU.PROTECTED_FILES_BY_RESOURCE]
 60 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
