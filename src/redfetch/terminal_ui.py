@@ -500,7 +500,7 @@ class Redfetch(App):
                 self.notify(f"Invalid Download Folder: {e}", severity="error")
         elif input_id == "eq_path_input":
             # Validate EverQuest path contains eqgame.exe
-            if config.validate_file_in_path(input_value, 'eqgame.exe'):
+            if utils.validate_file_in_path(input_value, 'eqgame.exe'):
                 try:
                     config.update_setting(['EQPATH'], input_value, env=self.current_env)
                     self.eq_path = input_value
