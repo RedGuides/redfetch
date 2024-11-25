@@ -197,7 +197,8 @@ def update_setting(setting_path, setting_value, env=None):
         current_data = current_data[key]
 
     # Debugging output
-    # print(f"Setting path: {'.'.join(setting_path)}")
+    config_key = '.'.join(setting_path)
+    print(f"Updating config key: {config_key}")
     print(f"Old Value: {current_data.get(setting_path[-1], 'Not set')}")
 
     # Convert 'true'/'false' strings to Boolean values
@@ -208,9 +209,9 @@ def update_setting(setting_path, setting_value, env=None):
     current_data[setting_path[-1]] = setting_value
 
     # Update the environment using from_env to target the correct environment
-    settings.from_env(env).set('.'.join(setting_path), setting_value)
+    settings.from_env(env).set(config_key, setting_value)
     # Update general settings object to keep it in sync
-    settings.set('.'.join(setting_path), setting_value)
+    settings.set(config_key, setting_value)
 
     print(f"New Value: {setting_value}")
 
