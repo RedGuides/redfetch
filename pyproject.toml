@@ -65,5 +65,5 @@ packages = ["src/redfetch"]
 
 [tool.hatch.envs.dev]
 dependencies = [
-  "textual-dev==1.6.1"
+  "textual-dev>=1.7.0"
 ]
