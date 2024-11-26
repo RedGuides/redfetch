@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2024-11-26
+
+### Added
+- TUI: Added server-select to Fetch tab.
+- TUI: Added a unique default theme for each server type.
+
+### Changed
+- Resource names (as well as IDs) are now displayed when updating.
+- TUI: EverQuest directory validation
+- TUI: Check for presence of files for shortcuts
+- TUI: The setting being changed will now appear in the log.
+- TUI: Removed some emojis and colors that were especially ugly in Win10's conhost (cmd prompt).
+- TUI: Uninstall confirmation.
+
+### Fixed
+- MQ will now terminate prior to unload. 
+
 ## [0.5.0] - 2024-11-22
 
 ### Added

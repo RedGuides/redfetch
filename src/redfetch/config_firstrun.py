@@ -248,7 +248,7 @@ def first_run_setup():
     while any(word in response for word in ["what", "huh", "idk"]) or response == "":
         console.print("\nThe wizards seem annoyed and speak plainly, [italic][bold cyan]\"We're talking about multiboxing EQ. Wanna do that?\"[/italic][/bold cyan]")
         response = CustomPrompt.ask().lower()
-    
+
     if any(word in response for word in ["ready", "yes", "sure", "yup", "aye", "ok", "okay"]) or response == "y":
         console.print("\nThe wizards /nod and beckon you to enter.")
         console.print("\n[bold cyan][italic]\"Where shall we lay the hall of settings? Thou may wish to tinker with its keys in days yet to come.\"\n[italic][/bold cyan]")
@@ -256,8 +256,22 @@ def first_run_setup():
         console.print("\n[bold red]The wizards point to the sky with their longest finger ... \"BEGONE!\"[/bold red]")
         Prompt.ask("\nPress Enter to continue")
         sys.exit(1)
+    elif any(phrase in response for phrase in ["xyzzy", "plugh", "hello sailor", "mailbox", "east", "leave house", "grue"]):
+        console.print(
+            "\nAs you utter the ancient words, the wizards eyes widen."
+            "\n[bold cyan][italic]\"Ah, a fellow traveler of twisty passages!\"[/italic][/bold cyan]"
+        )
+        console.print(
+            "\nWith a grand, unified, sweeping gesture, the wizards reveal a hidden passage into the castle."
+            "\n[bold cyan][italic]\"Step forth, brave soul, and enter many lives, each fraught with peril and wonder alike.\"[/italic][/bold cyan]"
+            "\nThey look at your empty hands and add, [bold cyan][italic]\"You'll need this.\"[/italic][/bold cyan]"
+            "\nA brass lantern is summoned into your possession."
+        )
+        console.print(
+            "\n[bold cyan][italic]\"Where shall we record your preferences?\"[/italic][/bold cyan]"
+        )
     else:
-        console.print("\n[bold red]The wizards shake their heads sadly, \"Your riddle eludes us.\"[/bold red]")
+        console.print("\n[bold red]The wizards shake their heads sadly, \"Your riddle eludes us. Perhaps you should go east.\"[/bold red]")
         Prompt.ask("\nPress Enter to continue")
         sys.exit(1)
     
