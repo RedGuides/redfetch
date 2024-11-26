@@ -421,7 +421,7 @@ UninstallScreen Button {
 #uninstall_dialog {
     grid-size: 2;
     grid-gutter: 0 1;
-    margin: 10 1;
+    margin: 4 1;
     padding: 0 1;
     width: 50;
     height: 15;
