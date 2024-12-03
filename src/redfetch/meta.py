@@ -56,10 +56,6 @@ def detect_installation_method():
         if os.getenv('PIPENV_ACTIVE'):
             return 'pipenv'
             
-        # Check for Conda
-        if os.getenv('CONDA_PREFIX'):
-            return 'conda'
-            
         # Check for pipx
         if 'pipx' in str(package_location):
             return 'pipx'
@@ -73,20 +69,39 @@ def get_update_command():
     """Get the appropriate update command based on installation method."""
     method = detect_installation_method()
     
-    # Add TestPyPI index URL to pip commands if using TestPyPI
+    # Add TestPyPI index URL to commands if using TestPyPI
     is_test_pypi = "test.pypi.org" in PYPI_URL
-    pip_args = [
-        "--index-url", "https://test.pypi.org/simple/",
-        "--extra-index-url", "https://pypi.org/simple/"
-    ] if is_test_pypi else []
 
     commands = {
-        'pip': [sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'] + pip_args,
-        'poetry': ['poetry', 'source', 'add', '--priority', 'supplemental', 'testpypi', 'https://test.pypi.org/simple/'] if is_test_pypi else ['poetry', 'update', 'redfetch'],
-        'pipenv': ['pipenv', 'install', 'redfetch', '--index', 'https://test.pypi.org/simple'] if is_test_pypi else ['pipenv', 'update', 'redfetch'],
-        'conda': ['conda', 'update', 'redfetch', '-c', 'conda-forge', '-y'],
-        'pipx': ['pipx', 'install', '--index-url', 'https://test.pypi.org/simple', 'redfetch'] if is_test_pypi else ['pipx', 'upgrade', 'redfetch'],
-        'pyapp': None
+        'pip': [
+            sys.executable, '-m', 'pip', 'install', '--upgrade',
+            '--index-url', 'https://test.pypi.org/simple/',
+            '--extra-index-url', 'https://pypi.org/simple/',
+            'redfetch'
+        ] if is_test_pypi else [
+            sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'
+        ],
+        'poetry': (
+            [
+                ['poetry', 'source', 'add', '--priority', 'supplemental', 'testpypi', 'https://test.pypi.org/simple/'],
+                ['poetry', 'update', 'redfetch', '--source', 'testpypi']
+            ] if is_test_pypi else [
+                ['poetry', 'update', 'redfetch']
+            ]
+        ),
+        'pipenv': [
+            'pipenv', 'install', 'redfetch', '--index', 'https://test.pypi.org/simple'
+        ] if is_test_pypi else [
+            'pipenv', 'update', 'redfetch'
+        ],
+        'pipx': (
+            [
+                'pipx', 'upgrade', 'redfetch', '--pip-args', '--index-url https://test.pypi.org/simple'
+            ] if is_test_pypi else [
+                'pipx', 'upgrade', 'redfetch'
+            ]
+        ),
+        'pyapp': None  # Handle separately with self_update()
     }
     
     return commands.get(method)
@@ -100,7 +115,7 @@ def check_for_update():
         if version.parse(latest_version) > version.parse(current_version):
             version_info = Panel(
                 Text.assemble(
-                    ("An update for redfetch is available! \n\n", "bold green"),
+                    ("An update for redfetch is available! 🚡\n\n", "bold green"),
                     ("Local version: ", "dim"),
                     (f"{current_version}\n", "cyan"),
                     ("Latest version: ", "dim"),
