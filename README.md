@@ -48,7 +48,7 @@ To add more MacroQuest scripts, "watch" them on RedGuides, and then run the *Eas
 
 ![a screenshot showing the watch button on a resource page](https://www.redguides.com/images/watch.png)
 
-If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the local settings file.
+If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the local settings file, as shown in settings section.
 
 ## Alternative Interfaces
 
@@ -99,7 +99,7 @@ All settings are prefixed with the environment,
 - `[EMU]` - EverQuest Emulator
 
 ### Adding a special resource
-To add a "special resource" (a non-MQ resource that you want to keep updated), edit it in to `settings.local.toml`. You'll need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory. Example:
+To add a "special resource" (a non-MQ resource that you want to keep updated), open `settings.local.toml` and add an entry. You'll need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory. Example:
 
 ```toml
 [LIVE.SPECIAL_RESOURCES.153]
@@ -129,7 +129,7 @@ redfetch.exe --update-setting SPECIAL_RESOURCES.1974.opt_in false LIVE
 redfetch.exe --update-setting SPECIAL_RESOURCES.60.opt_in false EMU
 redfetch.exe --update-setting SPECIAL_RESOURCES.2218.opt_in false TEST
 ```
-or edit the `settings.local.toml` file directly:
+Alternately, you can add an entry to `settings.local.toml`:
 ```toml
 [LIVE.SPECIAL_RESOURCES.1974]
 opt_in = false
