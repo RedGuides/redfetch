@@ -1,6 +1,6 @@
 ![six wizards levitating a package, the word redfetch underneath](https://www.redguides.com/images/redfetchlogo.png)
 
-redfetch is for updating EverQuest multiboxing software and scripts that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". 
+redfetch is for updating EverQuest multiboxing software and scripts that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". It's also open source, how nice.
 
 ## Installation (Windows)
 
@@ -9,11 +9,21 @@ On Windows the easiest way to install redfetch is to [download](https://www.redg
 <details>
 <summary>Python / Linux</summary>
 
-If you have a recent version of Python, you can install redfetch with pip,
+### Alternate install for Linux or *cool* Windows users
 
+install a recent version of [Python](https://www.python.org/downloads/) and type a few commands in your terminal:
+
+First, install pipx
 ```bash
-pip install redfetch
+python -m pip install --user pipx
+python -m pipx ensurepath
 ```
+Then install redfetch
+```bash
+pipx install redfetch
+```
+
+When you open a new terminal window, you'll be able to run redfetch by typing `redfetch` from the command line. 
 
 </details>
 
@@ -38,7 +48,7 @@ To add more MacroQuest scripts, "watch" them on RedGuides, and then run the *Eas
 
 ![a screenshot showing the watch button on a resource page](https://www.redguides.com/images/watch.png)
 
-If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the local settings file.
+If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the local settings file, as shown in settings section.
 
 ## Alternative Interfaces
 
@@ -89,7 +99,7 @@ All settings are prefixed with the environment,
 - `[EMU]` - EverQuest Emulator
 
 ### Adding a special resource
-Here's how to add a non-MQ resource. You need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory.
+To add a "special resource" (a non-MQ resource that you want to keep updated), open `settings.local.toml` and add an entry. You'll need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory. Example:
 
 ```toml
 [LIVE.SPECIAL_RESOURCES.153]
@@ -119,7 +129,7 @@ redfetch.exe --update-setting SPECIAL_RESOURCES.1974.opt_in false LIVE
 redfetch.exe --update-setting SPECIAL_RESOURCES.60.opt_in false EMU
 redfetch.exe --update-setting SPECIAL_RESOURCES.2218.opt_in false TEST
 ```
-or edit the `settings.local.toml` file directly:
+Alternately, you can add an entry to `settings.local.toml`:
 ```toml
 [LIVE.SPECIAL_RESOURCES.1974]
 opt_in = false

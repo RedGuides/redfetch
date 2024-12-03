@@ -233,7 +233,7 @@ def first_run_setup():
     greeting_panel = Panel.fit(
         Text.from_markup(
             f"{castle_gate}\n"
-            "[bright_black]Six wizards, unnaturally identical in their red robes, meet you at the gate. They /wave, and speak in chorus:[/]\n"
+            "[bright_black]Six wizards, unnaturally identical in their red robes, meet you at the gate. They /wave and /say in chorus:[/]\n"
             "[bold cyan][italic]\"Hail, and well met, wayfarer. Art thou [/italic][bright_white]\\[ready][/bright_white][italic] to cleave thy soul manifold, and become thyself a great company?\"[/italic][/bold cyan]",
             justify="center"
         ),

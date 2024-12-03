@@ -3,6 +3,7 @@ import os
 import platform
 import subprocess
 import sys
+from pathlib import Path
 
 # Third-party
 import requests
@@ -18,7 +19,8 @@ from rich.prompt import Confirm
 # Local
 from redfetch.__about__ import __version__
 
-PYPI_URL = "https://pypi.org/pypi/redfetch/json"
+# environment variable to determine which PyPI URL to use. just fyi test is https://test.pypi.org/pypi/redfetch/json
+PYPI_URL = os.getenv("REDFETCH_PYPI_URL", "https://pypi.org/pypi/redfetch/json")
 
 console = Console()
 
@@ -34,6 +36,52 @@ def fetch_latest_version_from_pypi():
 def get_executable_path():
     executable_path = os.environ.get('PYAPP')
     return executable_path
+
+def detect_installation_method():
+    """Detect how the package was installed."""
+    try:
+        # Check for PYAPP first
+        if os.getenv('PYAPP'):
+            return 'pyapp'
+                
+        # Get the package location
+        package_location = Path(__file__).parent.absolute()
+        
+        # Check for pipx
+        if 'pipx' in str(package_location):
+            return 'pipx'
+                
+        # Default to pip
+        return 'pip'
+    except Exception:
+        return 'pip'
+
+def get_update_command():
+    """Get the appropriate update command based on installation method."""
+    method = detect_installation_method()
+    
+    # Add TestPyPI index URL to commands if using TestPyPI
+    is_test_pypi = "test.pypi.org" in PYPI_URL
+
+    commands = {
+        'pip': [
+            sys.executable, '-m', 'pip', 'install', '--upgrade',
+            '--index-url', 'https://test.pypi.org/simple/',
+            '--extra-index-url', 'https://pypi.org/simple/',
+            'redfetch'
+        ] if is_test_pypi else [
+            sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'
+        ],
+        'pipx': [
+            'pipx', 'upgrade', 'redfetch', '--pip-args',
+            '--index-url https://test.pypi.org/simple'
+        ] if is_test_pypi else [
+            'pipx', 'upgrade', 'redfetch'
+        ],
+        'pyapp': None  # Handle separately with self_update()
+    }
+    
+    return commands.get(method)
 
 def check_for_update():
     current_version = get_current_version()
@@ -55,32 +103,31 @@ def check_for_update():
             )
             console.print(version_info)
             
+            # Handle PYAPP separately
             if os.getenv('PYAPP'):
                 if Confirm.ask("Would you like to update now?"):
                     return self_update()
                 else:
                     console.print("[yellow]Update skipped. You can manually update later.[/yellow]")
+                return False
+            
+            # Get the appropriate update command
+            update_command = get_update_command()
+            if not update_command:
+                console.print("[red]Could not determine update method.[/red]")
+                return False
+                
+            command_panel = Panel(
+                Text(" ".join(update_command), style="bold cyan"),
+                title="Update Command",
+                expand=False
+            )
+            console.print(command_panel)
+            
+            if Confirm.ask("Would you like to run this command to update?"):
+                return pip_update_redfetch(update_command, latest_version)
             else:
-                update_command = [
-                    sys.executable, 
-                    '-m', 
-                    'pip', 
-                    'install', 
-                    '--upgrade', 
-                    'redfetch'
-                ]
-                
-                command_panel = Panel(
-                    Text(" ".join(update_command), style="bold cyan"),
-                    title="Update Command",
-                    expand=False
-                )
-                console.print(command_panel)
-                
-                if Confirm.ask("Would you like to run this command to update?"):
-                    return pip_update_redfetch(update_command, latest_version)
-                else:
-                    console.print("[yellow]Update skipped. You can manually update later.[/yellow]")
+                console.print("[yellow]Update skipped. You can manually update later.[/yellow]")
     except Exception as e:
         console.print(f"[bold red]Error checking for updates:[/bold red] {e}")
     return False
