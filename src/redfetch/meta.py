@@ -3,6 +3,8 @@ import os
 import platform
 import subprocess
 import sys
+import site
+from pathlib import Path
 
 # Third-party
 import requests
@@ -18,7 +20,8 @@ from rich.prompt import Confirm
 # Local
 from redfetch.__about__ import __version__
 
-PYPI_URL = "https://pypi.org/pypi/redfetch/json"
+# environment variable to determine which PyPI URL to use. just fyi test is https://test.pypi.org/pypi/redfetch/json
+PYPI_URL = os.getenv("REDFETCH_PYPI_URL", "https://pypi.org/pypi/redfetch/json")
 
 console = Console()
 
@@ -35,6 +38,59 @@ def get_executable_path():
     executable_path = os.environ.get('PYAPP')
     return executable_path
 
+def detect_installation_method():
+    """Detect how the package was installed."""
+    try:
+        # Check for PYAPP first (your existing method)
+        if os.getenv('PYAPP'):
+            return 'pyapp'
+            
+        # Get the package location
+        package_location = Path(__file__).parent.absolute()
+        
+        # Check for Poetry
+        if any(Path(site.getsitepackages()).glob('poetry.lock')):
+            return 'poetry'
+            
+        # Check for Pipenv
+        if os.getenv('PIPENV_ACTIVE'):
+            return 'pipenv'
+            
+        # Check for Conda
+        if os.getenv('CONDA_PREFIX'):
+            return 'conda'
+            
+        # Check for pipx
+        if 'pipx' in str(package_location):
+            return 'pipx'
+            
+        # Default to pip
+        return 'pip'
+    except Exception:
+        return 'pip'
+
+def get_update_command():
+    """Get the appropriate update command based on installation method."""
+    method = detect_installation_method()
+    
+    # Add TestPyPI index URL to pip commands if using TestPyPI
+    is_test_pypi = "test.pypi.org" in PYPI_URL
+    pip_args = [
+        "--index-url", "https://test.pypi.org/simple/",
+        "--extra-index-url", "https://pypi.org/simple/"
+    ] if is_test_pypi else []
+
+    commands = {
+        'pip': [sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'] + pip_args,
+        'poetry': ['poetry', 'source', 'add', '--priority', 'supplemental', 'testpypi', 'https://test.pypi.org/simple/'] if is_test_pypi else ['poetry', 'update', 'redfetch'],
+        'pipenv': ['pipenv', 'install', 'redfetch', '--index', 'https://test.pypi.org/simple'] if is_test_pypi else ['pipenv', 'update', 'redfetch'],
+        'conda': ['conda', 'update', 'redfetch', '-c', 'conda-forge', '-y'],
+        'pipx': ['pipx', 'install', '--index-url', 'https://test.pypi.org/simple', 'redfetch'] if is_test_pypi else ['pipx', 'upgrade', 'redfetch'],
+        'pyapp': None
+    }
+    
+    return commands.get(method)
+
 def check_for_update():
     current_version = get_current_version()
     
@@ -44,7 +100,7 @@ def check_for_update():
         if version.parse(latest_version) > version.parse(current_version):
             version_info = Panel(
                 Text.assemble(
-                    ("An update for redfetch is available! 🚡\n\n", "bold green"),
+                    ("An update for redfetch is available! \n\n", "bold green"),
                     ("Local version: ", "dim"),
                     (f"{current_version}\n", "cyan"),
                     ("Latest version: ", "dim"),
@@ -55,32 +111,31 @@ def check_for_update():
             )
             console.print(version_info)
             
+            # Handle PYAPP separately
             if os.getenv('PYAPP'):
                 if Confirm.ask("Would you like to update now?"):
                     return self_update()
                 else:
                     console.print("[yellow]Update skipped. You can manually update later.[/yellow]")
+                return False
+            
+            # Get the appropriate update command
+            update_command = get_update_command()
+            if not update_command:
+                console.print("[red]Could not determine update method.[/red]")
+                return False
+                
+            command_panel = Panel(
+                Text(" ".join(update_command), style="bold cyan"),
+                title="Update Command",
+                expand=False
+            )
+            console.print(command_panel)
+            
+            if Confirm.ask("Would you like to run this command to update?"):
+                return pip_update_redfetch(update_command, latest_version)
             else:
-                update_command = [
-                    sys.executable, 
-                    '-m', 
-                    'pip', 
-                    'install', 
-                    '--upgrade', 
-                    'redfetch'
-                ]
-                
-                command_panel = Panel(
-                    Text(" ".join(update_command), style="bold cyan"),
-                    title="Update Command",
-                    expand=False
-                )
-                console.print(command_panel)
-                
-                if Confirm.ask("Would you like to run this command to update?"):
-                    return pip_update_redfetch(update_command, latest_version)
-                else:
-                    console.print("[yellow]Update skipped. You can manually update later.[/yellow]")
+                console.print("[yellow]Update skipped. You can manually update later.[/yellow]")
     except Exception as e:
         console.print(f"[bold red]Error checking for updates:[/bold red] {e}")
     return False

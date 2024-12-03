@@ -1,6 +1,6 @@
 ![six wizards levitating a package, the word redfetch underneath](https://www.redguides.com/images/redfetchlogo.png)
 
-redfetch is for updating EverQuest multiboxing software and scripts that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". 
+redfetch is for updating EverQuest multiboxing software and scripts that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". It's also open source, how nice.
 
 ## Installation (Windows)
 
@@ -89,7 +89,7 @@ All settings are prefixed with the environment,
 - `[EMU]` - EverQuest Emulator
 
 ### Adding a special resource
-Here's how to add a non-MQ resource. You need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory.
+To add a "special resource" (a non-MQ resource that you want to keep updated), edit it in to `settings.local.toml`. You'll need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory. Example:
 
 ```toml
 [LIVE.SPECIAL_RESOURCES.153]
