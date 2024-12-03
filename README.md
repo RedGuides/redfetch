@@ -9,18 +9,21 @@ On Windows the easiest way to install redfetch is to [download](https://www.redg
 <details>
 <summary>Python / Linux</summary>
 
-Whether you're on linux or Windows, all you need is a recent version of [Python](https://www.python.org/downloads/) and [pipx](https://pipx.pypa.io/stable/) to install redfetch:
+### Alternate install for Linux or *cool* Windows users
 
+install a recent version of [Python](https://www.python.org/downloads/) and type a few commands in your terminal:
+
+First, install pipx
 ```bash
-# First, install pipx
 python -m pip install --user pipx
 python -m pipx ensurepath
-
-# Then install redfetch
+```
+Then install redfetch
+```bash
 pipx install redfetch
 ```
 
-When you open a new terminal window, you'll be able to run redfetch by typing `redfetch` from the command line.
+When you open a new terminal window, you'll be able to run redfetch by typing `redfetch` from the command line. 
 
 </details>
 
