@@ -3,7 +3,6 @@ import os
 import platform
 import subprocess
 import sys
-import site
 from pathlib import Path
 
 # Third-party
@@ -41,25 +40,17 @@ def get_executable_path():
 def detect_installation_method():
     """Detect how the package was installed."""
     try:
-        # Check for PYAPP first (your existing method)
+        # Check for PYAPP first
         if os.getenv('PYAPP'):
             return 'pyapp'
-            
+                
         # Get the package location
         package_location = Path(__file__).parent.absolute()
         
-        # Check for Poetry
-        if any(Path(site.getsitepackages()).glob('poetry.lock')):
-            return 'poetry'
-            
-        # Check for Pipenv
-        if os.getenv('PIPENV_ACTIVE'):
-            return 'pipenv'
-            
         # Check for pipx
         if 'pipx' in str(package_location):
             return 'pipx'
-            
+                
         # Default to pip
         return 'pip'
     except Exception:
@@ -81,26 +72,12 @@ def get_update_command():
         ] if is_test_pypi else [
             sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'
         ],
-        'poetry': (
-            [
-                ['poetry', 'source', 'add', '--priority', 'supplemental', 'testpypi', 'https://test.pypi.org/simple/'],
-                ['poetry', 'update', 'redfetch', '--source', 'testpypi']
-            ] if is_test_pypi else [
-                ['poetry', 'update', 'redfetch']
-            ]
-        ),
-        'pipenv': [
-            'pipenv', 'install', 'redfetch', '--index', 'https://test.pypi.org/simple'
+        'pipx': [
+            'pipx', 'upgrade', 'redfetch', '--pip-args',
+            '--index-url https://test.pypi.org/simple'
         ] if is_test_pypi else [
-            'pipenv', 'update', 'redfetch'
+            'pipx', 'upgrade', 'redfetch'
         ],
-        'pipx': (
-            [
-                'pipx', 'upgrade', 'redfetch', '--pip-args', '--index-url https://test.pypi.org/simple'
-            ] if is_test_pypi else [
-                'pipx', 'upgrade', 'redfetch'
-            ]
-        ),
         'pyapp': None  # Handle separately with self_update()
     }
     
