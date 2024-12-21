@@ -72,50 +72,59 @@ def setup_directories():
     choice = Prompt.ask("Enter your choice", choices=[str(i) for i in range(1, len(options) + 1)], default=default_choice)
     
     if (windows_public_dir and choice == '3') or (not windows_public_dir and choice == '2'):
-        # Custom directory logic
+        # User wants a custom directory
         custom_dir = Prompt.ask("Enter the path to your custom directory")
         custom_dir = os.path.expanduser(os.path.normpath(custom_dir))
-        
-        # Check for eqgame.exe in custom_dir or its parent directories
-        current_dir = custom_dir
-        while current_dir != os.path.dirname(current_dir):  # Stop at root directory
-            if 'eqgame.exe' in os.listdir(current_dir):
-                console.print(Panel(
-                    Text.from_markup(
-                        "[bold red blink]WHAT THE F*** ARE YOU DOING?!?!![/bold red blink]\n"
-                        "There's an EQGame.exe in this path!!\n"
-                        "Please select a different directory, thank you in advance. :pray:",
-                        justify="center"
-                    ),
-                    title="[bold underline red]Critical Warning[/bold underline red]",
-                    border_style="bold red",
-                    expand=False
-                ))
-                return setup_directories()  # Restart the directory selection process
-            current_dir = os.path.dirname(current_dir)
-        
-        if os.path.isdir(custom_dir):
-            config_dir = custom_dir
-        else:
+
+        # Check if the directory exists first
+        if not os.path.isdir(custom_dir):
             console.print(f"[yellow]Directory does not exist: {custom_dir}[/yellow]")
             create_dir = CustomConfirm.ask("Would you like to create this directory?")
             if create_dir:
                 try:
                     os.makedirs(custom_dir, exist_ok=True)
-                    config_dir = custom_dir
                     console.print(f"[green]Directory created: {custom_dir}[/green]")
                 except Exception as e:
                     console.print(f"[bold red]Error creating directory: {e}[/bold red]")
-                    console.print("[yellow]Using default config directory.[/yellow]")
-                    config_dir = default_config_dir
+                    console.print("[yellow]We will restart the directory selection process now.[/yellow]")
+                    Prompt.ask("\nPress Enter to continue")
+                    # Restart the directory selection process on failure
+                    return setup_directories()
             else:
-                console.print("[yellow]Using default config directory.[/yellow]")
-                config_dir = default_config_dir
+                console.print("\n[bold yellow]Directory creation canceled. We'll restart the selection process now.[/bold yellow]")
+                Prompt.ask("\nPress Enter to continue")
+                return setup_directories()
+
+        # At this point, the directory should exist (either pre-existing or newly created).
+        # We can now safely iterate through parent directories to check for eqgame.exe
+        current_dir = custom_dir
+        while current_dir != os.path.dirname(current_dir):  # Stop at root directory
+            if 'eqgame.exe' in os.listdir(current_dir):
+                console.print(
+                    Panel(
+                        Text.from_markup(
+                            "[bold red blink]WHAT THE FUCK ARE YOU DOING?!?!![/bold red blink]\n"
+                            "There's an EQGame.exe in this path!!\n"
+                            "Please select a different directory, please, thank you in advance. :pray:",
+                            justify="center"
+                        ),
+                        title="[bold underline red]Critical Warning[/bold underline red]",
+                        border_style="bold red",
+                        expand=False
+                    )
+                )
+                # Restart the directory selection process
+                return setup_directories()
+            current_dir = os.path.dirname(current_dir)
+
+        # Use the custom directory if it exists and is valid
+        config_dir = custom_dir
+
     elif windows_public_dir and choice == '1':
         config_dir = windows_public_dir
     else:
         config_dir = default_config_dir
-    
+
     os.makedirs(config_dir, exist_ok=True)
     return config_dir
 
