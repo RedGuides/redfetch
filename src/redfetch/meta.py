@@ -270,6 +270,10 @@ def uninstall():
     # Call the logout function to clear stored credentials
     logout()
 
+    # Get executable path and installation method
+    executable_path = get_executable_path()
+    install_method = detect_installation_method()
+
     # Inform the user of directories that may contain data
     console.print("\n[bold]Manual Cleanup Instructions:[/bold]\n")
 
@@ -362,9 +366,6 @@ def uninstall():
     else:
         console.print("[green]No existing directories found that need manual cleanup.[/green]\n")
 
-    # Get executable path
-    executable_path = get_executable_path()
-
     if executable_path:
         # Ask the user if they want to proceed with self-uninstall
         if Confirm.ask("Would you like to uninstall redfetch's little python environment?"):
@@ -373,9 +374,12 @@ def uninstall():
         else:
             console.print("[yellow]Uninstallation canceled.[/yellow]")
     else:
-        # If executable_path is not set, guide the user to uninstall via pip
+        # If executable_path is not set, guide the user to uninstall via pip or pipx
         console.print("\n[bold]To uninstall redfetch, please run the following command:[/bold]")
-        console.print("  [cyan]pip uninstall redfetch[/cyan]")
+        if install_method == 'pipx':
+            console.print("  [cyan]pipx uninstall redfetch[/cyan]")
+        else:
+            console.print("  [cyan]pip uninstall redfetch[/cyan]")
         # Optionally, exit the program
         sys.exit(0)
 
