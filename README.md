@@ -141,13 +141,16 @@ opt_in = false
 ```
 Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 
-## Known Issues
-- Directory selectors can't change drive letters yet. To change the drive letter in a path, you'll need to type the new drive letter in the input field.
-
 ## Todo
 - Instead of keeping a db entry for each file downloaded and its version, we should check the files on the drive.
 - Refactor download logic, now that we know our needs.
 - Re-write auth for latest Xenforo version.
+- Make "fetch" ui tab responsive at smaller sizes.
+- Add custom buttons for "fetch" tab.
+- Option: Close after update
+- Launch programs with cli options
+- Indicate when updated VV is available
+- Launch more than just mq (eqbcs, etc) upon update. 
 
 ## Contributing
 
