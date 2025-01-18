@@ -60,16 +60,15 @@ If there are non-MQ resources you'd like to keep in sync with redfetch, you can 
 ### Command Line
 
 To update everything you've watched from the command line (as well as special resources),
-
-```bash
-redfetch.exe --download-watched
-```
+| .exe file | python |
+|---------|-----------|
+| ```.\redfetch.exe --download-watched``` | ```redfetch --download-watched``` |
 
 ### Web UI
 Another UI option! Run this command and then browse https://www.redguides.com/community/resources
-```bash
-redfetch.exe --serve
-```
+| .exe file | python |
+|---------|-----------|
+| ```.\redfetch.exe --serve``` | ```redfetch --serve``` |
 
 ![redfetch Web UI, with a hastily drawn circle around the install button](https://www.redguides.com/images/webui.png)
 
