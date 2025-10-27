@@ -166,7 +166,8 @@ def pip_update_redfetch(update_command, latest_version):
         
         if returncode == 0:
             console.print("[bold green]redfetch has been successfully updated. 🫎[/bold green]")
-            return True
+            console.print("[yellow]Please run redfetch again to use the updated version.[/yellow]")
+            sys.exit(0)
         else:
             error_output = process.stderr.read()
             console.print(f"[bold red]Error updating redfetch:[/bold red] {error_output}")
