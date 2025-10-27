@@ -12,7 +12,7 @@ from redfetch.auth import KEYRING_SERVICE_NAME, authorize
 
 # Constants
 BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
-MANIFEST_URL = 'https://www.redguides.com/resources-manifest'
+MANIFEST_URL = f'{BASE_URL}/resources-manifest'
 
 def get_api_headers():
     """Fetches API details and returns the constructed headers for requests."""
