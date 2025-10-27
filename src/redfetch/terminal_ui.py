@@ -718,7 +718,7 @@ class Redfetch(App):
         if myseq_path:
             myseq_executable = os.path.join(myseq_path, "MySEQ.exe")  # Adjust if necessary
             if os.path.exists(myseq_executable):
-                self.run_executable(myseq_executable)
+                self.run_executable(myseq_path, "MySEQ.exe")
             else:
                 self.notify("MySEQ executable not found.", severity="error")
         else:
