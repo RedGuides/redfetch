@@ -33,9 +33,7 @@ def download_resource(resource_id, parent_category_id, download_url, filename, h
             if resource_data and resource_data.get('current_files'):
                 expected_hash = resource_data['current_files'][0].get('hash')
                 if expected_hash:
-                    if api.verify_file_md5(file_path, expected_hash):
-                        print(f"MD5 verified for {filename}")
-                    else:
+                    if not api.verify_file_md5(file_path, expected_hash):
                         print(f"MD5 mismatch for {filename} - deleting corrupted file")
                         os.remove(file_path)
                         return False
