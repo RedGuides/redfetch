@@ -232,7 +232,7 @@ class Redfetch(App):
                         yield Label("Loading...", id="account_label")
                     with Center():
                         yield Button("Ding for level 2 🆙", id="btn_ding", variant="primary", tooltip="Upgrade your RedGuides account to level 2.")
-                        yield Button("Manage Watched Resources 🪺", id="btn_watched", variant="default", classes="web_link", tooltip="Manage the resources you're watching.")
+                        yield Button("Manage Watched Resources 👀", id="btn_watched", variant="default", classes="web_link", tooltip="Manage the resources you're watching.")
                         yield Button("Licensed Resources 🎫", id="btn_licensed", variant="default", classes="web_link", tooltip="Manage your purchased resources.")
                         yield Button("Manage Account 🧾", id="btn_account", variant="default", classes="web_link", tooltip="Manage your RedGuides 'Level 2' subscription.")
                         yield Button("RedGuides 🍻", id="btn_redguides", variant="default", classes="web_link")
@@ -1136,7 +1136,7 @@ class Redfetch(App):
         if api.is_kiss_downloadable(api.get_api_headers()):
             greeting = f"[italic]Hail, [bold]{self.username}![/bold][/italic]"
             greetingacct = (
-                f"[italic][bold]{self.username}, thank you for being level 2[/bold][/italic] 🫂"
+                f"[italic][bold]{self.username}, thank you for being level 2[/bold][/italic] 💛"
             )
             self.call_from_thread(self.show_ding_button, False)
         else:
