@@ -101,37 +101,40 @@ def get_client_credentials():
         raise Exception(f"An unexpected error occurred: {e}") from None
 
 def authorize():
+    # If using env var (mainly for CI), skip OAuth entirely
+    if os.environ.get('REDGUIDES_API_KEY'):
+        return
+    
     try:
         client_id, client_secret = get_client_credentials()
     except Exception as e:
         print(f"Error during authorization: {e}")
         sys.exit(1)
 
-    data = get_cached_tokens()  # Load existing tokens from keyring
-    if data.get('api_key') and api_is_valid(data['api_key']):
-        return  # Exit if the API key is valid and cached
-    else:
-        print("Looks like we need to get a new API key.")
-        if token_is_valid():
-            print("Token is still valid, attempting to refresh or reauthorize for a new API key.")
-            if data.get('refresh_token'):
-                if refresh_token(data, client_id, client_secret):
-                    print("Token successfully refreshed.")
-                    updated_data = get_cached_tokens()
-                    if updated_data.get('api_key') and api_is_valid(updated_data['api_key']):
-                        return  # Exit if the API key is found and valid after refreshing
-                    else:
-                        print("API key still invalid after refresh, reauthorizing...")
-                        first_authorization(client_id, client_secret)
-                else:
-                    print("Token refresh failed, proceeding to first authorization.")
-                    first_authorization(client_id, client_secret)
-            else:
-                print("Refresh token not found, proceeding to first authorization.")
-                first_authorization(client_id, client_secret)
-        else:
-            if not first_authorization(client_id, client_secret):
-                print("First authorization failed.")
+    data = get_cached_tokens()
+    
+    # Fast path: if we have a cached API key, trust it
+    if data.get('api_key') and data.get('user_id'):
+        return
+    
+    # Slow path: need to get credentials
+    print("API key not found in cache. Obtaining credentials...")
+    
+    # Try to refresh token if available
+    if data.get('refresh_token') and token_is_valid():
+        print("Attempting to refresh token...")
+        if refresh_token(data, client_id, client_secret):
+            print("Token refreshed successfully.")
+            updated_data = get_cached_tokens()
+            if updated_data.get('api_key'):
+                return
+            print("Warning: Token refreshed but API key not found. Reauthorizing...")
+    
+    # Fall back to full authorization
+    print("Performing full authorization...")
+    if not first_authorization(client_id, client_secret):
+        print("Authorization failed.")
+        sys.exit(1)
 
 def run_server():
     server_address = ('', 62897)
@@ -140,7 +143,7 @@ def run_server():
     return httpd.code
 
 def fetch_username(api_key):
-    """This is duplicate code from api.py, but leaving it here for now."""
+    """This is duplicate code from api.py, but leaving it here for now to avoid circular imports."""
     url = f"{BASE_URL}/api/me/"
     headers = {
         'XF-Api-Key': api_key
@@ -209,19 +212,8 @@ def token_is_valid():
         expires_at = datetime.fromtimestamp(float(expires_at_str))
         now = datetime.now()
         is_valid = now < expires_at - timedelta(minutes=5)  # Buffer of 5 minutes
-        print(f"Checking token validity: now={now}, expires_at={expires_at}, is_valid={is_valid}")
         return is_valid
     else:
-        print("Expires_at not found in keyring.")
-        return False
-
-def api_is_valid(api_key):
-    """Validate the stored API key."""
-    username = fetch_username(api_key)
-    if username != "Unknown":
-        return True
-    else:
-        print("API key validation failed.")
         return False
 
 def get_cached_tokens():
@@ -254,6 +246,10 @@ def logout():
         print("No active session found. You were not logged in.")
 
 def initialize_keyring():
+    # Skip keyring init if using env var (mainly for CI on Linux)
+    if os.environ.get('REDGUIDES_API_KEY'):
+        return
+    
     try:
         # Attempt to use the keyring to trigger any potential errors
         keyring.get_password('test_service', 'test_user')

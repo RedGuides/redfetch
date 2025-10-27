@@ -8,7 +8,7 @@ import keyring
 import os
 
 # local
-from redfetch.auth import KEYRING_SERVICE_NAME, authorize
+from redfetch.auth import KEYRING_SERVICE_NAME, authorize, initialize_keyring
 
 # Constants
 BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
@@ -192,7 +192,8 @@ def get_username():
 
     # Priority 4: Authorization Process
     print("Username not found in environment or keyring. Initiating authorization process...")
-    authorize()  # This will trigger the authorization process
+    initialize_keyring()
+    authorize()
     username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
     if not username:
         raise Exception("Authorization failed. Unable to retrieve username.")

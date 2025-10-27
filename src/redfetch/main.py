@@ -312,13 +312,9 @@ def synchronize_db_and_download(cursor, headers, resource_ids=None, worker=None)
         return True
 
 def handle_push(args):
-    API_KEY = os.environ.get('REDGUIDES_API_KEY')
     # Ensure the user is authorized
-    if not API_KEY:
-        auth.initialize_keyring()
-        auth.authorize()
-    else:
-        print("Using API key from environment variable. Skipping OAuth.")
+    auth.initialize_keyring()
+    auth.authorize()
 
     if not any([args.description, args.version, args.message, args.file]):
         print("At least one option (--description, --version, --message, or --file) must be specified.")
@@ -350,9 +346,8 @@ def handle_push(args):
         sys.exit(1) #exit with a non-zero code to indicate failure
 
 def handle_fetch(args):
-    API_KEY = os.environ.get('REDGUIDES_API_KEY')
-
     if args.logout:
+        API_KEY = os.environ.get('REDGUIDES_API_KEY')
         if not API_KEY:
             # Initialize keyring to ensure access to stored credentials
             auth.initialize_keyring()
@@ -361,13 +356,6 @@ def handle_fetch(args):
         else:
             print("Cannot logout when using API key from environment variable.")
         return
-
-    if not API_KEY:
-        # Only initialize keyring and authorize if API_KEY not provided
-        auth.initialize_keyring()
-        auth.authorize()
-    else:
-        print("Using API key from environment variable. Skipping OAuth.")
 
     validate_settings()
 
@@ -394,6 +382,9 @@ def handle_fetch(args):
         return
 
     if args.serve or args.download_resource or args.download_watched or args.force_download or args.list_resources:
+        # Ensure the user is authorized for operations that require API access
+        auth.initialize_keyring()
+        auth.authorize()
         # These variables are now set only if needed
         db_name = f"{config.settings.ENV}_resources.db"
         db.initialize_db(db_name)
@@ -409,6 +400,9 @@ def handle_fetch(args):
 
     if not any(vars(args).values()):
         print("No arguments provided, launching UI.")
+        # Ensure the user is authorized before launching UI
+        auth.initialize_keyring()
+        auth.authorize()
         from redfetch.terminal_ui import run_textual_ui
         run_textual_ui() 
         return
