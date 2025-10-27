@@ -70,11 +70,21 @@ def get_special_resource_status(resource_ids=None):
 
 def process_resources(cursor, resources):
     current_ids = set()
+    current_env = config.settings.ENV
+    
     for resource in resources:
         if not resource:
             continue  # Skip None resources
+        
+        resource_id = resource['resource_id']
+        parent_category_id = resource['Category']['parent_category_id']
+        
+        # Skip ALL plugins on TEST/EMU (bundled with VanillaMQ)
+        if parent_category_id == 11 and current_env in ['TEST', 'EMU']:
+            continue
+        
         # Only add to the db if it's in an MQ category
-        if resource['Category']['parent_category_id'] in config.CATEGORY_MAP:
+        if parent_category_id in config.CATEGORY_MAP:
             db.insert_prepared_resource(
                 cursor,
                 resource,
@@ -83,20 +93,28 @@ def process_resources(cursor, resources):
                 parent_id=None,
                 license_details=None
             )
-            current_ids.add((None, resource['resource_id']))  # Add to current IDs
+            current_ids.add((None, resource_id))  # Add to current IDs
     return current_ids
 
 def process_licensed_resources(cursor, licensed_resources):
     current_ids = set()
+    current_env = config.settings.ENV  # Get current environment (LIVE, TEST, or EMU)
+    
     for license_info in licensed_resources:
         resource = license_info['resource']
+        parent_category_id = resource['Category']['parent_category_id']
+        
+        # Skip ALL plugins on TEST/EMU (bundled with VanillaMQ)
+        if parent_category_id == 11 and current_env in ['TEST', 'EMU']:
+            continue
+        
         license_details = {
             'active': license_info['active'],
             'start_date': license_info.get('start_date'),
             'end_date': license_info.get('end_date'),
             'license_id': license_info['license_id']
         }
-        if resource['Category']['parent_category_id'] in config.CATEGORY_MAP:
+        if parent_category_id in config.CATEGORY_MAP:
             db.insert_prepared_resource(
                 cursor,
                 resource,
@@ -110,6 +128,18 @@ def process_licensed_resources(cursor, licensed_resources):
 
 def process_special_resources(cursor, special_resource_status, special_resources_data):
     current_ids = set()
+    
+    # First, add all opted-in special resources to current_ids (even if not fetched)
+    for res_id, status in special_resource_status.items():
+        is_special = status['is_special']
+        parent_ids = status['parent_ids']
+        
+        if not parent_ids and is_special:
+            current_ids.add((None, res_id))
+        for parent_id in parent_ids:
+            current_ids.add((parent_id, res_id))
+    
+    # Then, insert/update the fetched resources in the DB
     for resource in special_resources_data:
         res_id = str(resource['resource_id'])
         if res_id not in special_resource_status:
@@ -119,13 +149,12 @@ def process_special_resources(cursor, special_resource_status, special_resources
         is_dependency = status['is_dependency']
         parent_ids = status['parent_ids']
 
-        if not parent_ids and is_special:  # Handle special resources with no dependencies
+        if not parent_ids and is_special:
             db.insert_prepared_resource(cursor, resource, is_special, is_dependency, parent_id=None, license_details=None)
-            current_ids.add((None, res_id))  # Add to current IDs without a parent ID
 
         for parent_id in parent_ids:
-            current_ids.add((parent_id, res_id))
             db.insert_prepared_resource(cursor, resource, is_special, is_dependency, parent_id, license_details=None)
+    
     return current_ids
 
 def filter_special_resources(special_resource_status, manifest, cursor):
