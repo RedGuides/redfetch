@@ -1,3 +1,7 @@
+# standard
+import hashlib
+from pathlib import Path
+
 # third-party
 import requests
 import keyring
@@ -8,6 +12,7 @@ from redfetch.auth import KEYRING_SERVICE_NAME, authorize
 
 # Constants
 BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
+MANIFEST_URL = 'https://www.redguides.com/resources-manifest'
 
 def get_api_headers():
     """Fetches API details and returns the constructed headers for requests."""
@@ -192,3 +197,26 @@ def get_username():
     if not username:
         raise Exception("Authorization failed. Unable to retrieve username.")
     return username
+
+def fetch_manifest():
+    """Fetches the public resource manifest."""
+    response = requests.get(MANIFEST_URL, timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+def calculate_md5(filepath):
+    """Calculate MD5 hash of a file."""
+    filepath = Path(filepath)
+    md5 = hashlib.md5()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            md5.update(chunk)
+    return md5.hexdigest()
+
+def verify_file_md5(filepath, expected_md5):
+    """Verify file matches expected MD5 hash (case-insensitive)."""
+    if not expected_md5:
+        return True
+    
+    actual_md5 = calculate_md5(filepath)
+    return actual_md5.lower() == expected_md5.lower()

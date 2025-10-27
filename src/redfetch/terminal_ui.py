@@ -1163,7 +1163,7 @@ class Redfetch(App):
         
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
-        log.write_line(f"redfetch v{__version__} allows you to download EQ resources from RedGuides")
+        log.write_line(f"redfetch v{__version__} allows you to download resources from RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
         # two spaces to make up for tcss padding of tabbedcontent and tabpane

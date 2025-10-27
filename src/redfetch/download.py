@@ -9,6 +9,7 @@ import requests
 from rich import print as rprint
 
 # local
+from redfetch import api
 from redfetch import config
 from redfetch.utils import (
     get_folder_path,
@@ -27,6 +28,19 @@ def download_resource(resource_id, parent_category_id, download_url, filename, h
     try:
         file_path = os.path.join(folder_path, filename)
         if download_file(download_url, file_path, headers):
+            # Verify MD5 hash after download
+            resource_data = api.fetch_single_resource(resource_id, headers)
+            if resource_data and resource_data.get('current_files'):
+                expected_hash = resource_data['current_files'][0].get('hash')
+                if expected_hash:
+                    if api.verify_file_md5(file_path, expected_hash):
+                        print(f"MD5 verified for {filename}")
+                    else:
+                        print(f"MD5 mismatch for {filename} - deleting corrupted file")
+                        os.remove(file_path)
+                        return False
+            
+            # Continue with zip extraction if applicable
             if file_path.endswith('.zip'):
                 extract_and_discard_zip(file_path, folder_path, resource_id, flatten)
             return True  # Indicate successful download

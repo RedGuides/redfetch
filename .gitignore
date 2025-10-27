@@ -11,6 +11,9 @@ venv/
 # Downloaded files
 Downloads/
 
+# One-offs and garbage
+garbage/
+
 # Build files
 build/
 dist/

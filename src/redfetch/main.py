@@ -128,20 +128,48 @@ def process_special_resources(cursor, special_resource_status, special_resources
             db.insert_prepared_resource(cursor, resource, is_special, is_dependency, parent_id, license_details=None)
     return current_ids
 
-def fetch_from_api(headers, resource_ids=None):
+def filter_special_resources(special_resource_status, manifest, cursor):
+    """Return list of special resource IDs that need fetching."""
+    manifest_resources = manifest.get('resources', {})
+    to_fetch = []
+
+    last_fetch_time = 0
+    if cursor:
+        cursor.execute("SELECT last_fetch_time FROM metadata WHERE id = 1")
+        result = cursor.fetchone()
+        if result:
+            last_fetch_time = result[0]
+
+    for res_id in special_resource_status.keys():
+        entry = manifest_resources[str(res_id)]  # manifest contains all resources
+
+        if entry.get('last_update', 0) > last_fetch_time:
+            to_fetch.append(res_id)
+            continue
+
+        if cursor:
+            cursor.execute("SELECT resource_id FROM resources WHERE resource_id = ?", (res_id,))
+            if not cursor.fetchone():
+                to_fetch.append(res_id)
+        else:
+            to_fetch.append(res_id)
+
+    return to_fetch
+
+def fetch_from_api(headers, resource_ids=None, cursor=None):
     if resource_ids is None:
-        # Fetch all watched resources if no specific IDs are provided
         watched_resources = api.fetch_watched_resources(headers)
         licensed_resources = api.fetch_licenses(headers)
         special_resource_status = get_special_resource_status()
     else:
-        # Fetch only the specified resources
         watched_resources = [api.fetch_single_resource(rid, headers) for rid in resource_ids]
-        licensed_resources = []  # Assuming no licenses for specific resource fetches
+        licensed_resources = []
         special_resource_status = get_special_resource_status(resource_ids)
-        
-    # fetch each resource only once
-    special_resources_data = api.fetch_single_resource_batch(list(special_resource_status.keys()), headers)
+
+    manifest = api.fetch_manifest()
+    special_ids = filter_special_resources(special_resource_status, manifest, cursor)
+    print(f"Fetching {len(special_ids)} of {len(special_resource_status)} special resources")
+    special_resources_data = api.fetch_single_resource_batch(special_ids, headers)
 
     return {
         'watched_resources': watched_resources,
@@ -199,10 +227,9 @@ def handle_resource_download(cursor, headers, resource):
         return 'cancelled'  # Indicate download was cancelled
 
 def synchronize_db_and_download(cursor, headers, resource_ids=None, worker=None):
-    # Save the original resource_ids (if provided) to download their correct dependencies
     original_resource_ids = resource_ids[:] if resource_ids is not None else None
-    # Fetch latest from RG plus locally-defined special resources
-    fetched_data = fetch_from_api(headers, resource_ids)
+    # Fetch latest resources using manifest for efficient filtering
+    fetched_data = fetch_from_api(headers, resource_ids, cursor)
     if resource_ids and not fetched_data['watched_resources']:
         print(f"No valid resources found for IDs: {resource_ids}")
         return False
