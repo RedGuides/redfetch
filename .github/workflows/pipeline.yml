@@ -41,6 +41,8 @@ jobs:
         run: |
           if [ "${{ github.ref }}" == "refs/heads/develop" ]; then
             echo "REDFETCH_BASE_URL=https://www.redguides.com/devtestbaby" >> $GITHUB_ENV
+            # Use production manifest endpoint (no /community) for develop builds.
+            echo "REDFETCH_MANIFEST_URL=https://www.redguides.com/resources-manifest" >> $GITHUB_ENV
           fi
 
       - name: Install Hatch

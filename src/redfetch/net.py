@@ -14,7 +14,7 @@ from diskcache import Cache
 from redfetch import config
 
 BASE_URL = os.environ.get("REDFETCH_BASE_URL", "https://www.redguides.com/community")
-MANIFEST_URL = f"{BASE_URL}/resources-manifest"
+MANIFEST_URL = os.environ.get("REDFETCH_MANIFEST_URL") or f"{BASE_URL}/resources-manifest"
 
 # Manifest cache: 5 minutes TTL
 _MANIFEST_TTL_SECONDS = 300
