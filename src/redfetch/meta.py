@@ -3,10 +3,11 @@ import os
 import platform
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 # Third-party
-import requests
+import httpx
 from packaging import version
 
 # Rich library
@@ -18,24 +19,61 @@ from rich.prompt import Confirm
 
 # Local
 from redfetch.__about__ import __version__
+from redfetch import config
+from diskcache import Cache
 
 # environment variable to determine which PyPI URL to use. just fyi test is https://test.pypi.org/pypi/redfetch/json
 PYPI_URL = os.getenv("REDFETCH_PYPI_URL", "https://pypi.org/pypi/redfetch/json")
 
 console = Console()
 
+
 def get_current_version():
     return __version__
 
+_UPDATE_CACHE_TTL_SECONDS = 12 * 60 * 60  # 12 hours
+
+_meta_cache = None
+
+
+def _get_meta_cache():
+    """Lazy-load disk-backed cache under the config directory."""
+    cache_dir = getattr(config, 'config_dir', None) or os.getenv('REDFETCH_CONFIG_DIR')
+    if not cache_dir:
+        cache_dir = os.getcwd()
+    api_cache_dir = os.path.join(cache_dir, '.cache')
+    try:
+        os.makedirs(api_cache_dir, exist_ok=True)
+    except Exception:
+        pass
+    return Cache(api_cache_dir)
+
+
+def fetch_latest_version_cached():
+    """Fetch latest PyPI version with a 12-hour disk-backed cache."""
+    global _meta_cache
+    if _meta_cache is None:
+        _meta_cache = _get_meta_cache()
+    cache_key = f"pypi_latest:{PYPI_URL}"
+    cached = _meta_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    latest = fetch_latest_version_from_pypi()
+    _meta_cache.set(cache_key, latest, expire=_UPDATE_CACHE_TTL_SECONDS)
+    return latest
+
+
 def fetch_latest_version_from_pypi():
-    response = requests.get(PYPI_URL)
+    response = httpx.get(PYPI_URL, timeout=10.0)
     response.raise_for_status()
     data = response.json()
     return data['info']['version']
 
+
 def get_executable_path():
     executable_path = os.environ.get('PYAPP')
     return executable_path
+
 
 def detect_installation_method():
     """Detect how the package was installed."""
@@ -56,6 +94,7 @@ def detect_installation_method():
     except Exception:
         return 'pip'
 
+
 def get_update_command():
     """Get the appropriate update command based on installation method."""
     method = detect_installation_method()
@@ -74,7 +113,7 @@ def get_update_command():
         ],
         'pipx': [
             'pipx', 'upgrade', 'redfetch', '--pip-args',
-            '--index-url https://test.pypi.org/simple'
+            '--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/'
         ] if is_test_pypi else [
             'pipx', 'upgrade', 'redfetch'
         ],
@@ -83,11 +122,12 @@ def get_update_command():
     
     return commands.get(method)
 
+
 def check_for_update():
     current_version = get_current_version()
     
     try:
-        latest_version = fetch_latest_version_from_pypi()
+        latest_version = fetch_latest_version_cached()
         
         if version.parse(latest_version) > version.parse(current_version):
             version_info = Panel(
@@ -131,6 +171,7 @@ def check_for_update():
     except Exception as e:
         console.print(f"[bold red]Error checking for updates:[/bold red] {e}")
     return False
+
 
 def pip_update_redfetch(update_command, latest_version):
     try:
@@ -176,6 +217,7 @@ def pip_update_redfetch(update_command, latest_version):
         console.print(f"[bold red]Error during update process:[/bold red] {e}")
         return False
 
+
 def self_update():
     """Update with PYAPP."""
     try:
@@ -202,6 +244,7 @@ def self_update():
         console.print(f"[bold red]Error during self-update process:[/bold red] {e}")
         sys.exit(1)
 
+
 def self_remove():
     """Remove with PYAPP."""
     try:
@@ -215,7 +258,7 @@ def self_remove():
             return
 
         # Create a batch script to handle the uninstallation
-        batch_script = f"""
+        batch_script = textwrap.dedent(f"""
         @echo off
         timeout /t 2 > nul
         "{executable_path}" self remove
@@ -234,7 +277,7 @@ def self_remove():
         echo Cleanup complete. Press any key to exit.
         pause > nul
         (goto) 2>nul & del "%~f0"
-        """
+        """).strip()
 
         batch_file_path = os.path.join(os.path.dirname(executable_path), "uninstall.bat")
         with open(batch_file_path, 'w') as batch_file:
@@ -256,15 +299,16 @@ def self_remove():
         input("Press Enter to close this window...")
         sys.exit(1)
 
+
 def uninstall():
     """Guide the user through the uninstallation process."""
-    # Import required modules when necessary
-    from . import config
-
     # Import the logout function from auth module
     from .auth import logout
 
     console = Console()
+    
+    # Initialize config before using it
+    config.initialize_config()
 
     console.print("\n[bold]Uninstallation Process:[/bold]")
 
@@ -341,7 +385,7 @@ def uninstall():
             os.path.join(config_dir, 'settings.local.toml')
         ]
         
-        # Add any .db files
+        # Add any .db files from config root (legacy location)
         db_files = [f for f in os.listdir(config_dir) if f.endswith('.db')]
         files_to_delete.extend([os.path.join(config_dir, f) for f in db_files])
         
@@ -351,6 +395,15 @@ def uninstall():
                     os.remove(file_path)
                 except Exception as e:
                     console.print(f"[red]Failed to delete {file_path}: {e}[/red]")
+        
+        # Delete the entire .cache directory
+        cache_dir = os.path.join(config_dir, '.cache')
+        if os.path.isdir(cache_dir):
+            try:
+                import shutil
+                shutil.rmtree(cache_dir)
+            except Exception as e:
+                console.print(f"[red]Failed to delete cache directory: {e}[/red]")
         
         if should_print_path(config_dir):
             existing_paths.add(config_dir)
@@ -362,7 +415,7 @@ def uninstall():
             console.print(f" - [cyan]{path}[/cyan]")
 
         # Generate OS-specific commands to remove the directories
-        commands = generate_removal_commands(existing_paths, console)
+        commands = generate_removal_commands(existing_paths)
         write_commands_to_file(commands, existing_paths)
     else:
         console.print("[green]No existing directories found that need manual cleanup.[/green]\n")
@@ -384,7 +437,8 @@ def uninstall():
         # Optionally, exit the program
         sys.exit(0)
 
-def generate_removal_commands(paths, console):
+
+def generate_removal_commands(paths):
     """Generate OS-specific commands to remove the given directories."""
     system = platform.system()
     if system == 'Windows':
@@ -409,6 +463,7 @@ def generate_removal_commands(paths, console):
             console.print(f"  {command}")
     console.print("\n[bold yellow]These directories must be removed manually.[/bold yellow]")
     return commands
+
 
 def write_commands_to_file(commands, paths):
     """Write the removal commands and additional information to a text file and open it on Windows."""

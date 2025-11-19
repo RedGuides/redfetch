@@ -1,4 +1,5 @@
 # standard
+import asyncio
 import os
 import sys
 import subprocess
@@ -12,7 +13,6 @@ else:
 
 # third-party
 import pyperclip
-import requests
 from dynaconf import ValidationError
 from textual_fspicker import SelectDirectory
 from rich.console import detect_legacy_windows
@@ -25,21 +25,23 @@ from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select
 from textual.events import Print
 from textual.containers import ScrollableContainer, Center, Grid, ItemGrid
 from textual.reactive import reactive
-from textual.worker import Worker, WorkerState, get_current_worker
+from textual.worker import Worker, WorkerState
 from textual.screen import ModalScreen
 
 # local
-from redfetch import db
+from redfetch import store
 from redfetch import api
 from redfetch import config
+from redfetch import net
+from redfetch import processes
 from redfetch import utils
-from redfetch import listener
-from redfetch.main import synchronize_db_and_download
-from redfetch.__about__ import __version__
+from redfetch import meta
+from redfetch import sync
 
 # for dev mode, from root dir:
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
+
 
 class RedfetchCommands(Provider):
     '''this is textual's command palette, it's how you search for commands from the top-right corner button'''
@@ -103,14 +105,14 @@ class RedfetchCommands(Provider):
 
 # the main app class
 class Redfetch(App):
-    interface_running = False
+    interface_running = reactive(False)
     is_updating = reactive(False)
     mq_down = reactive(None)
     CSS_PATH = "terminal_ui.tcss"
     current_env = config.settings.ENV 
     download_folder = config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
-    eq_path = config.settings.from_env(config.settings.ENV).EQPATH
-    has_switched_tab = False  # Track if we've switched tabs this session
+    # Always keep eq_path as a string for Textual inputs; use empty string when unset
+    eq_path = config.settings.from_env(config.settings.ENV).EQPATH or ""
 
     # Add the theme cycling binding
     BINDINGS = [
@@ -139,7 +141,7 @@ class Redfetch(App):
                         [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
                         id="server_type_fetch",
                         value=self.current_env,  # Use the reactive attribute
-                        allow_blank = False,
+                        allow_blank=False,
                         tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
                     )
                     yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="primary", tooltip="Access an interface for this script on the website.")
@@ -155,7 +157,7 @@ class Redfetch(App):
                             classes="bordertitles",
                             value=self.current_env,  # Use the reactive attribute
                             prompt="Select server type",
-                            allow_blank = False,
+                            allow_blank=False,
                             tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
                         )
                     with ItemGrid(id="inputs_grid", classes="bordertitles"):
@@ -200,7 +202,7 @@ class Redfetch(App):
                     with ItemGrid(id="maintenance_grid", classes="bordertitles"):
                         yield Button("Clear Download Cache", id="reset_downloads", variant="default", tooltip="This clears a record of what has been downloaded. (it doesn't delete any actual downloads.)")
                         yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall redfetch and guide through manual cleanup.")
-                
+
             with TabPane("Shortcuts", id="shortcuts"):
                 with ScrollableContainer(id="shortcuts"):
                     with ItemGrid(id="executables_grid"):
@@ -224,7 +226,6 @@ class Redfetch(App):
                         yield Button("MacroQuest.ini 🍦", id="open_mq_config", classes="file", tooltip="Open VV MQ's config file.")
                         yield Button("eqclient.ini 🐲", id="open_eq_config", classes="file", tooltip="Open EverQuest's config file.")
                         yield Button("eqhost.txt 🐲", id="open_eq_host", classes="file", tooltip="Open EverQuest's eqhost.txt, which is useful for emulators.")
-                    
 
             with TabPane("Account", id="account"):
                 with ScrollableContainer(id="account_grid"):
@@ -249,18 +250,17 @@ class Redfetch(App):
                 self.handle_update_watched()
             else:
                 # Cancel the update
-                self.is_updating = False
                 self.cancel_update_watched()
         elif event.button.id == "update_resource_id":
             event.button.variant = "default"
             self.handle_update_resource_id()
         elif event.button.id == "redguides_interface":
             if not self.interface_running:
-                self.interface_running = True
-                self.handle_redguides_interface()  # Start the interface
+                # Start the interface; flag will be updated via workers
+                self.handle_redguides_interface()
             else:
-                self.interface_running = False
-                self.cancel_redguides_interface()  # Cancel the interface
+                # Cancel the interface; flag will be updated via workers
+                self.cancel_redguides_interface()
         elif event.button.id == "copy_log":
             self.handle_copy_log()
 
@@ -339,9 +339,7 @@ class Redfetch(App):
             self.handle_toggle_auto_run_vvmq(event.value)
         elif event.switch.id == "auto_terminate_processes":
             self.handle_toggle_auto_terminate_processes(event.value)
-
-    def handle_toggle_dark(self) -> None:
-        self.dark = not self.dark  
+        
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "eq_maps":
@@ -361,9 +359,10 @@ class Redfetch(App):
             # Update the download folder input
             dl_input = self.query_one("#dl_path_input", Input)
             dl_input.value = utils.get_current_download_folder()
+            self.download_folder = dl_input.value
             
             # Update eqpath input
-            self.eq_path = config.settings.from_env(self.current_env).EQPATH
+            self.eq_path = config.settings.from_env(self.current_env).EQPATH or ""
             eq_input = self.query_one("#eq_path_input", Input)
             eq_input.value = self.eq_path
             
@@ -395,29 +394,48 @@ class Redfetch(App):
             update_button.disabled = not bool(event.value)
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        if event.state == WorkerState.SUCCESS:
-            if event.worker.name == "handle_update_watched":
-                self.update_complete(event.worker.result, self.query_one("#update_watched", Button))
-            elif event.worker.name == "handle_update_resource_id":
-                self.update_complete(event.worker.result, self.query_one("#update_resource_id", Button))
-            elif event.worker.name == "handle_redguides_interface":
+        worker = event.worker
+        state = event.state
+        group = getattr(worker, "group", None)
+
+        # Handle completion and errors for specific workers
+        if state == WorkerState.SUCCESS:
+            if worker.name == "_update_watched_worker":
+                self.update_complete(worker.result, self.query_one("#update_watched", Button))
+            elif worker.name == "_update_single_resource_worker":
+                self.update_complete(worker.result, self.query_one("#update_resource_id", Button))
+            elif worker.name == "_redguides_interface_worker":
                 self.notify("RedGuides Interface is now running.")
 
-        elif event.state == WorkerState.ERROR:
-            error_message = f"Worker {event.worker.name} encountered an error: {event.worker.error}"
+        elif state == WorkerState.ERROR:
+            error_message = f"Worker {worker.name} encountered an error: {worker.error}"
             self.notify(error_message, severity="error")
             print(error_message)  # Log the error to console as well
 
-            if event.worker.name == "handle_update_watched":
+            if worker.name == "_update_watched_worker":
                 self.query_one("#update_watched", Button).variant = "error"
-            elif event.worker.name == "handle_update_resource_id":
+            elif worker.name == "_update_single_resource_worker":
                 self.query_one("#update_resource_id", Button).variant = "error"
-            elif event.worker.name == "handle_redguides_interface":
+            elif worker.name == "_redguides_interface_worker":
                 self.query_one("#redguides_interface", Button).variant = "error"
-                self.interface_running = False
 
-        elif event.state == WorkerState.CANCELLED:
-            self.notify(f"Worker {event.worker.name} was cancelled.", severity="warning")
+        elif state == WorkerState.CANCELLED:
+            self.notify(f"Worker {worker.name} was cancelled.", severity="warning")
+
+        # Centralized flag management based on worker groups
+        if group in {"update_watched_group", "single_update_group", "maintenance_group"}:
+            if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
+                self.is_updating = False
+
+        if group == "interface_group":
+            # Only clear interface_running when the long-running interface worker finishes,
+            # or when preparation fails / is cancelled before the server starts.
+            if worker.name == "_redguides_interface_worker":
+                if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
+                    self.interface_running = False
+            elif worker.name == "_prepare_redguides_interface_worker":
+                if state in {WorkerState.ERROR, WorkerState.CANCELLED}:
+                    self.interface_running = False
 
         # Update widget states based on the current application state
         self.update_widget_states()
@@ -446,6 +464,9 @@ class Redfetch(App):
     def watch_is_updating(self, old_value: bool, new_value: bool) -> None:
         self.update_widget_states()
 
+    def watch_interface_running(self, old_value: bool, new_value: bool) -> None:
+        self.update_widget_states()
+
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
         current_theme = config.settings.get('THEME', 'textual-dark')
@@ -459,25 +480,21 @@ class Redfetch(App):
     # action handlers (called by textual framework)
     #
 
-    def action_link (self, href: str) -> None:
+    def action_link(self, href: str) -> None:
         """
         action to invoke webbrowser
         """
         webbrowser.open(href)
 
-    @work(exclusive=True, thread=True, group="generic_group")
     def action_quit(self) -> None:
         """Handle the quit action by canceling ongoing workers and exiting the application."""
         # Check if the RedGuides Interface is running and cancel it if necessary
         if self.interface_running:
-            self.interface_running = False
-            cancel_complete = self.cancel_redguides_interface()
-            cancel_complete.wait()  # Wait for the interface cancellation to complete
+            self.cancel_redguides_interface()
 
         # Check if an update is in progress and cancel it if necessary
         if self.is_updating:
             # Change the button label to indicate cancellation is in progress
-            update_watched_button = self.query_one("#update_watched", Button)
             self.cancel_update_watched()
 
         # Exit the application
@@ -533,7 +550,7 @@ class Redfetch(App):
         self.notify("Log contents copied to clipboard")
         copy_button.variant = "success"
         self.set_timer(3, lambda: self.reset_button("copy_log", "default"))
-    
+
     def reset_button(self, button_id: str, variant: str = "default") -> None:
         # pass the button id and variant to reset
         button = self.query_one(f"#{button_id}", Button)
@@ -579,7 +596,7 @@ class Redfetch(App):
                     winreg.QueryValue(key, "")
                     os.startfile(full_path)
                     self.notify(f"{file_name} opened with default program.")
-            except WindowsError:
+            except OSError:
                 # No registered application found, use Notepad
                 subprocess.Popen(['notepad.exe', full_path])
                 self.notify(f"{file_name} opened with Notepad.")
@@ -662,7 +679,7 @@ class Redfetch(App):
 
     def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
         """Run an executable and show appropriate notifications."""
-        success = utils.run_executable(folder_path, executable_name, args)
+        success = processes.run_executable(folder_path, executable_name, args)
         if success:
             self.notify(f"{executable_name} started successfully.")
         else:
@@ -708,7 +725,8 @@ class Redfetch(App):
                     print("bye bye!")
                     self.exit()
             else:
-                self.notify(f"{self.username} enjoys clicking things for no reason.")
+                username = getattr(self, "username", "You")
+                self.notify(f"{username} enjoys clicking things for no reason.")
 
         self.push_screen(UninstallScreen(), handle_uninstall_response)
 
@@ -914,91 +932,80 @@ class Redfetch(App):
     # worker handlers
     #
 
-    @work(thread=True, exclusive=True, group="mq_status_group")
-    def check_mq_status_worker(self):
+    @work(exclusive=True, group="mq_status_group")
+    async def check_mq_status_worker(self):
         """Background worker to check MQ status."""
-        mq_down = utils.is_mq_down()
-        self.call_from_thread(self.set_mq_down_status, mq_down)
+        mq_down = await net.is_mq_down()
+        self.set_mq_down_status(mq_down)
 
     def set_mq_down_status(self, mq_down: bool | None):
         """Set the mq_down reactive variable."""
         self.mq_down = mq_down
 
-    @work(exclusive=True, thread=True, group="update_watched_group")
     def handle_update_watched(self) -> None:
         """Handle the update process for watched resources."""
+        if self.is_updating:
+            return
         self.notify("Updating watched resources...")
-        print(f"Starting update of all watched & special resources, please wait...")
-        
+        self.is_updating = True
+        self._update_watched_worker()
+
+    @work(exclusive=True, group="update_watched_group")
+    async def _update_watched_worker(self) -> bool:
+        print("Starting update of all watched & special resources, please wait...")
+
         # Check for running processes
         mq_folder = utils.get_base_path()
-        running_executables = utils.are_executables_running_in_folder(mq_folder)
+        running_executables = await asyncio.to_thread(processes.are_executables_running_in_folder, mq_folder)
         if running_executables:
             auto_terminate = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
             if auto_terminate is True:
-                utils.terminate_executables_in_folder(mq_folder)
+                await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
             elif auto_terminate is False:
                 self.notify("Continuing update without closing processes...", severity="warning")
             else:
-                # We need to switch to the main thread to show the modal
-                response = self.call_from_thread(
-                    self.push_screen_wait, 
+                response = await self.push_screen_wait(
                     ProcessTerminationScreen(running_executables=running_executables)
                 )
-                
+
                 if response in [ProcessTerminationScreen.RESPONSE_TERMINATE, ProcessTerminationScreen.RESPONSE_ALWAYS]:
                     if response == ProcessTerminationScreen.RESPONSE_ALWAYS:
-                        self.call_from_thread(self.handle_toggle_auto_terminate_processes, True)
-                    utils.terminate_executables_in_folder(mq_folder)
+                        self.handle_toggle_auto_terminate_processes(True)
+                    await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
                 elif response == ProcessTerminationScreen.RESPONSE_NEVER:
-                    self.call_from_thread(self.handle_toggle_auto_terminate_processes, False)
+                    self.handle_toggle_auto_terminate_processes(False)
                 else:  # RESPONSE_SKIP
                     self.notify("Continuing update without closing processes...", severity="warning")
 
-        self.is_updating = True
-        result = self.run_synchronization()
-        self.is_updating = False
+        result = await self.run_synchronization()
         return result
     
     def cancel_update_watched(self):
+        # Textual's WorkerManager.cancel_group expects the app and group name
         cancelled_workers = self.workers.cancel_group(self, "update_watched_group")
         if cancelled_workers:
             self.notify("Update canceled.", severity="warning")
-        self.is_updating = False
-        self.update_widget_states()
 
-    def run_synchronization(self, resource_ids=None):
+    async def run_synchronization(self, resource_ids=None):
         try:
             # Get the current environment from the server_type Select widget
             server_type_select = self.query_one("#server_type", Select)
             current_env = server_type_select.value
-            worker = get_current_worker()
 
             db_name = f"{current_env}_resources.db"
-            db.initialize_db(db_name)
-            headers = api.get_api_headers()
-            with db.get_db_connection(db_name) as conn:
-                cursor = conn.cursor()
-                if resource_ids:
-                    # Reset download date for specific resources
-                    for resource_id in resource_ids:
-                        reset_success = self.reset_download_date(cursor, resource_id)
-                        if not reset_success:
-                            print(f"Failed to reset download date for resource ID: {resource_id}")
-                            return False
-                # Proceed with synchronization and download
-                result = synchronize_db_and_download(cursor, headers, resource_ids=resource_ids, worker=worker)
-                return result
+            await asyncio.to_thread(store.initialize_db, db_name)
+            db_path = store.get_db_path(db_name)
+            headers = await api.get_api_headers()
+            if resource_ids:
+                reset_success = await asyncio.to_thread(
+                    store.reset_download_dates_for_resources, db_name, resource_ids
+                )
+                if not reset_success:
+                    return False
+            result = await sync.run_sync(db_path, headers, resource_ids=resource_ids)
+            return result
         except Exception as e:
             print(f"Error in run_synchronization: {e}")
-            return False
-        
-    def reset_download_date(self, cursor, resource_id):
-        try:
-            db.reset_download_date_for_resource(cursor, resource_id)
-            return True
-        except Exception as e:
-            print(f"Error during resetting download date for resource ID {resource_id}: {str(e)}")
             return False
 
     def update_complete(self, result: bool, button: Button):
@@ -1029,6 +1036,7 @@ class Redfetch(App):
                             elif response == RunVVMQScreen.RESPONSE_NEVER:
                                 self.handle_toggle_auto_run_vvmq(False)
                             self.reset_button("update_watched", "primary")
+                            self.update_widget_states()
                         self.push_screen(RunVVMQScreen(), handle_vvmq_response)
                 else:
                     # Non-Windows platforms just reset the button
@@ -1038,116 +1046,113 @@ class Redfetch(App):
             print(f"Some resources failed to update.")
             self.notify("Failed to update some resources.", severity="error")
 
-    @work(exclusive=True, thread=True, group="generic_group")
     def handle_update_resource_id(self) -> None:
-        input_value = self.query_one("#resource_id_input").value
-        if input_value:
-            try:
-                print(f"Downloading resource please wait...")
-                resource_id = utils.parse_resource_id(input_value)
-                self.notify(f"Updating Resource ID: {resource_id}")
-                self.is_updating = True
-                result = self.run_synchronization([resource_id])
-                self.is_updating = False
-                return result
-            except ValueError as e:
-                self.notify(str(e), severity="error")
-                self.is_updating = False
-                return False
-        else:
-            self.notify("Please enter a Resource ID or URL", severity="error")
-            return False
+        if self.is_updating:
+            return
 
-    def start_redguides_interface(self):
-        db_name = f"{self.current_env}_resources.db"
-        headers = api.get_api_headers()
-        special_resources = config.settings.from_env(self.current_env).SPECIAL_RESOURCES
-        category_map = config.CATEGORY_MAP
-        listener.run_server(config.settings.from_env(self.current_env), db_name, headers, special_resources, category_map)
-        worker = get_current_worker()
-        
+        input_widget = self.query_one("#resource_id_input", Input)
+        input_value = input_widget.value.strip()
+        if not input_value:
+            self.notify("Please enter a Resource ID or URL", severity="error")
+            return
+
         try:
-            while True:
-                if worker.is_cancelled:
-                    print("Worker has been cancelled.")
-                    break
-        except Exception as e:
-            print(f"Exception in worker: {e}")
-        finally:
-            print("Worker has stopped.")
+            resource_id = utils.parse_resource_id(input_value)
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
+
+        print("Downloading resource please wait...")
+        self.notify(f"Updating Resource ID: {resource_id}")
+        self.is_updating = True
+        self._update_single_resource_worker(resource_id)
+
+    @work(exclusive=True, group="single_update_group")
+    async def _update_single_resource_worker(self, resource_id: str) -> bool:
+        result = await self.run_synchronization([resource_id])
+        return result
 
     def cancel_redguides_interface(self):
-        cancelled_workers = self.workers.cancel_group(self, "generic_group")
-        self.interface_running = False
-        #print(f"Cancelled {len(cancelled_workers)} workers in the 'redguides_interface' group.")
-        
-        # Trigger shutdown
-        shutdown_complete = self.trigger_shutdown()
-        return shutdown_complete
+        # Cancel only interface-related workers; cancelling the worker will cancel the server task.
+        # Textual's WorkerManager.cancel_group expects the app and group name
+        cancelled_workers = self.workers.cancel_group(self, "interface_group")
     
-    @work(exclusive=True, thread=True, group="generic_group")
     def handle_reset_downloads(self) -> None:
+        if self.is_updating:
+            return
         self.notify("Resetting all download dates...")
-        print("Resetting all download dates, please wait...")
         self.is_updating = True
-        result = self.run_reset_downloads()
-        self.is_updating = False
-        if result:
-            self.notify("All download dates have been reset successfully.")
-        else:
-            self.notify("Failed to reset download dates.", severity="error")
+        self._reset_downloads_worker()
 
-    def run_reset_downloads(self):
+    @work(exclusive=True, group="maintenance_group")
+    async def _reset_downloads_worker(self) -> bool:
+        """Async worker to reset all download dates using aiosqlite helper."""
         try:
+            print("Resetting all download dates, please wait...")
             db_name = f"{self.current_env}_resources.db"
-            with db.get_db_connection(db_name) as conn:
-                cursor = conn.cursor()
-                db.reset_download_dates(cursor)
-                conn.commit()
+            db_path = store.get_db_path(db_name)
+            await store.reset_download_dates_async(db_path)
+            self.notify("All download dates have been reset successfully.")
             return True
         except Exception as e:
-            print(f"Error in run_reset_downloads: {e}")
+            print(f"Error in _reset_downloads_worker: {e}")
+            self.notify("Failed to reset download dates.", severity="error")
             return False
 
-    @work(thread=True)
-    def trigger_shutdown(self):
-        try:
-            response = requests.post('http://localhost:7734/shutdown')
-            if response.status_code == 200:
-                print("Successfully triggered interface shutdown")
-                self.notify("Interface shutdown initiated.")
-            else:
-                print(f"Failed to trigger server shutdown. Status code: {response.status_code}")
-                self.notify("Failed to initiate server shutdown.", severity="error")
-        except requests.RequestException as e:
-            print(f"Error making request to /shutdown: {e}")
-            self.notify("Error communicating with server during shutdown.", severity="error")
-
-    #adding a group to the worker so that it can be cancelled
-    @work(exclusive=True, thread=True, group="generic_group")
+    # adding a group to the worker so that it can be cancelled
     def handle_redguides_interface(self) -> None:
+        # Mark interface as running as we begin startup; it will be cleared via worker state.
+        self.interface_running = True
         self.notify("Starting RedGuides Interface...")
-        self.start_redguides_interface()
+        self._prepare_redguides_interface_worker()
+
+    @work(exclusive=True, group="interface_group")
+    async def _prepare_redguides_interface_worker(self) -> bool:
+        try:
+            db_name = f"{self.current_env}_resources.db"
+            await asyncio.to_thread(store.initialize_db, db_name)
+            headers = await api.get_api_headers()
+            settings = config.settings.from_env(self.current_env)
+            special_resources = settings.SPECIAL_RESOURCES
+            category_map = config.CATEGORY_MAP
+        except Exception as exc:
+            self.notify(f"Failed to start RedGuides Interface: {exc}", severity="error")
+            raise
+        else:
+            self._redguides_interface_worker(
+                settings,
+                db_name,
+                headers,
+                special_resources,
+                category_map,
+            )
+            return True
+
+    @work(exclusive=True, group="interface_group")
+    async def _redguides_interface_worker(self, settings, db_name, headers, special_resources, category_map) -> bool:
+        """Run the RedGuides interface server on the main asyncio loop."""
+        from redfetch.listener import run_server_async
+        await run_server_async(settings, db_name, headers, special_resources, category_map)
         return True
     
-    @work(thread=True)
-    def load_user_level(self):
-        self.username = api.get_username()
-        if api.is_kiss_downloadable(api.get_api_headers()):
+    @work
+    async def load_user_level(self):
+        self.username = await api.get_username()
+        headers = await api.get_api_headers()
+        if await api.is_kiss_downloadable(headers):
             greeting = f"[italic]Hail, [bold]{self.username}![/bold][/italic]"
             greetingacct = (
                 f"[italic][bold]{self.username}, thank you for being level 2[/bold][/italic] 💛"
             )
-            self.call_from_thread(self.show_ding_button, False)
+            self.show_ding_button(False)
         else:
             greeting = f"Hey {self.username}, you're level 1 😞"
             greetingacct = (
                 f"Hey {self.username}, you're level 1 😞 some resources won't be downloaded."
             )
-            self.call_from_thread(self.show_ding_button, True)
-        # Update the label on the main thread
-        self.call_from_thread(self.update_welcome_label, greeting)
-        self.call_from_thread(self.update_account_label, greetingacct)
+            self.show_ding_button(True)
+        self.update_welcome_label(greeting)
+        self.update_account_label(greetingacct)
 
     #
     # the start
@@ -1163,7 +1168,7 @@ class Redfetch(App):
         
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
-        log.write_line(f"redfetch v{__version__} allows you to download resources from RedGuides")
+        log.write_line(f"redfetch v{meta.get_current_version()} allows you to download resources from RedGuides")
         log.write_line("Server type: " + self.current_env)
         log.write_line("\n")
         # two spaces to make up for tcss padding of tabbedcontent and tabpane
@@ -1179,12 +1184,12 @@ class Redfetch(App):
         self.query_one("#executables_grid").border_title = "Executables ⚡"
         self.query_one("#folders_grid").border_title = "Folders 📁"
         self.query_one("#files_grid").border_title = "Files 📎"
+        
     # 
     # the end
     #
 
     def on_unmount(self):
-        self.interface_running = False
         self.workers.cancel_all()
 
     def action_cycle_theme(self) -> None:
@@ -1200,6 +1205,7 @@ class PrintCapturingLog(Log):
 
     def on_print(self, event: Print) -> None:
         self.write(event.text)
+
 
 class RunVVMQScreen(ModalScreen):
     """A modal screen to ask if the user wants to run Very Vanilla MQ."""
@@ -1228,6 +1234,7 @@ class RunVVMQScreen(ModalScreen):
             self.dismiss(self.RESPONSE_NEVER)
         else:  # "nomq"
             self.dismiss(self.RESPONSE_SKIP)
+
 
 class ProcessTerminationScreen(ModalScreen):
     """A modal screen to ask if user wants to terminate running processes."""
@@ -1273,6 +1280,7 @@ class ProcessTerminationScreen(ModalScreen):
         else:  # "noterminate"
             self.dismiss(self.RESPONSE_SKIP)
 
+
 class UninstallScreen(ModalScreen):
     """A modal screen to confirm uninstallation."""
 
@@ -1294,9 +1302,11 @@ class UninstallScreen(ModalScreen):
         else:  # "no_uninstall"
             self.dismiss(self.RESPONSE_NO)
 
+
 def run_textual_ui():
     app = Redfetch()
     app.run()
+
 
 if __name__ == "__main__":
     run_textual_ui()

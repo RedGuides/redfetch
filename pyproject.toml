@@ -18,14 +18,11 @@ classifiers = [
 # run `pip-check` to check for outdated dependencies
 dependencies = [
     "aiofiles~=25.1",
-    "aiolimiter~=1.2",
     "aiosqlite~=0.21",
+    "aiohttp~=3.9",
     "cachetools~=6.2",
-    "cheroot~=11.1",
     "diskcache~=5.6",
     "dynaconf~=3.2",
-    "flask~=3.1",
-    "flask-cors~=6.0",
     "httpx[http2]~=0.28",
     "keepachangelog~=2.0",
     "keyring~=25.6",

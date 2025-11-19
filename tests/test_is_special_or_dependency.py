@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from redfetch import utils, config
+from redfetch import special, config
 
 # Realistic and complex sample data to mock config.settings.SPECIAL_RESOURCES
 special_resources_mock = {
@@ -34,7 +34,7 @@ special_resources_mock = {
 @pytest.fixture(autouse=True)
 def mock_first_run_setup(mocker):
     # Mock the first_run_setup function to return a dummy config dir
-    mock_setup = mocker.patch('redfetch.config.first_run_setup')
+    mock_setup = mocker.patch('redfetch.config_firstrun.first_run_setup')
     mock_setup.return_value = '/dummy/config/dir'
     return mock_setup
 
@@ -59,29 +59,33 @@ def mock_config(mocker):
     return mock_settings
 
 def test_is_special_or_dependency_special(mock_config):
-    # Test to check if the function correctly identifies a special resource
-    is_special, is_dependency, parent_ids = utils.is_special_or_dependency('1974')
-    assert is_special == True
-    assert is_dependency == False
-    assert parent_ids == []
+    # Test to check if the logic correctly identifies a special resource
+    status = special.compute_special_status(['1974'])
+    info = status['1974']
+    assert info['is_special'] is True
+    assert info['is_dependency'] is False
+    assert info['parent_ids'] == set()
 
 def test_is_special_or_dependency_dependency(mock_config):
-    # Test to check if the function correctly identifies a resource that is both special and a dependency
-    is_special, is_dependency, parent_ids = utils.is_special_or_dependency('153')
-    assert is_special == True
-    assert is_dependency == True
-    assert parent_ids == ['151']
+    # Resource that is both special and a dependency
+    status = special.compute_special_status(['153'])
+    info = status['153']
+    assert info['is_special'] is True
+    assert info['is_dependency'] is True
+    assert info['parent_ids'] == {'151'}
 
 def test_is_special_or_dependency_neither(mock_config):
-    # Test to check if the function correctly identifies a resource that is neither special nor a dependency
-    is_special, is_dependency, parent_ids = utils.is_special_or_dependency('3032')
-    assert is_special == False
-    assert is_dependency == False
-    assert parent_ids == []
+    # Resource that is neither special nor opted-in dependency
+    status = special.compute_special_status(['3032'])
+    info = status['3032']
+    assert info['is_special'] is False
+    assert info['is_dependency'] is False
+    assert info['parent_ids'] == set()
 
 def test_is_special_or_dependency_false_true(mock_config):
-    # Test to check if the function correctly identifies a resource that is not special but is a dependency
-    is_special, is_dependency, parent_ids = utils.is_special_or_dependency('1865')
-    assert is_special == False
-    assert is_dependency == True
-    assert parent_ids == ['151']
+    # Not special, but is an opted-in dependency
+    status = special.compute_special_status(['1865'])
+    info = status['1865']
+    assert info['is_special'] is False
+    assert info['is_dependency'] is True
+    assert info['parent_ids'] == {'151'}

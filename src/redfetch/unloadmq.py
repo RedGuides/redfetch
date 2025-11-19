@@ -1,6 +1,5 @@
 import sys
 import ctypes
-import ctypes.wintypes
 import psutil
 import os
 from contextlib import contextmanager
@@ -9,25 +8,38 @@ if sys.platform == 'win32':
     import win32api
     import win32process
 
-    # Constants
-    PROCESS_ALL_ACCESS = 0x1F0FFF
-    INFINITE = 0xFFFFFFFF
+    # Minimal required access rights instead of PROCESS_ALL_ACCESS
+    PROCESS_QUERY_INFORMATION = 0x0400
+    PROCESS_VM_READ = 0x0010
+    PROCESS_CREATE_THREAD = 0x0002
+    PROCESS_VM_OPERATION = 0x0008
+    PROCESS_VM_WRITE = 0x0020
+    PROCESS_PERMS = (
+        PROCESS_QUERY_INFORMATION
+        | PROCESS_VM_READ
+        | PROCESS_CREATE_THREAD
+        | PROCESS_VM_OPERATION
+        | PROCESS_VM_WRITE
+    )
 
     # Load kernel32.dll
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 
     @contextmanager
     def open_process(pid, access):
+        h_process = None
         try:
-            h_process = win32api.OpenProcess(access, False, pid)
-            if not h_process:
-                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                h_process = win32api.OpenProcess(access, False, pid)
+                if not h_process:
+                    raise ctypes.WinError(ctypes.get_last_error())
+            except Exception as e:
+                print(f"Failed to open process {pid}: {e}")
+                yield None
+                return
             yield h_process
-        except Exception as e:
-            print(f"Failed to open process {pid}: {e}")
-            yield None
         finally:
-            if 'h_process' in locals() and h_process:
+            if h_process:
                 win32api.CloseHandle(h_process)
 
     def get_eqgame_process_pids():
@@ -35,27 +47,28 @@ if sys.platform == 'win32':
         pids = []
         for proc in psutil.process_iter(['pid', 'name']):
             try:
-                if proc.info['name'].lower() == 'eqgame.exe':
+                name = proc.info.get('name')
+                if name and name.lower() == 'eqgame.exe':
                     pids.append(proc.info['pid'])
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         return pids
 
     def get_module_base_address(process_handle, module_name):
-        """Get the base address of the specified module in the remote process."""
+        """Return the module handle (base address) and full path for the specified module."""
         try:
             modules = win32process.EnumProcessModules(process_handle)
-            for module in modules:
-                module_filename = win32process.GetModuleFileNameEx(process_handle, module)
+            for module_handle in modules:
+                module_filename = win32process.GetModuleFileNameEx(process_handle, module_handle)
                 if os.path.basename(module_filename).lower() == module_name.lower():
-                    return module, module_filename  # Return both module handle and full path
+                    return module_handle, module_filename  # Return both module handle and full path
             print(f"{module_name} not found in the process.")
             return None, None
         except Exception as e:
             print(f"Failed to enumerate modules in the remote process: {e}")
             return None, None
 
-    def get_remote_function_address(process_handle, module_path, module_base_address, function_name):
+    def get_remote_function_address(module_path, module_base_address, function_name):
         """Get the address of the function in the remote process."""
         try:
             if not os.path.exists(module_path):
@@ -63,7 +76,7 @@ if sys.platform == 'win32':
                 return None
 
             # Load the module locally using the full path
-            local_module = ctypes.WinDLL(module_path)
+            local_module = ctypes.WinDLL(module_path, use_last_error=True)
         except Exception as e:
             print(f"Failed to load {module_path} locally: {e}")
             return None
@@ -79,7 +92,7 @@ if sys.platform == 'win32':
         return func_address_remote
 
     def force_remote_unload_mq2(pid):
-        with open_process(pid, PROCESS_ALL_ACCESS) as process_handle:
+        with open_process(pid, PROCESS_PERMS) as process_handle:
             if not process_handle:
                 print(f"Skipping process {pid} due to insufficient permissions or other errors.")
                 return
@@ -90,7 +103,7 @@ if sys.platform == 'win32':
                 return
 
             func_address = get_remote_function_address(
-                process_handle, module_path, module_handle, 'MQ2End')
+                module_path, module_handle, 'MQ2End')
             if not func_address:
                 print(f"MQ2End function not found in process {pid}.")
                 return
@@ -98,7 +111,7 @@ if sys.platform == 'win32':
             try:
                 # Create a remote thread to execute MQ2End
                 hThread = kernel32.CreateRemoteThread(
-                    process_handle.handle,
+                    int(process_handle),
                     None,
                     0,
                     ctypes.c_void_p(func_address),
@@ -125,9 +138,11 @@ if sys.platform == 'win32':
         for pid in pids:
             force_remote_unload_mq2(pid)
 
+
 else:
     def force_remote_unload():
         print("unloading MacroQuest is not supported on this platform.")
+
 
 if __name__ == '__main__':
     force_remote_unload()

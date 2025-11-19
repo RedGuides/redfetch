@@ -1,223 +1,312 @@
-# standard
-import hashlib
-from pathlib import Path
-
-# third-party
-import requests
-import keyring
+"""API client for RedGuides with async HTTP support."""
+import asyncio
 import os
+from typing import List, Optional
 
-# local
-from redfetch.auth import KEYRING_SERVICE_NAME, authorize, initialize_keyring
+import httpx
+import keyring
+from diskcache import Cache
+
+from redfetch.auth import KEYRING_SERVICE_NAME
+from redfetch import config
+from redfetch import net
 
 # Constants
-BASE_URL = os.environ.get('REDFETCH_BASE_URL', 'https://www.redguides.com/community')
-MANIFEST_URL = f'{BASE_URL}/resources-manifest'
+BASE_URL = net.BASE_URL
 
-def get_api_headers():
-    """Fetches API details and returns the constructed headers for requests."""
+
+async def get_api_headers():
+    """Fetch API key/user headers for authenticated API requests."""
     api_key = os.environ.get('REDGUIDES_API_KEY')
     if api_key:
         headers = {'XF-Api-Key': api_key}
         user_id = os.environ.get('REDGUIDES_USER_ID')
         if not user_id:
-            user_id = fetch_user_id_from_api(api_key)
+            user_id = await fetch_user_id_from_api(api_key)
             if not user_id:
                 raise Exception("Unable to retrieve user ID using the provided API key.")
         headers['XF-Api-User'] = str(user_id)
         return headers
-    else:
-        # Import keyring only when needed
-        api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
-        user_id = keyring.get_password(KEYRING_SERVICE_NAME, 'user_id')
-        if not api_key or not user_id:
-            raise Exception("API key or User ID not found in keyring.")
-        return {"XF-Api-Key": api_key, "XF-Api-User": str(user_id)}
     
-def fetch_all_resources(headers):
-    # fetch all resources from the API
-    page = 1
-    all_resources = []
+    api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
+    if not api_key:
+        raise Exception("API key not found. Please run authorization.")
+    
+    user_id = get_user_id()
+    if not user_id:
+        user_id = await fetch_user_id_from_api(api_key)
+        if not user_id:
+            raise Exception("Unable to retrieve user ID. Please re-authorize.")
+    
+    return {"XF-Api-Key": api_key, "XF-Api-User": str(user_id)}
 
-    while True:
-        response = requests.get(f'{BASE_URL}/api/resources/?page={page}', headers=headers)
-        if response.ok:
-            data = response.json()
-            resources = data['resources']
-            all_resources.extend(resources)
-            if page >= data['pagination']['last_page']:
-                break
-            page += 1
-        else:
-            print(f"Error fetching resources: HTTP Status {response.status_code}")
-            break
 
-    return all_resources
-
-def fetch_watched_resources(headers):
-    """Fetches watched resources from the API with pagination."""
+async def fetch_watched_page(client: httpx.AsyncClient, page: int) -> tuple[list, int]:
+    """Fetch a single page of watched resources.
+    
+    Returns: (resources, total_pages)
+    """
     url = f'{BASE_URL}/api/rgwatched'
-    page = 1
-    rgwatched_resources = []
+    try:
+        data = await net.get_json(client, url, params={'page': page})
+        last_page = data['pagination']['last_page']
+        items = [res for res in data['resources'] if res.get('can_download', False) and res.get('current_files')]
+        return items, last_page
+    except Exception as e:
+        print(f"Error fetching watched resources page {page}: {e}")
+        return [], 0
 
-    while True:
-        response = requests.get(f"{url}?page={page}", headers=headers)
-        if response.ok:
-            data = response.json()
-            # Filter to include only resources that can be downloaded and have files
-            watched_resources = [
-                res for res in data['resources'] 
-                if res.get('can_download', False) and res.get('current_files')
-            ]
-            rgwatched_resources.extend(watched_resources)
-            if page >= data['pagination']['last_page']:
-                break
-            page += 1
-        else:
-            print(f"Error fetching watched resources: HTTP Status {response.status_code}")
-            break
 
-    return rgwatched_resources
-
-def fetch_licenses(headers):
-    """Fetches user licenses from the API with pagination, only including licenses for downloadable resources."""
+async def fetch_licenses_page(client: httpx.AsyncClient, page: int) -> tuple[list, int]:
+    """Fetch a single page of user licenses.
+    
+    Returns: (licenses, total_pages)
+    """
     url = f'{BASE_URL}/api/user-licenses'
-    page = 1
-    all_licenses = []
+    try:
+        data = await net.get_json(client, url, params={'page': page})
+        last_page = data['pagination']['last_page']
+        items = [lic for lic in data['licenses'] if lic['resource']['can_download'] and lic['resource'].get('current_files')]
+        return items, last_page
+    except Exception as e:
+        print(f"Error fetching licenses page {page}: {e}")
+        return [], 0
 
-    while True:
-        response = requests.get(f"{url}?page={page}", headers=headers)
-        if response.ok:
-            data = response.json()
-            # Filter licenses to include only those with downloadable resources and files
-            licenses = [
-                lic for lic in data['licenses'] 
-                if lic['resource']['can_download'] and lic['resource'].get('current_files')
-            ]
-            all_licenses.extend(licenses)
-            if page >= data['pagination']['last_page']:
-                break
-            page += 1
-        else:
-            print(f"Error fetching licenses: HTTP Status {response.status_code}")
-            break
 
-    return all_licenses
-
-def fetch_single_resource(resource_id, headers):
+async def fetch_single_resource(client: httpx.AsyncClient, resource_id: str) -> Optional[dict]:
     """Fetches a single resource from the API, ensuring it is downloadable and has files."""
     url = f'{BASE_URL}/api/resources/{resource_id}'
-    response = requests.get(url, headers=headers)
-    if response.ok:
-        resource_data = response.json()
-        resource = resource_data['resource']
+    try:
+        data = await net.get_json(client, url)
+        resource = data['resource']
         if resource.get('can_download', False) and resource.get('current_files'):
-            return resource  # Return only the resource details if downloadable and has files
+            return resource
         else:
             print(f"Resource {resource_id} is not downloadable or has no files.")
             return None
-    else:
-        print(f"Error fetching resource {resource_id}: HTTP Status {response.status_code}")
+    except httpx.HTTPStatusError as e:
+        print(f"Error fetching resource {resource_id}: HTTP Status {e.response.status_code}")
+        return None
+    except Exception as e:
+        print(f"Error fetching resource {resource_id}: {e}")
         return None
 
-def fetch_single_resource_batch(resource_ids, headers):
-    """Fetches single resource details for a set of resource IDs using the API. Slow."""
-    resources = []
-    for res_id in resource_ids:
-        resource_data = fetch_single_resource(res_id, headers)
-        if resource_data:
-            resources.append(resource_data)
-    return resources
 
-def is_kiss_downloadable(headers):
-    """Checks for level 2 access, since XF doesn't expose secondary_groups to non-admin api"""
-    resource = fetch_single_resource(4, headers)
-    return resource is not None and resource.get('can_download', False)
+async def get_resource_details(resource_id: int) -> dict:
+    """Retrieve details of a specific resource from the API."""
+    url = f'{BASE_URL}/api/resources/{resource_id}'
+    headers = await get_api_headers()
+    async with httpx.AsyncClient(headers=headers, http2=True, timeout=30.0) as client:
+        response = await client.get(url)
+    response.raise_for_status()
+    return response.json()['resource']
+
+
+async def fetch_watched_resources(client: httpx.AsyncClient) -> list:
+    """Fetch all watched resources with concurrent pagination."""
+    items, total_pages = await fetch_watched_page(client, 1)
+    if total_pages <= 1:
+        return items
+
+    coros = [fetch_watched_page(client, p) for p in range(2, total_pages + 1)]
+    page_results = await asyncio.gather(*coros)
+
+    for page_items, _ in page_results:
+        items.extend(page_items)
     
-def fetch_versions_info(resource_id, headers):
-    # fetch individual resource data from the API
-    url = f'{BASE_URL}/api/resources/{resource_id}/versions'
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
-    return response.json()
+    return items
 
-def fetch_user_id_from_api(api_key):
-    """Fetches the user ID from the API using the provided API key."""
+
+async def fetch_licenses(client: httpx.AsyncClient) -> list:
+    """Fetch all user licenses with concurrent pagination."""
+    items, total_pages = await fetch_licenses_page(client, 1)
+    if total_pages <= 1:
+        return items
+    coros = [fetch_licenses_page(client, p) for p in range(2, total_pages + 1)]
+    page_results = await asyncio.gather(*coros)
+
+    for page_items, _ in page_results:
+        items.extend(page_items)
+    
+    return items
+
+
+async def fetch_resources_batch(client: httpx.AsyncClient, resource_ids: List[str]) -> list:
+    """Fetch multiple resources concurrently; returns list of resource dicts."""
+    if not resource_ids:
+        return []
+    coroutines = [fetch_single_resource(client, rid) for rid in resource_ids]
+    responses = await asyncio.gather(*coroutines, return_exceptions=True)
+
+    results = []
+    for rid, data in zip(resource_ids, responses):
+        if isinstance(data, Exception):
+            print(f"Warning: Resource {rid} failed to fetch: {data}")
+            continue
+        if data:
+            results.append(data)
+    
+    return results
+
+
+_KISS_CACHE_TTL_SECONDS = 24 * 60 * 60  # 1 day
+
+
+# Persistent disk-backed cache (survives across CLI runs)
+def _get_api_cache():
+    """Lazy-load cache after config is initialized."""
+    cache_dir = getattr(config, 'config_dir', None) or os.getenv('REDFETCH_CONFIG_DIR')
+    if not cache_dir:
+        cache_dir = os.getcwd()
+    api_cache_dir = os.path.join(cache_dir, '.cache')
+    return Cache(api_cache_dir)
+
+
+_api_cache = None
+
+
+def set_user_id(user_id: str) -> None:
+    """Store user_id in disk cache (non-sensitive public identifier)."""
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    _api_cache.set('user_id', str(user_id))
+
+
+def get_user_id() -> Optional[str]:
+    """Retrieve user_id from disk cache."""
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    return _api_cache.get('user_id')
+
+
+def set_username(username: str) -> None:
+    """Store username in disk cache (non-sensitive public display name)."""
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    _api_cache.set('username', username)
+
+
+def get_username_from_cache() -> Optional[str]:
+    """Retrieve username from disk cache."""
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    return _api_cache.get('username')
+
+
+def set_token_expiry(expires_at: str) -> None:
+    """Store OAuth token expiry timestamp in disk cache."""
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    _api_cache.set('expires_at', expires_at)
+
+
+def get_token_expiry() -> Optional[str]:
+    """Retrieve OAuth token expiry timestamp from disk cache."""
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    return _api_cache.get('expires_at')
+
+
+async def is_kiss_downloadable(headers):
+    """Check for level 2 access with 1-day disk cache.
+
+    XF doesn't expose secondary_groups to non-admin API, so we test by attempting
+    to fetch KISS (resource 4). Result is cached for 1 day.
+    """
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    
+    # Single-user install: use a singleton cache key
+    cache_key = "kiss"
+    cached = _api_cache.get(cache_key)
+    if cached is not None:
+        return bool(cached)
+
+    async with httpx.AsyncClient(headers=headers, http2=True) as client:
+        resource = await fetch_single_resource(client, "4")
+    result = resource is not None and resource.get('can_download', False)
+    _api_cache.set(cache_key, bool(result), expire=_KISS_CACHE_TTL_SECONDS)
+    return result
+
+
+async def fetch_me(client: httpx.AsyncClient) -> Optional[dict]:
+    """Fetch current user info from /api/me."""
     url = f'{BASE_URL}/api/me'
-    headers = {'XF-Api-Key': api_key}
-    response = requests.get(url, headers=headers)
-    if response.ok:
-        user_id = response.json()['me']['user_id']
-        return user_id
-    else:
-        print("Failed to retrieve user ID.")
-        print(response.text)
+    try:
+        data = await net.get_json(client, url)
+        return {
+            'user_id': str(data['me']['user_id']),
+            'username': data['me']['username']
+        }
+    except Exception as e:
+        print(f"Failed to retrieve user info: {e}")
         return None
 
-def fetch_username(api_key, cache=True):
-    """Fetches the username from the API using the provided API key."""
-    url = f'{BASE_URL}/api/me'
-    headers = {'XF-Api-Key': api_key}
-    response = requests.get(url, headers=headers)
-    if response.ok:
-        username = response.json()['me']['username']
-        if cache:
-            keyring.set_password(KEYRING_SERVICE_NAME, 'username', username)
-        return username
-    else:
-        print("Failed to retrieve username.")
-        print(response.text)
-        return "Unknown"
 
-def get_username():
-    """Fetches the username from the environment variable, keyring, or API."""
-    # Priority 1: Environment Variable
+async def fetch_user_id_from_api(api_key):
+    """Fetch user_id using the API key; caches it."""
+    async with httpx.AsyncClient(headers={'XF-Api-Key': api_key}, http2=True) as client:
+        me = await fetch_me(client)
+    if me:
+        set_user_id(me['user_id'])
+        return me['user_id']
+    return None
+
+
+async def fetch_username(api_key, cache=True):
+    """Fetch username via API key; caches username and user_id."""
+    async with httpx.AsyncClient(headers={'XF-Api-Key': api_key}, http2=True) as client:
+        me = await fetch_me(client)
+    if me:
+        if cache:
+            set_username(me['username'])
+            set_user_id(me['user_id'])
+        return me['username']
+    return "Unknown"
+
+
+def clear_api_cache():
+    """Clear all cached API data."""
+    cache = _get_api_cache()
+    try:
+        cache.clear()
+    finally:
+        try:
+            cache.close()
+        except Exception:
+            pass
+
+
+async def get_username():
+    """Fetch the username from the environment variable, disk cache, or API."""
     username = os.environ.get('REDFETCH_USERNAME')
     if username:
         return username
 
-    # Priority 2: Keyring
-    username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
+    username = get_username_from_cache()
     if username:
         return username
 
-    # Priority 3: API Call
     api_key = os.environ.get('REDGUIDES_API_KEY')
     if api_key:
-        username = fetch_username(api_key)
+        username = await fetch_username(api_key)
         if username != "Unknown":
             return username
-        else:
-            raise Exception("Unable to retrieve username using the provided API key.")
+        raise Exception("Unable to retrieve username using the provided API key.")
 
-    # Priority 4: Authorization Process
-    print("Username not found in environment or keyring. Initiating authorization process...")
-    initialize_keyring()
-    authorize()
-    username = keyring.get_password(KEYRING_SERVICE_NAME, 'username')
-    if not username:
-        raise Exception("Authorization failed. Unable to retrieve username.")
-    return username
+    # Check keyring for API key (used after OAuth authorization)
+    api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
+    if api_key:
+        username = await fetch_username(api_key)
+        if username != "Unknown":
+            return username
+        raise Exception("Unable to retrieve username using the stored API key.")
 
-def fetch_manifest():
-    """Fetches the public resource manifest."""
-    response = requests.get(MANIFEST_URL, timeout=10)
-    response.raise_for_status()
-    return response.json()
-
-def calculate_md5(filepath):
-    """Calculate MD5 hash of a file."""
-    filepath = Path(filepath)
-    md5 = hashlib.md5()
-    with open(filepath, 'rb') as f:
-        for chunk in iter(lambda: f.read(8192), b''):
-            md5.update(chunk)
-    return md5.hexdigest()
-
-def verify_file_md5(filepath, expected_md5):
-    """Verify file matches expected MD5 hash (case-insensitive)."""
-    if not expected_md5:
-        return True
-    
-    actual_md5 = calculate_md5(filepath)
-    return actual_md5.lower() == expected_md5.lower()
+    raise Exception("Username not found. Please run authorization first.")

@@ -2,28 +2,27 @@
 
 redfetch is for updating EverQuest multiboxing software and scripts that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". It's also open source, how nice.
 
-## Installation (Windows)
+## Installation
 
 On Windows the easiest way to install redfetch is to [download](https://www.redguides.com/community/resources/redfetch.3177/download) and run [`redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download). (*optional: If you're still on Windows 10 and want a more modern appearance, follow [this guide](https://www.redguides.com/community/threads/redfetch.92998/post-634938) to set [Windows Terminal](https://www.redguides.com/community/threads/redfetch.92998/post-634938) as your default terminal.*)
 
 <details>
-<summary>Python / Linux</summary>
+<summary>Terminal / Python / Linux</summary>
 
-### Alternate install for Linux or *cool* Windows users
 
-Prerequisite: a recent version of [Python](https://www.python.org/downloads/)
+Make sure you have a recent version of [Python](https://www.python.org/downloads/)
 
-1) Install pipx
+1) **Install pipx**
 ```bash
 python -m pip install --user pipx
 ```
 
-2) Make it so you can run packages without having to type python -m
+2) **Make it so you can run packages without having to type "python -m"**
 ```bash
 python -m pipx ensurepath
 ```
 
-3) Install redfetch
+3) **Install redfetch**
 ```bash
 pipx install redfetch
 ```
@@ -59,37 +58,57 @@ If there are non-MQ resources you'd like to keep in sync with redfetch, you can 
 
 ### Command Line
 
-To update everything you've watched from the command line (as well as special resources),
+To update everything you've watched from the command line (as well as special resources):
+
 | .exe file | python |
 |---------|-----------|
-| ```.\redfetch.exe --download-watched``` | ```redfetch --download-watched``` |
+| `.\redfetch.exe update` | `redfetch update` |
 
 ### Web UI
 Another UI option! Run this command and then browse https://www.redguides.com/community/resources
+
 | .exe file | python |
 |---------|-----------|
-| ```.\redfetch.exe --serve``` | ```redfetch --serve``` |
+| `.\redfetch.exe web` | `redfetch web` |
 
 ![redfetch Web UI, with a hastily drawn circle around the install button](https://www.redguides.com/images/webui.png)
 
-## Command-Line Options
+## Command Line Reference
 
-- `--download-resource <RESOURCE_ID | URL>`: Downloads a resource by its ID or URL.
-- `--download-watched`: Downloads all watched and special resources.
-- `--force-download`: Clears recent download dates in the cache.
-- `--list-resources`: Lists all resources in the cache.
-- `--serve`: Runs as a flask server to interact with the web UI.
-- `--update-setting <SETTING_PATH> <VALUE> [ENVIRONMENT]`: Updates a configuration setting. The setting path should be dot-separated. Environment is optional.
-- `--switch-env <ENVIRONMENT>`: Changes the server type (`LIVE`, `TEST`, `EMU`).
-- `--logout`: Logs out and clears cached tokens.
-- `--uninstall`: Uninstalls redfetch and outputs a text guide for cleaning up downloaded data.
-- `--version`: Displays the current version of redfetch.
-- `push <resource_id> [options]`: Update you or your team's resource. [There's also a github action for this.](https://github.com/marketplace/actions/redguides-publish) Options include:
-  - `--description <README.md>`: Path to a description file which will become the resource's overview description.
-  - `--version <version_number>`: Specifies a new version number.
-  - `--message <CHANGELOG.md | MESSAGE>`: Version update message or path to a changelog file.
-  - `--file <FILE.zip>`: Path to the zipped release file.
-  - `--domain <URL>`: Domain to prepend to relative URLs in README.md or CHANGELOG.md files. (mostly for images. e.g., `https://raw.githubusercontent.com/yourusername/yourrepo/main/`)
+> Run `redfetch --help` or `.\redfetch.exe --help` to see something like this in your terminal:
+> 
+> ### 📦 Resource Management
+> - `update` - Update all watched and special resources
+>   - `--force` / `-f` - Force re-download of all watched resources
+> - `download <ID_OR_URL>` - Download a specific resource by ID or URL
+>   - `--force` / `-f` - Force re-download by resetting this resource's download date
+> - `list` - List resources and dependencies in the cache database
+> - `reset` - Reset download dates for watched resources
+> 
+> ### 🍔 Configuration
+> - `server <SERVER>` - Switch the current server/environment to `LIVE`, `TEST`, or `EMU`
+> - `config <SETTING_PATH> <VALUE>` - Update a setting by path and value
+>   - `SETTING_PATH` - Dot-separated setting path (e.g., `SPECIAL_RESOURCES.1974.opt_in`)
+>   - `VALUE` - New value for the setting
+>   - `--server` / `-s` - Server to apply the change in (`LIVE`, `TEST`, `EMU`)
+> - `status` - Show the configuration for the current or specified server
+>   - `--server` / `-s` - Server to show (defaults to current)
+> 
+> ### 🔧 System & Utilities
+> - `ui` - Launch the Terminal User Interface
+> - `web` - Launch the RedGuides.com web interface
+> - `version` - Show version and exit
+> - `logout` - Log out and clear cached token and API cache
+> - `uninstall` - Uninstall redfetch and clean up data
+> 
+> ### 📤 Publishing
+> - `publish <resource_id>` - Publish updates to a RedGuides resource. [There's also a github action for this.](https://github.com/marketplace/actions/redguides-publish)
+>   - `resource_id` - Existing RedGuides resource ID
+>   - `--description <README.md>` / `-d` - Path to a description file (e.g. `README.md`) to become the overview description
+>   - `--version <version_number>` / `-v` - New version string (e.g., `v1.0.1`)
+>   - `--message <CHANGELOG.md | MESSAGE>` / `-m` - Path to `CHANGELOG.md` (keep a changelog) or a direct message string
+>   - `--file <FILE.zip>` / `-f` - Path to your zipped release file
+>   - `--domain <URL>` - If description or message is a .md file with relative URLs, resolve them to this domain (e.g., `https://raw.githubusercontent.com/your/repo/main/`)
 
 ## Settings
 
@@ -129,27 +148,23 @@ If there are local files you don't want overwritten by a resource, you can add t
 If you self-compile MacroQuest or use a discord friend's copy, you can still keep your scripts and plugins in sync with redfetch by opting out of Very Vanilla:
 
 ```powershell
-redfetch.exe --update-setting SPECIAL_RESOURCES.1974.opt_in false LIVE
-redfetch.exe --update-setting SPECIAL_RESOURCES.60.opt_in false EMU
-redfetch.exe --update-setting SPECIAL_RESOURCES.2218.opt_in false TEST
+redfetch.exe config SPECIAL_RESOURCES.1974.opt_in false --server LIVE
+redfetch.exe config SPECIAL_RESOURCES.60.opt_in false --server EMU
+redfetch.exe config SPECIAL_RESOURCES.2218.opt_in false --server TEST
 ```
-Alternately, you can add an entry to `settings.local.toml`:
-```toml
-[LIVE.SPECIAL_RESOURCES.1974]
-opt_in = false
-```
+
 Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 
-## Todo
-- Instead of keeping a db entry for each file downloaded and its version, we should check the files on the drive.
-- Refactor download logic, now that we know our needs.
-- Re-write auth for latest Xenforo version.
+## Trailmap
+- Re-write auth for Xenforo 2.4 (when available).
 - Make "fetch" ui tab responsive at smaller sizes.
 - Add custom buttons for "fetch" tab.
 - Option: Close after update
 - Launch programs with cli options
 - Indicate when updated VV is available
 - Launch more than just mq (eqbcs, etc) upon update. 
+- Run from MQ
+- Integrate with the forums
 
 ## Contributing
 

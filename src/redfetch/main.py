@@ -1,468 +1,117 @@
 # standard imports
-import argparse
 import sys
 import os
+from enum import Enum
+from pathlib import Path
+from typing import Optional
+import asyncio
 
 # third-party imports
-from dynaconf import ValidationError
-from rich import print as rprint
-from rich.prompt import Confirm, InvalidResponse
-from rich_argparse import RichHelpFormatter
+from rich.prompt import Confirm, Prompt
+from rich.console import Console
+import typer
 
 # local imports
 from redfetch import api
 from redfetch import auth
 from redfetch import config
 from redfetch import meta
-from redfetch import db
-from redfetch import download
+from redfetch import net
+from redfetch import processes
 from redfetch import utils
 from redfetch import push
+from redfetch import sync as sync_pipeline
+from redfetch import store
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="redfetch CLI.", formatter_class=RichHelpFormatter)
 
-    parser.add_argument('--logout', action='store_true', help='Log out and clear cached token.')
-    parser.add_argument('--download-resource', metavar='RESOURCE_ID | URL', help='Download a resource by its ID or URL', type=utils.parse_resource_id)
-    parser.add_argument('--download-watched', action='store_true', help='Download all watched & special resources.')
-    parser.add_argument('--force-download', action='store_true', help='Force download all watched resources.')
-    parser.add_argument('--list-resources', action='store_true', help='List all resources in the cache.')
-    parser.add_argument('--serve', action='store_true', help='Run as a server to handle download requests.')
-    parser.add_argument('--update-setting', nargs='+', metavar=('SETTING_PATH VALUE [ENVIRONMENT]'), help='Update a setting by specifying the path and value. Path should be dot-separated. Environment is optional. Example: --update-setting SPECIAL_RESOURCES.1974.opt_in false LIVE')
-    parser.add_argument('--switch-env', metavar='ENVIRONMENT', help='Change the server type. LIVE, TEST, EMU.')
-    parser.add_argument('--version', action='version', version=f'redfetch {meta.get_current_version()}')
-    parser.add_argument('--uninstall', action='store_true', help='Uninstall redfetch and clean up data.')
+app = typer.Typer(
+    help="[bold red]redfetch[/bold red] - RedGuides resource management tool. Run without arguments to launch the [italic]Terminal User Interface[/italic].",
+    rich_markup_mode="rich"
+)
 
-    # Subparsers for commands (Only for 'push')
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+console = Console()
+err_console = Console(stderr=True)
 
-    # Push Command Parser
-    push_parser = subparsers.add_parser('push', help='Publish resources on RedGuides. (see also the github action for this)', formatter_class=parser.formatter_class)
-    push_parser.add_argument('resource_id', type=int, help='The ID of the resource to update. Must already exist on RedGuides.')
-    push_parser.add_argument('--description', metavar='README.md', help='Path to a description file (e.g. README.md) which will become the "overview" description of your resource.')
-    push_parser.add_argument('--version', help='New version number (e.g., v1.0.1)')
-    push_parser.add_argument('--message', metavar='FILE | MESSAGE', help='Version update message or path to CHANGELOG.md in "keep a changelog" format. Requires --version.')
-    push_parser.add_argument('--file', metavar='FILE.zip', help='Path to the your zipped release file')
-    push_parser.add_argument('--domain', help='If using a description or message file, this is the domain to prepend to relative URLs (e.g., https://raw.githubusercontent.com/yourusername/yourrepo/main/)')
 
-    return parser.parse_args()
+class Env(str, Enum):
+    LIVE = "LIVE"
+    TEST = "TEST"
+    EMU = "EMU"
 
-def validate_settings():
-    try:
-        config.settings.validators.validate()
-    except ValidationError as e:
-        print(f"Validation error: {e}")
-        sys.exit(1)
-    print("Server:", config.settings.current_env)
 
-def get_special_resource_status(resource_ids=None):
-    resource_ids = utils.filter_and_fetch_dependencies(resource_ids)
-    special_resource_status = {}
-    for res_id in resource_ids:
-        is_special, is_dependency, parent_ids = utils.is_special_or_dependency(res_id)
-        special_resource_status[res_id] = {
-            'is_special': is_special,
-            'is_dependency': is_dependency,
-            'parent_ids': set(parent_ids)
-        }
-    #print(f"special_resource_status: {special_resource_status}")
-    return special_resource_status
+def parse_resource_id_or_fail(value: str) -> str:
+    """Accept either an integer ID or a URL that includes a recognizable ID."""
+    value_stripped = value.strip()
+    if value_stripped.isdigit():
+        return value_stripped
+    parsed = utils.parse_resource_id(value_stripped)
+    if parsed is None:
+        raise typer.BadParameter("Provide a resource ID or a recognized RedGuides URL.")
+    return parsed
 
-def process_resources(cursor, resources):
-    current_ids = set()
-    current_env = config.settings.ENV
-    
-    for resource in resources:
-        if not resource:
-            continue  # Skip None resources
-        
-        resource_id = resource['resource_id']
-        parent_category_id = resource['Category']['parent_category_id']
-        
-        # Skip ALL plugins on TEST/EMU (bundled with VanillaMQ)
-        if parent_category_id == 11 and current_env in ['TEST', 'EMU']:
-            continue
-        
-        # Only add to the db if it's in an MQ category
-        if parent_category_id in config.CATEGORY_MAP:
-            db.insert_prepared_resource(
-                cursor,
-                resource,
-                is_special=False,
-                is_dependency=False,
-                parent_id=None,
-                license_details=None
-            )
-            current_ids.add((None, resource_id))  # Add to current IDs
-    return current_ids
 
-def process_licensed_resources(cursor, licensed_resources):
-    current_ids = set()
-    current_env = config.settings.ENV  # Get current environment (LIVE, TEST, or EMU)
-    
-    for license_info in licensed_resources:
-        resource = license_info['resource']
-        parent_category_id = resource['Category']['parent_category_id']
-        
-        # Skip ALL plugins on TEST/EMU (bundled with VanillaMQ)
-        if parent_category_id == 11 and current_env in ['TEST', 'EMU']:
-            continue
-        
-        license_details = {
-            'active': license_info['active'],
-            'start_date': license_info.get('start_date'),
-            'end_date': license_info.get('end_date'),
-            'license_id': license_info['license_id']
-        }
-        if parent_category_id in config.CATEGORY_MAP:
-            db.insert_prepared_resource(
-                cursor,
-                resource,
-                is_special=False,
-                is_dependency=False,
-                parent_id=None,
-                license_details=license_details
-            )
-            current_ids.add((None, resource['resource_id']))  # Add to current IDs
-    return current_ids
-
-def process_special_resources(cursor, special_resource_status, special_resources_data):
-    current_ids = set()
-    
-    # First, add all opted-in special resources to current_ids (even if not fetched)
-    for res_id, status in special_resource_status.items():
-        is_special = status['is_special']
-        parent_ids = status['parent_ids']
-        
-        if not parent_ids and is_special:
-            current_ids.add((None, res_id))
-        for parent_id in parent_ids:
-            current_ids.add((parent_id, res_id))
-    
-    # Then, insert/update the fetched resources in the DB
-    for resource in special_resources_data:
-        res_id = str(resource['resource_id'])
-        if res_id not in special_resource_status:
-            continue
-        status = special_resource_status[res_id]
-        is_special = status['is_special']
-        is_dependency = status['is_dependency']
-        parent_ids = status['parent_ids']
-
-        if not parent_ids and is_special:
-            db.insert_prepared_resource(cursor, resource, is_special, is_dependency, parent_id=None, license_details=None)
-
-        for parent_id in parent_ids:
-            db.insert_prepared_resource(cursor, resource, is_special, is_dependency, parent_id, license_details=None)
-    
-    return current_ids
-
-def filter_special_resources(special_resource_status, manifest, cursor):
-    """Return list of special resource IDs that need fetching."""
-    manifest_resources = manifest.get('resources', {})
-    to_fetch = []
-
-    last_fetch_time = 0
-    if cursor:
-        cursor.execute("SELECT last_fetch_time FROM metadata WHERE id = 1")
-        result = cursor.fetchone()
-        if result:
-            last_fetch_time = result[0]
-
-    for res_id in special_resource_status.keys():
-        entry = manifest_resources[str(res_id)]  # manifest contains all resources
-
-        if entry.get('last_update', 0) > last_fetch_time:
-            to_fetch.append(res_id)
-            continue
-
-        if cursor:
-            cursor.execute("SELECT resource_id FROM resources WHERE resource_id = ?", (res_id,))
-            if not cursor.fetchone():
-                to_fetch.append(res_id)
-        else:
-            to_fetch.append(res_id)
-
-    return to_fetch
-
-def fetch_from_api(headers, resource_ids=None, cursor=None):
-    if resource_ids is None:
-        watched_resources = api.fetch_watched_resources(headers)
-        licensed_resources = api.fetch_licenses(headers)
-        special_resource_status = get_special_resource_status()
-    else:
-        watched_resources = [api.fetch_single_resource(rid, headers) for rid in resource_ids]
-        licensed_resources = []
-        special_resource_status = get_special_resource_status(resource_ids)
-
-    manifest = api.fetch_manifest()
-    special_ids = filter_special_resources(special_resource_status, manifest, cursor)
-    print(f"Fetching {len(special_ids)} of {len(special_resource_status)} special resources")
-    special_resources_data = api.fetch_single_resource_batch(special_ids, headers)
-
-    return {
-        'watched_resources': watched_resources,
-        'licensed_resources': licensed_resources,
-        'special_resource_status': special_resource_status,
-        'special_resources_data': special_resources_data
-    }
-
-def store_fetched_data(cursor, fetched_data):
-    current_ids = process_resources(cursor, fetched_data['watched_resources'])
-    current_ids.update(process_licensed_resources(cursor, fetched_data['licensed_resources']))
-    current_ids.update(process_special_resources(cursor, fetched_data['special_resource_status'], fetched_data['special_resources_data']))
-
-    return current_ids
-
-def handle_resource_download(cursor, headers, resource):
-    try:
-        resource_id, parent_category_id, remote_version, local_version, parent_resource_id, download_url, filename = resource
-        resource_id = str(resource_id)
-        if parent_resource_id is not None:
-            parent_resource_id = str(parent_resource_id)
-
-        # Get the resource title if available
-        title = db.get_resource_title(cursor, resource_id)
-        resource_display = f"{title} (ID: {resource_id})" if title else f"resource {resource_id}"
-
-        if local_version is None or local_version < remote_version:
-            print(f"Downloading updates for {resource_display}.")
-            success = download.download_resource(
-                resource_id,
-                parent_category_id,
-                download_url,
-                filename,
-                headers,
-                is_dependency=bool(parent_resource_id),
-                parent_resource_id=parent_resource_id,
-            )
-            if success:
-                db.update_download_date(
-                    resource_id,
-                    remote_version,
-                    bool(parent_resource_id),
-                    parent_resource_id,
-                    cursor,
-                )
-                return 'downloaded'  # Indicate successful download
-            else:
-                print(f"Error occurred while downloading {resource_display}.")
-                return 'error'  # Indicate download error
-        else:
-            print(f"Skipping download for {resource_display} - no new updates since last download.")
-            return 'skipped'  # Indicate resource was up-to-date
-    except KeyboardInterrupt:
-        print(f"\nDownload of {resource_display} cancelled by user.")
-        return 'cancelled'  # Indicate download was cancelled
-
-def synchronize_db_and_download(cursor, headers, resource_ids=None, worker=None):
-    original_resource_ids = resource_ids[:] if resource_ids is not None else None
-    # Fetch latest resources using manifest for efficient filtering
-    fetched_data = fetch_from_api(headers, resource_ids, cursor)
-    if resource_ids and not fetched_data['watched_resources']:
-        print(f"No valid resources found for IDs: {resource_ids}")
-        return False
-    # Store fetched data in the database
-    current_ids = store_fetched_data(cursor, fetched_data)
-    
-    # Fetch and download specific resource(s)
-    if resource_ids is not None:
-        resource_data = []
-        for rid in original_resource_ids:
-            single_resource_data = db.fetch_single_db_resource(rid, cursor)
-            resource_data.extend(single_resource_data)  # Flatten the list of resources and dependencies
-    else:
-        # Clean up the database when downloading watched resources
-        db.clean_up_unnecessary_resources(cursor, current_ids)
-        # Fetch and download watched, special, and licensed resources from the database
-        resource_data = db.fetch_watched_db_resources(cursor)
-    
-    print(f"Total resources to process: >>> {len(resource_data)} <<<")
-    
-    download_results = []
-    try:
-        for resource in resource_data:
-            # Check if the worker has been cancelled
-            if worker and worker.is_cancelled:
-                print("\nCancelling remaining downloads.")
-                return False  # Exit the function gracefully
-            result = handle_resource_download(cursor, headers, resource)
-            if result == 'cancelled':
-                print("\nCancelling remaining downloads.")
-                return False
-            download_results.append((resource[0], result))  # Store resource_id and result
-    except KeyboardInterrupt:
-        print("\nDownload process was cancelled by user.")
-        return False
-    
-    # Separate resources based on the result
-    downloaded_resources = [res_id for res_id, res in download_results if res == 'downloaded']
-    skipped_resources = [res_id for res_id, res in download_results if res == 'skipped']
-    errored_resources = [res_id for res_id, res in download_results if res == 'error']
-
-    if errored_resources:
-        print("One or more resources failed to download.")
-        print(f"Failed resources: {errored_resources}")
-        return False
-    elif downloaded_resources:
-        print("All resources downloaded successfully.")
-        return True
-    else:
-        print("All resources are up-to-date; no downloads were necessary.")
-        return True
-
-def handle_push(args):
-    # Ensure the user is authorized
+def initialize_db_only():
+    """Initialize configuration, auth, and local cache database (no network)."""
+    config.initialize_config()
+    if os.environ.get('CI') != 'true':
+        _ = meta.check_for_update()
+    # Ensure the user is authorized for operations that touch the cache DB
     auth.initialize_keyring()
     auth.authorize()
+    db_name = f"{config.settings.ENV}_resources.db"
+    store.initialize_db(db_name)
+    db_path = store.get_db_path(db_name)
+    return db_name, db_path
 
-    if not any([args.description, args.version, args.message, args.file]):
-        print("At least one option (--description, --version, --message, or --file) must be specified.")
-        return
 
-    if args.domain and not (args.description or args.message):
-        print("The --domain option requires either --description or --message to be specified.")
-        return
-
-    if args.message and not args.version:
-        print("The --message option requires --version to be specified.")
-        return
-
-    try:
-        resource = push.get_resource_details(args.resource_id)
-
-        if args.description:
-            push.update_description(args.resource_id, args.description, domain=args.domain)
-
-        if args.version and args.message:
-            message = push.generate_version_message(args)
-            version_info = {'version_string': args.version, 'message': message}
-            push.update_resource(resource, version_info, args.file)
-        elif args.file:
-            push.add_xf_attachment(resource, args.file, None)
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        sys.exit(1) #exit with a non-zero code to indicate failure
-
-def handle_fetch(args):
-    if args.logout:
-        API_KEY = os.environ.get('REDGUIDES_API_KEY')
-        if not API_KEY:
-            # Initialize keyring to ensure access to stored credentials
-            auth.initialize_keyring()
-            auth.logout()
-            print("Logged out successfully.")
-        else:
-            print("Cannot logout when using API key from environment variable.")
-        return
-
-    validate_settings()
-
-    if args.switch_env:
-        ENV = args.switch_env.upper()
-        config.switch_environment(ENV)
-        print(f"Environment updated to {ENV}.")
-        print("New complete configuration:", config.settings.from_env(ENV).as_dict())
-        return
-
-    if args.update_setting:
-        num_args = len(args.update_setting)
-        if num_args == 2:
-            setting_path, value = args.update_setting
-            env = None
-        elif num_args == 3:
-            setting_path, value, env = args.update_setting
-        else:
-            print("Error: --update-setting requires 2 or 3 arguments: SETTING_PATH VALUE [ENVIRONMENT]")
-            return
-        setting_path_list = setting_path.split('.')
-        config.update_setting(setting_path_list, value, env)
-        print(f"Updated setting {setting_path} to {value}{' in environment ' + env if env else ''}.")
-        return
-
-    if args.serve or args.download_resource or args.download_watched or args.force_download or args.list_resources:
-        # Ensure the user is authorized for operations that require API access
-        auth.initialize_keyring()
-        auth.authorize()
-        # These variables are now set only if needed
-        db_name = f"{config.settings.ENV}_resources.db"
-        db.initialize_db(db_name)
-        headers = api.get_api_headers()
-        special_resources = config.settings.SPECIAL_RESOURCES
-        if not api.is_kiss_downloadable(headers):
-            print("You're not level 2 on RedGuides, so some resources will not be downloadable.")
-
-    if args.serve:
-        from .listener import run_server
-        run_server(config.settings, db_name, headers, special_resources, config.CATEGORY_MAP)
-        return
-
-    if not any(vars(args).values()):
-        print("No arguments provided, launching UI.")
-        # Ensure the user is authorized before launching UI
-        auth.initialize_keyring()
-        auth.authorize()
-        from redfetch.terminal_ui import run_textual_ui
-        run_textual_ui() 
-        return
-
-    with db.get_db_connection(db_name) as conn:
-        cursor = conn.cursor()
-        if args.force_download:
-            print("Force download requested. All watched resources will be re-downloaded.")
-            db.reset_download_dates(cursor)
-        if args.list_resources:
-            db.list_resources(cursor)
-            db.list_dependencies(cursor)
-            return
-        if args.download_resource:
-            print(f"Downloading resource {args.download_resource}.")
-            synchronize_db_and_download(cursor, headers, [args.download_resource])
-        elif args.download_watched:
-            handle_download_watched(cursor, headers)
-
-def handle_download_watched(cursor, headers):
-    if utils.is_mq_down():
-        rprint("[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work.")
-        continue_download = Confirm.ask("Do you want to continue with the download?", default=False)
+async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
+    """Run the main 'update watched' flow using async network calls."""
+    if await net.is_mq_down():
+        console.print(
+            "[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work."
+        )
+        continue_download = Confirm.ask(
+            "Do you want to continue with the download?", default=False
+        )
         if not continue_download:
-            print("Download cancelled by user.")
+            console.print("Download cancelled by user.")
             return False
 
     mq_folder = utils.get_base_path()
     # Check if MQ or any other executable is running
-    if utils.are_executables_running_in_folder(mq_folder):
+    if processes.are_executables_running_in_folder(mq_folder):
         # Check auto-terminate setting
-        auto_terminate = config.settings.from_env(config.settings.ENV).get('AUTO_TERMINATE_PROCESSES', None)
+        auto_terminate = config.settings.from_env(config.settings.ENV).get(
+            "AUTO_TERMINATE_PROCESSES", None
+        )
         if auto_terminate:
-            utils.terminate_executables_in_folder(mq_folder)
+            processes.terminate_executables_in_folder(mq_folder)
         else:
-            # Use the custom prompt
-            try:
-                user_choice = utils.TerminationPrompt.ask(
-                    "Processes are running from the folder. Attempt to close them? [yes/no/always/never]",
-                    default="yes"
-                )
-                if user_choice == "yes":
-                    utils.terminate_executables_in_folder(mq_folder)
-                elif user_choice == "always":
-                    utils.terminate_executables_in_folder(mq_folder)
-                    config.update_setting(['AUTO_TERMINATE_PROCESSES'], True)
-                    print("Updated settings to always terminate processes.")
-                elif user_choice == "never":
-                    print("Continuing update without closing processes...")
-                    config.update_setting(['AUTO_TERMINATE_PROCESSES'], False)
-                    print("Updated settings to never terminate processes.")
-                else:  # user_choice == "no"
-                    print("Continuing update without closing processes...")
-            except InvalidResponse:
-                print("Invalid input. Continuing update without closing processes...")
+            user_choice = Prompt.ask(
+                "Processes are running from the folder. Attempt to close them?",
+                choices=["yes", "no", "always", "never"],
+                default="yes",
+            )
+            if user_choice == "yes":
+                processes.terminate_executables_in_folder(mq_folder)
+            elif user_choice == "always":
+                processes.terminate_executables_in_folder(mq_folder)
+                config.update_setting(["AUTO_TERMINATE_PROCESSES"], True)
+                console.print("Updated settings to always terminate processes.")
+            elif user_choice == "never":
+                console.print("Continuing update without closing processes...")
+                config.update_setting(["AUTO_TERMINATE_PROCESSES"], False)
+                console.print("Updated settings to never terminate processes.")
+            else:  # user_choice == "no"
+                console.print("Continuing update without closing processes...")
 
-    # Perform the download
-    success = synchronize_db_and_download(cursor, headers)
+    # Perform the download via async pipeline
+    success = await sync_pipeline.run_sync(db_path, headers)
     if success:
         handle_auto_run_macroquest()
+        return True
+    return False
+
 
 def handle_auto_run_macroquest():
     # Skip if we're in CI or not on Windows
@@ -470,30 +119,29 @@ def handle_auto_run_macroquest():
         return
 
     auto_run = config.settings.from_env(config.settings.ENV).get('AUTO_RUN_VVMQ', None)
+    should_run = False
+
     if auto_run is None:
-        # Use the custom prompt
-        try:
-            user_choice = utils.TerminationPrompt.ask(
-                "Do you want to start MacroQuest now? [yes/no/always/never]",
-                default="yes"
-            )
-            if user_choice == "yes":
-                pass  # Proceed to run MacroQuest
-            elif user_choice == "always":
-                config.update_setting(['AUTO_RUN_VVMQ'], True)
-                print("Updated settings to always run MacroQuest after updates.")
-            elif user_choice == "never":
-                config.update_setting(['AUTO_RUN_VVMQ'], False)
-                print("Updated settings to never run MacroQuest after updates.")
-                return  # Do not run MQ
-            else:  # user_choice == "no"
-                print("Not starting MacroQuest.")
-                return  # Do not run MQ
-        except InvalidResponse:
-            print("Invalid input. Not starting MacroQuest.")
+        user_choice = Prompt.ask(
+            "Do you want to start MacroQuest now?",
+            choices=["yes", "no", "always", "never"],
+            default="yes"
+        )
+        if user_choice == "yes":
+            should_run = True
+        elif user_choice == "always":
+            config.update_setting(['AUTO_RUN_VVMQ'], True)
+            console.print("Updated settings to always run MacroQuest after updates.")
+            should_run = True
+        elif user_choice == "never":
+            config.update_setting(['AUTO_RUN_VVMQ'], False)
+            console.print("Updated settings to never run MacroQuest after updates.")
+            return  # Do not run MQ
+        else:  # user_choice == "no"
+            console.print("Not starting MacroQuest.")
             return  # Do not run MQ
     elif auto_run:
-        pass  # Proceed to run MacroQuest
+        should_run = True
     else:
         # AUTO_RUN_VVMQ is False; do not run MacroQuest
         return
@@ -502,30 +150,327 @@ def handle_auto_run_macroquest():
     mq_path = utils.get_vvmq_path()
     if mq_path:
         exe_name = "MacroQuest.exe"
-        utils.run_executable(mq_path, exe_name)
+        processes.run_executable(mq_path, exe_name)
     else:
-        print("MacroQuest path not found. Please check your configuration.")
+        console.print("MacroQuest path not found. Please check your configuration.")
+
+
+async def update_command_async(db_name: str, db_path: str, force: bool) -> None:
+    headers = await api.get_api_headers()
+    # Only check KISS access for bulk operations (not single resource downloads)
+    if not await api.is_kiss_downloadable(headers):
+        console.print(
+            "[bold yellow]Warning:[/bold yellow] You're not level 2 on RedGuides, so some resources will not be downloadable."
+        )
+    if force:
+        with store.get_db_connection(db_name) as conn:
+            cursor = conn.cursor()
+            console.print(
+                "Force download requested. All watched resources will be re-downloaded."
+            )
+            store.reset_download_dates(cursor)
+    await handle_download_watched_async(db_path, headers)
+
+
+async def download_command_async(db_name: str, db_path: str, id_or_url: str, force: bool) -> None:
+    headers = await api.get_api_headers()
+    rid = parse_resource_id_or_fail(id_or_url)
+    if force:
+        with store.get_db_connection(db_name) as conn:
+            cursor = conn.cursor()
+            store.reset_download_date_for_resource(cursor, rid)
+    console.print(f"Downloading resource {rid}.")
+    await sync_pipeline.run_sync(db_path, headers, [rid])
+
+
+@app.command(
+    "update",
+    help="Update all [italic]watched[/italic] and special resources.",
+    rich_help_panel="📦 Resource Management"
+)
+def update_command(
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-download of all watched resources."),
+):
+    db_name, db_path = initialize_db_only()
+    asyncio.run(update_command_async(db_name=db_name, db_path=db_path, force=force))
+
+
+@app.command(
+    "download",
+    help="Download a specific resource by ID or URL.",
+    rich_help_panel="📦 Resource Management"
+)
+def download(
+    id_or_url: str = typer.Argument(..., metavar="ID_OR_URL", help="RedGuides resource ID or URL"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-download by resetting this resource's download date."),
+):
+    db_name, db_path = initialize_db_only()
+    asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))
+
+
+@app.command(
+    "ui",
+    help="Launch the [italic]Terminal User Interface[/italic].",
+    rich_help_panel="🔧 System & Utilities"
+)
+def run_tui():
+    """Initialize configuration and launch the Terminal User Interface."""
+    # Initialize config early; terminal_ui accesses config at import time
+    config.initialize_config()
+    if os.environ.get('CI') != 'true':
+        _ = meta.check_for_update()
+    # Ensure the user is authorized before launching UI
+    auth.initialize_keyring()
+    auth.authorize()
+    from redfetch.terminal_ui import run_textual_ui
+    run_textual_ui()
+
+
+@app.command(
+    "web",
+    help="Launch the [bold]RedGuides.com[/bold] web interface.",
+    rich_help_panel="🔧 System & Utilities"
+)
+def web_command():
+    db_name, _db_path = initialize_db_only()
+    try:
+        asyncio.run(web_command_async(db_name=db_name))
+    except KeyboardInterrupt:
+        console.print("\nServer stopped by user (Ctrl+C).")
+
+
+async def web_command_async(db_name: str) -> None:
+    headers = await api.get_api_headers()
+    special_resources = config.settings.SPECIAL_RESOURCES
+    from .listener import run_server_async
+    await run_server_async(
+        config.settings, db_name, headers, special_resources, config.CATEGORY_MAP
+    )
+
+
+@app.command(
+    "list",
+    help="List resources and dependencies currently in the cache database.",
+    rich_help_panel="📦 Resource Management"
+)
+def resources_list_command():
+    db_name, _db_path = initialize_db_only()
+    with store.get_db_connection(db_name) as conn:
+        cursor = conn.cursor()
+        resources = store.list_resources(cursor)
+        console.print("Resources:")
+        for resource_id, title in resources:
+            console.print(f"ID: {resource_id}, Title: {title}")
+        dependencies = store.list_dependencies(cursor)
+        console.print("Dependencies:")
+        for resource_id, title in dependencies:
+            console.print(f"ID: {resource_id}, Title: {title}")
+
+
+@app.command(
+    "reset",
+    help="Reset download dates for [italic]watched resources[/italic] in the database.",
+    rich_help_panel="📦 Resource Management"
+)
+def resources_reset_command():
+    db_name, _db_path = initialize_db_only()
+    with store.get_db_connection(db_name) as conn:
+        cursor = conn.cursor()
+        store.reset_download_dates(cursor)
+    console.print("Reset download dates for watched resources.")
+
+
+@app.command(
+    "config",
+    help="Update a setting by path and value.",
+    rich_help_panel="🍔 Configuration"
+)
+def config_command(
+    path: str = typer.Argument(..., metavar="SETTING_PATH", help="Dot-separated setting path (e.g., SPECIAL_RESOURCES.1974.opt_in)"),
+    value: str = typer.Argument(..., metavar="VALUE", help="New value for the setting"),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to apply the change in ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])"),
+):
+    config.initialize_config()
+    setting_path_list = path.split('.')
+    config.update_setting(setting_path_list, value, server.value if server else None)
+    console.print(f"Updated setting {path} to {value}{' for server ' + server.value if server else ''}.")
+
+
+@app.command(
+    "server",
+    help="Switch the current server/environment to [green]LIVE[/green], [yellow]TEST[/yellow], or [cyan]EMU[/cyan].",
+    rich_help_panel="🍔 Configuration"
+)
+def server_command(
+    env: Env = typer.Argument(..., metavar="SERVER", case_sensitive=False, help="Server to use: [green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]"),
+):
+    config.initialize_config()
+    config.switch_environment(env.value)
+    console.print(f"Environment updated to {env.value}.")
+    console.print("New complete configuration:")
+    typer.echo(config.settings.from_env(env.value).as_dict())
+
+
+@app.command("show", hidden=True)
+@app.command(
+    "status",
+    help="Show the configuration for the current or specified server.",
+    rich_help_panel="🍔 Configuration"
+)
+def config_show_command(server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to show (defaults to current)")):
+    config.initialize_config()
+    current_env = server.value if server else getattr(config.settings, 'ENV', 'UNKNOWN')
+    typer.echo({"Server": current_env})
+    typer.echo(config.settings.from_env(current_env).as_dict())
+
+
+@app.command(
+    "publish",
+    help="Publish updates to a [bold]RedGuides[/bold] resource.",
+    rich_help_panel="📤 Publishing"
+)
+def publish_command(
+    resource_id: int = typer.Argument(..., help="Existing RedGuides resource ID"),
+    description: Optional[Path] = typer.Option(None, "--description", "-d", metavar="README.md", help="Path to a description file (e.g. README.md) to become the overview description.", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+    version: Optional[str] = typer.Option(None, "--version", "-v", help="New version string (e.g., v1.0.1)"),
+    message: Optional[Path] = typer.Option(None, "--message", "-m", metavar="CHANGELOG.md | MESSAGE", help="Path to [italic]CHANGELOG.md[/italic] (keep a changelog) or a direct message string.", exists=False),
+    file: Optional[Path] = typer.Option(None, "--file", "-f", metavar="FILE.zip", help="Path to your zipped release file", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+    domain: Optional[str] = typer.Option(None, "--domain", help="If description or message is a .md file with relative URLs, resolve them to this domain (e.g., https://raw.githubusercontent.com/your/repo/main/)")
+):
+    # Preserve existing push.handle_cli behavior by passing a simple namespace
+    class _Args:
+        pass
+    args = _Args()
+    args.resource_id = resource_id
+    args.description = str(description) if isinstance(description, Path) else description
+    args.version = version
+    # message can be a file or a plain string; keep as provided
+    args.message = str(message) if isinstance(message, Path) else message
+    args.file = str(file) if isinstance(file, Path) else file
+    args.domain = domain
+    push.handle_cli(args)
+
+
+@app.command(
+    "version",
+    help="Show version and exit.",
+    rich_help_panel="🔧 System & Utilities"
+)
+def version_command():
+    console.print(f"redfetch {meta.get_current_version()}")
+
+
+@app.command(
+    "uninstall",
+    help="Uninstall [bold]redfetch[/bold] and clean up data.",
+    rich_help_panel="🔧 System & Utilities"
+)
+def uninstall_command():
+    meta.uninstall()
+
+
+@app.command(
+    "logout",
+    help="Log out and clear cached token and API cache.",
+    rich_help_panel="🔧 System & Utilities"
+)
+def auth_logout():
+    config.initialize_config()
+    API_KEY = os.environ.get('REDGUIDES_API_KEY')
+    if not API_KEY:
+        auth.initialize_keyring()
+        auth.logout()
+        console.print("Logged out successfully.")
+    else:
+        console.print("Cannot logout when using API key from environment variable.")
+
+
+# ============================================================================
+# LEGACY/DEPRECATED COMMAND ALIASES
+# ============================================================================
+
+def legacy_callback_factory(new_command: str, invoke_func=None, **invoke_kwargs):
+    """Factory to create deprecation callbacks that forward to new commands."""
+    def callback(ctx: typer.Context, value):
+        if ctx.resilient_parsing or not value:
+            return value
+        console.print(f"[bold yellow blink]Warning:[/bold yellow blink] This flag is deprecated! Use 'redfetch {new_command}' instead.")
+        if invoke_func:
+            ctx.invoke(invoke_func, **invoke_kwargs)
+        raise typer.Exit()
+    return callback
+
+
+def legacy_switch_env_callback(ctx: typer.Context, value: Optional[Env]):
+    """Deprecated --switch-env handler that forwards to the 'server' subcommand."""
+    if ctx.resilient_parsing or value is None:
+        return value
+    console.print("[yellow]Warning:[/yellow] --switch-env is deprecated. Use 'redfetch server ENV' instead.")
+    ctx.invoke(server_command, env=value)
+    raise typer.Exit()
+
+
+@app.callback()
+def root(
+    ctx: typer.Context,
+    # Legacy: --switch-env ENV
+    switch_env: Optional[Env] = typer.Option(
+        None, "--switch-env", is_eager=True, case_sensitive=False, hidden=True,
+        callback=legacy_switch_env_callback,
+        metavar="ENV", help="(Deprecated) Use 'server' subcommand instead.",
+    ),
+    # Legacy: --download-watched
+    download_watched: bool = typer.Option(
+        False, "--download-watched", is_eager=True, hidden=True,
+        callback=legacy_callback_factory("update", update_command, force=False),
+        help="(Deprecated) Use 'update' subcommand instead.",
+    ),
+    # Legacy: --force-download
+    force_download: bool = typer.Option(
+        False, "--force-download", is_eager=True, hidden=True,
+        callback=legacy_callback_factory("update --force", update_command, force=True),
+        help="(Deprecated) Use 'update --force' instead.",
+    ),
+    # Legacy: --serve
+    serve: bool = typer.Option(
+        False, "--serve", is_eager=True, hidden=True,
+        callback=legacy_callback_factory("web", web_command),
+        help="(Deprecated) Use 'web' subcommand instead.",
+    ),
+    # Legacy: --version
+    show_version: bool = typer.Option(
+        False, "--version", is_eager=True, hidden=True,
+        callback=legacy_callback_factory("version", version_command),
+        help="(Deprecated) Use 'version' subcommand instead.",
+    ),
+    # Legacy: --logout
+    do_logout: bool = typer.Option(
+        False, "--logout", is_eager=True, hidden=True,
+        callback=legacy_callback_factory("logout", auth_logout),
+        help="(Deprecated) Use 'logout' subcommand instead.",
+    ),
+    # Legacy: --uninstall
+    do_uninstall: bool = typer.Option(
+        False, "--uninstall", is_eager=True, hidden=True,
+        callback=legacy_callback_factory("uninstall", uninstall_command),
+        help="(Deprecated) Use 'uninstall' subcommand instead.",
+    ),
+):
+    """redfetch - RedGuides resource management tool."""
+    pass
+
+
+# ============================================================================
+# END LEGACY/DEPRECATED COMMANDS
+# ============================================================================
 
 def main():
-    args = parse_arguments()
-    config.initialize_config()
-
-    # Handle uninstall command early if needed
-    if args.uninstall:
-        meta.uninstall()
+    # Launch TUI when no arguments are provided
+    if len(sys.argv) == 1:
+        run_tui()
         return
+    app()
 
-    # Skip update check in CI environment
-    if os.environ.get('CI') != 'true':
-        # Check for updates
-        update_available = meta.check_for_update()
-
-    # Check if the push command was called
-    if args.command == 'push':
-        handle_push(args)
-    else:
-        # Proceed with fetch-related operations
-        handle_fetch(args)
 
 if __name__ == "__main__":
     main()
