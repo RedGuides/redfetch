@@ -5,25 +5,30 @@ import sys
 import json
 
 # Third-party
+from dynaconf import ValidationError
 from platformdirs import user_config_dir
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm, PromptBase
 from rich.text import Text
 from rich.box import ASCII2
-from tomlkit import load, dumps, document, table, TOMLDocument
+from tomlkit import table, TOMLDocument
 
 # Custom
+from redfetch.config import load_config, save_config, validate_no_eqgame
 from redfetch.detecteq import find_everquest_uninstall_location
 
 console = Console()
+
 
 # zork-like prompt
 class CustomPrompt(PromptBase):
     prompt_suffix = " > "
 
+
 class CustomConfirm(Confirm):
     validate_error_message = "[prompt.invalid]The wizards look at you with a blank stare."
+
 
 def get_rg_utility_paths():
     """Returns relevant paths from RedGuides Desktop Utility if installed."""
@@ -46,6 +51,7 @@ def get_rg_utility_paths():
                    if k in relevant_keys and v}  # Only return non-empty paths
     except Exception:
         return {}
+
 
 def setup_directories():
     default_config_dir = user_config_dir("redfetch", "RedGuides")
@@ -96,26 +102,25 @@ def setup_directories():
                 return setup_directories()
 
         # At this point, the directory should exist (either pre-existing or newly created).
-        # We can now safely iterate through parent directories to check for eqgame.exe
-        current_dir = custom_dir
-        while current_dir != os.path.dirname(current_dir):  # Stop at root directory
-            if 'eqgame.exe' in os.listdir(current_dir):
-                console.print(
-                    Panel(
-                        Text.from_markup(
-                            "[bold red blink]WHAT THE FUCK ARE YOU DOING?!?!![/bold red blink]\n"
-                            "There's an EQGame.exe in this path!!\n"
-                            "Please select a different directory, please, thank you in advance. :pray:",
-                            justify="center"
-                        ),
-                        title="[bold underline red]Critical Warning[/bold underline red]",
-                        border_style="bold red",
-                        expand=False
-                    )
+        # We can now safely reuse the shared eqgame checker.
+        try:
+            validate_no_eqgame(custom_dir)
+        except ValidationError:
+            console.print(
+                Panel(
+                    Text.from_markup(
+                        "[bold red blink]WHAT THE FUCK ARE YOU DOING?!?!![/bold red blink]\n"
+                        "There's an EQGame.exe in this path!!\n"
+                        "Please select a different directory, please, thank you in advance. :pray:",
+                        justify="center"
+                    ),
+                    title="[bold underline red]Critical Warning[/bold underline red]",
+                    border_style="bold red",
+                    expand=False
                 )
-                # Restart the directory selection process
-                return setup_directories()
-            current_dir = os.path.dirname(current_dir)
+            )
+            # Restart the directory selection process
+            return setup_directories()
 
         # Use the custom directory if it exists and is valid
         config_dir = custom_dir
@@ -128,28 +133,18 @@ def setup_directories():
     os.makedirs(config_dir, exist_ok=True)
     return config_dir
 
+
 def create_first_run_flag(default_config_dir, chosen_config_dir):
     os.makedirs(default_config_dir, exist_ok=True)
     first_run_flag = os.path.join(default_config_dir, 'first_run_complete')
     with open(first_run_flag, 'w') as f:
         f.write(chosen_config_dir)
 
+
 def is_first_run(default_config_dir):
     first_run_flag = os.path.join(default_config_dir, 'first_run_complete')
     return not os.path.exists(first_run_flag)
 
-def load_settings(settings_file):
-    """Load existing settings or create a new TOML document."""
-    if os.path.exists(settings_file):
-        try:
-            with open(settings_file, "r", encoding="utf-8") as f:
-                doc = load(f)
-        except Exception as e:
-            console.print(f"[bold red]Error loading settings file: {e}[/bold red]")
-            doc = document()
-    else:
-        doc = document()
-    return doc
 
 def get_or_create_table(doc: TOMLDocument, table_path: str):
     """Navigate or create nested tables in the TOML document."""
@@ -159,6 +154,7 @@ def get_or_create_table(doc: TOMLDocument, table_path: str):
             current_section.add(key_name, table())
         current_section = current_section[key_name]
     return current_section
+
 
 def update_setting(doc: TOMLDocument, table_path: str, key_name: str, new_value, friendly_name: str):
     """Update a setting in the TOML document with user confirmation."""
@@ -180,13 +176,6 @@ def update_setting(doc: TOMLDocument, table_path: str, key_name: str, new_value,
     current_section[key_name] = new_value
     return True
 
-def save_settings(doc: TOMLDocument, settings_file: str):
-    """Write the TOML document back to the settings file."""
-    try:
-        with open(settings_file, "w", encoding="utf-8") as f:
-            f.write(dumps(doc))
-    except Exception as e:
-        console.print(f"[bold red]Error saving settings file: {e}[/bold red]")
 
 def first_run_setup():
     default_config_dir = user_config_dir("redfetch", "RedGuides")
@@ -201,7 +190,7 @@ def first_run_setup():
 
     # Load existing settings early
     settings_file = os.path.join(default_config_dir, "settings.local.toml")
-    doc = load_settings(settings_file)
+    doc = load_config(settings_file)
 
     if not is_first_run(default_config_dir):
         with open(os.path.join(default_config_dir, 'first_run_complete'), 'r') as f:
@@ -210,7 +199,27 @@ def first_run_setup():
         # Check for .env file
         env_file_path = os.path.join(config_dir, '.env')
         if os.path.exists(env_file_path):
-            console.print(Panel(f"[bold yellow]Setup already completed.[/bold yellow]\nConfiguration directory: {config_dir}", expand=False))
+            # Effective env: .env value, then REDFETCH_ENV, then LIVE
+            env_from_file = None
+            try:
+                with open(env_file_path, "r", encoding="utf-8") as env_file:
+                    for line in env_file:
+                        line = line.strip()
+                        if line.startswith("REDFETCH_ENV="):
+                            env_from_file = line.split("=", 1)[1].strip()
+                            break
+            except OSError:
+                pass
+
+            effective_env = env_from_file or os.environ.get("REDFETCH_ENV") or "LIVE"
+
+            console.print(
+                Panel(
+                    f"[bold yellow]Server type: [cyan]{effective_env}[/cyan][/bold yellow]\n"
+                    f"Configuration directory: {config_dir}",
+                    expand=False,
+                )
+            )
             return config_dir
         else:
             console.print("[bold red]Environment file (.env) not found. Rerunning setup.[/bold red]")
@@ -289,7 +298,7 @@ def first_run_setup():
     console.print(Panel(f"[bold green]Configuration directory: {config_dir}[/bold green]", expand=False))
     
     settings_file = os.path.join(config_dir, "settings.local.toml")
-    doc = load_settings(settings_file)
+    doc = load_config(settings_file)
 
     # Handle EQ path settings
     try:
@@ -306,7 +315,7 @@ def first_run_setup():
                             doc, 'LIVE', 'EQPATH', eq_path, 'EQ path'
                         )
                         if eq_path_updated:
-                            save_settings(doc, settings_file)
+                            save_config(settings_file, doc)
                             console.print(f"[green]EQ path updated in {settings_file}[/green]")
                         else:
                             console.print(f"[yellow]No changes made to EQ path in {settings_file}[/yellow]")
@@ -318,7 +327,7 @@ def first_run_setup():
                         doc, 'LIVE', 'EQPATH', eq_path, 'EQ path'
                     )
                     if eq_path_updated:
-                        save_settings(doc, settings_file)
+                        save_config(settings_file, doc)
                     else:
                         console.print(f"[yellow]No changes made to EQ path in {settings_file}[/yellow]")
     except Exception as e:
@@ -378,9 +387,10 @@ def first_run_setup():
             console.print(f"[cyan]No changes made to {friendly_name} path.[/cyan]")
 
     if settings_updated:
-        save_settings(doc, settings_file)
+        save_config(settings_file, doc)
 
     return config_dir
+
 
 if __name__ == "__main__":
     first_run_setup()

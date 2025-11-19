@@ -5,9 +5,6 @@ import os
 import tomlkit
 from dynaconf import Dynaconf, Validator, ValidationError
 
-# local
-from redfetch.config_firstrun import first_run_setup
-
 # Parent Category to folder
 CATEGORY_MAP = {
     8: "macros",
@@ -32,6 +29,7 @@ EQMAPS_MAP = {
     303: "Goods"
 }
 
+
 def validate_no_eqgame(path):
     """Validate that the path and its parents don't contain eqgame.exe."""
     current_path = os.path.abspath(path)
@@ -39,6 +37,7 @@ def validate_no_eqgame(path):
         if os.path.exists(os.path.join(current_path, 'eqgame.exe')):
             raise ValidationError(f"Path '{path}' or its parent contains eqgame.exe")
         current_path = os.path.dirname(current_path)
+
 
 def normalize_and_create_path(path):
     if not path:
@@ -52,6 +51,7 @@ def normalize_and_create_path(path):
         except OSError as e:
             raise ValidationError(f"Failed to create the directory '{normalized_path}': {e}")
     return normalized_path
+
 
 # Custom Dynaconf validator specifically for SPECIAL_RESOURCE paths
 def normalize_paths_in_dict(data, parent_key=None):
@@ -73,6 +73,7 @@ def normalize_paths_in_dict(data, parent_key=None):
             normalize_paths_in_dict(item, parent_key=parent_key)
     return data
 
+
 # Initialize variables
 script_dir = os.path.dirname(os.path.abspath(__file__))
 os.environ['REDFETCH_SCRIPT_DIR'] = script_dir
@@ -82,8 +83,11 @@ config_dir = None
 env_file_path = None
 settings = None
 
+
 def initialize_config():
     """Initialize configuration settings."""
+    from redfetch.config_firstrun import first_run_setup
+    
     global config_dir, env_file_path, settings  # Declare globals to modify them
 
     # Perform first-run setup
@@ -126,6 +130,7 @@ def initialize_config():
     # Return the settings object for potential use
     return settings
 
+
 def switch_environment(new_env):
     """Switch the environment and update the settings."""
     if settings is None:
@@ -134,15 +139,11 @@ def switch_environment(new_env):
     # Update the .env file first
     write_env_to_file(new_env)
 
-    # Now set the environment
+    # Set the Dynaconf environment so subsequent `from_env` calls use the new env
     settings.setenv(new_env)
-    settings.from_env(new_env).setenv(new_env)
 
-    # Explicitly set the ENV variable if needed
+    # Keep a simple attribute around for convenience (used throughout the app)
     settings.ENV = new_env
-
-    # Update the from_env object to reflect the new environment
-    settings.from_env(new_env).ENV = new_env
 
     # Re-validate settings after environment switch
     try:
@@ -153,6 +154,7 @@ def switch_environment(new_env):
 
     return settings
 
+
 def ensure_config_file_exists(file_path):
     """Ensure the configuration file exists."""
     if not os.path.exists(file_path):
@@ -162,15 +164,23 @@ def ensure_config_file_exists(file_path):
             f.write(tomlkit.dumps({}))  # Create an empty TOML file
         print(f"Created new configuration file: {file_path}")
 
+
 def load_config(file_path):
-    """Load the TOML configuration file."""
-    with open(file_path, 'r') as f:
-        return tomlkit.parse(f.read())
+    """Load the TOML configuration file, creating an empty document if it doesn't exist."""
+    if not os.path.exists(file_path):
+        return tomlkit.document()
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return tomlkit.parse(f.read())
+    except Exception as e:
+        raise ValidationError(f"Error loading config file {file_path}: {e}")
+
 
 def save_config(file_path, config_data):
     """Save the updated configuration data to the TOML file."""
     with open(file_path, 'w') as f:
         f.write(tomlkit.dumps(config_data))
+
 
 def update_setting(setting_path, setting_value, env=None):
     """Update a specific setting in the settings.local.toml file and in memory,
@@ -219,6 +229,7 @@ def update_setting(setting_path, setting_value, env=None):
     settings.reload()
 
     print("Configuration saved.")
+
 
 def write_env_to_file(new_env):
     """Update the environment setting in the .env file."""
