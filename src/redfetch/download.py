@@ -145,13 +145,18 @@ async def _stream_to_tempfile(resp, file_path: str, hasher) -> str:
 def _hash_matches(hasher, expected_md5: str, file_path: str, tmp_path: str | None) -> bool:
     """Verify MD5 hash and clean up temp file on mismatch."""
     actual = hasher.hexdigest().lower()
-    if actual == expected_md5.lower():
+    # Sanitize expected_md5 in case of any whitespace issues
+    expected = expected_md5.strip().lower()
+    
+    if actual == expected:
         return True
 
     if tmp_path and os.path.exists(tmp_path):
         os.remove(tmp_path)
 
     print(f"MD5 mismatch for {os.path.basename(file_path)}")
+    print(f"  Expected: {expected}")
+    print(f"  Got:      {actual}")
     return False
 
 

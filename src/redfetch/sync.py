@@ -24,10 +24,19 @@ DOWNLOAD_MAX_KEEPALIVE_CONNECTIONS = 6
 def resource_from_api_payload(payload: dict, *, is_watching: bool = False, is_special: bool = False, is_licensed: bool = False) -> Resource:
     """Convert API payload to Resource."""
     file = payload['current_files'][0]
+    raw_hash = file.get('hash')
+    # Sanitize hash: strip whitespace and validate it's hexadecimal
+    sanitized_hash = None
+    if raw_hash:
+        cleaned = raw_hash.strip().lower()
+        # Validate it's a valid MD5 (32 hex chars)
+        if len(cleaned) == 32 and all(c in '0123456789abcdef' for c in cleaned):
+            sanitized_hash = cleaned
+    
     file_info = FileInfo(
         filename=file['filename'],
         url=file['download_url'],
-        hash=file.get('hash')
+        hash=sanitized_hash
     )
     category_id = payload['Category']['parent_category_id']
     return Resource(
