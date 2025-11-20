@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2025-11-20
+
+### Added
+- Re-made the command line interface for redfetch. Legacy commands still work. See the resource overview or `redfetch help` for details.
+
+### Changed
+- Refactored just about everything to be async/await, which makes updates much faster.
+
 ## [0.8.0] - 2025-10-27
 
 ### Added

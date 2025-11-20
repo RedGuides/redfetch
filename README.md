@@ -98,17 +98,17 @@ Another UI option! Run this command and then browse https://www.redguides.com/co
 > - `ui` - Launch the Terminal User Interface
 > - `web` - Launch the RedGuides.com web interface
 > - `version` - Show version and exit
-> - `logout` - Log out and clear cached token and API cache
+> - `logout` - Disconnect your account from redfetch
 > - `uninstall` - Uninstall redfetch and clean up data
 > 
 > ### 📤 Publishing
-> - `publish <resource_id>` - Publish updates to a RedGuides resource. [There's also a github action for this.](https://github.com/marketplace/actions/redguides-publish)
+> - `publish <resource_id>` - Publish an update to you or your team's resource. [There's also a github action for this.](https://github.com/marketplace/actions/redguides-publish)
 >   - `resource_id` - Existing RedGuides resource ID
->   - `--description <README.md>` / `-d` - Path to a description file (e.g. `README.md`) to become the overview description
+>   - `--description <README.md>` / `-d` - Path to a file (e.g. `README.md`) that will become the resource's overview description
 >   - `--version <version_number>` / `-v` - New version string (e.g., `v1.0.1`)
->   - `--message <CHANGELOG.md | MESSAGE>` / `-m` - Path to `CHANGELOG.md` (keep a changelog) or a direct message string
+>   - `--message <CHANGELOG.md | MESSAGE>` / `-m` - Version update message or `CHANGELOG.md` (keep a changelog) file.
 >   - `--file <FILE.zip>` / `-f` - Path to your zipped release file
->   - `--domain <URL>` - If description or message is a .md file with relative URLs, resolve them to this domain (e.g., `https://raw.githubusercontent.com/your/repo/main/`)
+>   - `--domain <URL>` - Domain to prepend to relative URLs in README.md or CHANGELOG.md files. (mostly for images. e.g., `https://raw.githubusercontent.com/yourusername/yourrepo/main/`)
 
 ## Settings
 
