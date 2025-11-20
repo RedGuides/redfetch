@@ -67,7 +67,14 @@ def fetch_latest_version_from_pypi():
     response = httpx.get(PYPI_URL, timeout=10.0)
     response.raise_for_status()
     data = response.json()
-    return data['info']['version']
+    # On TestPyPI, prefer the highest available release (including pre-releases)
+    if "test.pypi.org" in PYPI_URL:
+        releases = list(data.get("releases", {}).keys())
+        if releases:
+            releases.sort(key=version.parse)
+            return releases[-1]
+    # Default: whatever PyPI reports as the latest stable version
+    return data["info"]["version"]
 
 
 def get_executable_path():
