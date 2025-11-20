@@ -318,10 +318,59 @@ def server_command(
     rich_help_panel="🍔 Configuration"
 )
 def config_show_command(server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to show (defaults to current)")):
+    from rich.panel import Panel
+
     config.initialize_config()
-    current_env = server.value if server else getattr(config.settings, 'ENV', 'UNKNOWN')
-    typer.echo({"Server": current_env})
-    typer.echo(config.settings.from_env(current_env).as_dict())
+    current_env = server.value if server else getattr(config.settings, "ENV", "UNKNOWN")
+    env_settings = config.settings.from_env(current_env)
+
+    # Core paths for this environment
+    download_folder = env_settings.get("DOWNLOAD_FOLDER") or ""
+    eq_path = env_settings.get("EQPATH") or ""
+
+    panel_lines: list[str] = []
+
+    # Only show top-level paths that are actually set
+    if download_folder:
+        panel_lines.append(f"[bold yellow]DOWNLOAD_FOLDER:[/bold yellow] {download_folder}")
+    if eq_path:
+        panel_lines.append(f"[bold yellow]EQPATH:[/bold yellow] {eq_path}")
+
+    # Opted-in special resources with resolved paths, keyed by resource ID
+    special_resources = env_settings.get("SPECIAL_RESOURCES", {})
+
+    for resource_id, resource_info in special_resources.items():
+        # Only show if opted in
+        if not resource_info.get("opt_in"):
+            continue
+
+        # Get the resolved path
+        custom_path = resource_info.get("custom_path", "")
+        default_path = resource_info.get("default_path", "")
+
+        if custom_path:
+            resource_path = custom_path
+        elif default_path:
+            # If default_path is absolute, use it as-is
+            if download_folder and not os.path.isabs(default_path):
+                resource_path = os.path.join(download_folder, default_path)
+            else:
+                resource_path = default_path
+        else:
+            continue
+
+        # Label only by resource ID
+        panel_lines.append(f"[bold yellow]Resource {resource_id}:[/bold yellow] {resource_path}")
+
+    # If nothing to show, still render an empty-but-clear panel
+    if not panel_lines:
+        panel_lines.append("[dim]No paths are currently configured or opted in for this environment.[/dim]")
+
+    console.print(Panel("\n".join(panel_lines), expand=False))
+
+    # Optional: Show full settings dict with a label
+    console.print("\n[dim][italic]Full configuration (for debugging):[/italic][/dim]")
+    typer.echo(env_settings.as_dict())
 
 
 @app.command(
