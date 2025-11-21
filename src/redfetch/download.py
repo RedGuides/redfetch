@@ -127,19 +127,27 @@ def _ensure_disk_space(resp, file_path: str) -> None:
 async def _stream_to_tempfile(resp, file_path: str, hasher) -> str:
     """Stream HTTP body into a temp file."""
     tmp_dir = os.path.dirname(file_path)
-    async with aiofiles.tempfile.NamedTemporaryFile("wb", delete=False, dir=tmp_dir) as tmp:
-        tmp_path = tmp.name
+    tmp_path = None
 
-        async for chunk in resp.aiter_bytes(chunk_size=262_144):
-            if not chunk:
-                continue
+    try:
+        async with aiofiles.tempfile.NamedTemporaryFile("wb", delete=False, dir=tmp_dir) as tmp:
+            tmp_path = tmp.name
 
-            if hasher:
-                hasher.update(chunk)
+            async for chunk in resp.aiter_bytes(chunk_size=262_144):
+                if not chunk:
+                    continue
 
-            await tmp.write(chunk)
+                if hasher:
+                    hasher.update(chunk)
 
-    return tmp_path
+                await tmp.write(chunk)
+
+        return tmp_path
+    except Exception:
+        # Clean up any partially written temp file on error
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 def _hash_matches(hasher, expected_md5: str, file_path: str, tmp_path: str | None) -> bool:
