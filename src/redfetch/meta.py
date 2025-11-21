@@ -22,14 +22,25 @@ from redfetch.__about__ import __version__
 from redfetch import config
 from diskcache import Cache
 
-# environment variable to determine which PyPI URL to use. just fyi test is https://test.pypi.org/pypi/redfetch/json
-PYPI_URL = os.getenv("REDFETCH_PYPI_URL", "https://pypi.org/pypi/redfetch/json")
+
+def _get_pypi_url() -> str:
+    """Pick PyPI JSON URL, favouring `REDFETCH_PYPI_URL` if set."""
+    env_url = os.getenv("REDFETCH_PYPI_URL")
+    if env_url:
+        return env_url
+    if "dev" in __version__:
+        return "https://test.pypi.org/pypi/redfetch/json"
+    return "https://pypi.org/pypi/redfetch/json"
+
+
+PYPI_URL = _get_pypi_url()
 
 console = Console()
 
 
 def get_current_version():
     return __version__
+
 
 _UPDATE_CACHE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
 
@@ -42,10 +53,7 @@ def _get_meta_cache():
     if not cache_dir:
         cache_dir = os.getcwd()
     api_cache_dir = os.path.join(cache_dir, '.cache')
-    try:
-        os.makedirs(api_cache_dir, exist_ok=True)
-    except Exception:
-        pass
+    os.makedirs(api_cache_dir, exist_ok=True)
     return Cache(api_cache_dir)
 
 
@@ -54,14 +62,11 @@ def clear_pypi_cache() -> None:
     global _meta_cache
     if _meta_cache is None:
         _meta_cache = _get_meta_cache()
-    try:
-        _meta_cache.clear()
-    except Exception:
-        pass
+    _meta_cache.clear()
 
 
 def fetch_latest_version_cached():
-    """Fetch latest PyPI version with a 12-hour disk-backed cache."""
+    """Fetch latest PyPI version with a 2-hour disk-backed cache."""
     global _meta_cache
     if _meta_cache is None:
         _meta_cache = _get_meta_cache()
