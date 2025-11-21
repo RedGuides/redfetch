@@ -42,6 +42,8 @@ jobs:
           if [ "${{ github.ref }}" == "refs/heads/develop" ]; then
             echo "REDFETCH_BASE_URL=https://www.redguides.com/devtestbaby" >> $GITHUB_ENV
             # Use production manifest endpoint (no /community) for develop builds.
+            # NOTE: to update an .exe that's pre-release, as we do on develop, PYAPP requires you to pass --pre:
+            #   .\redfetch.exe self update --pre
             echo "REDFETCH_MANIFEST_URL=https://www.redguides.com/resources-manifest" >> $GITHUB_ENV
           fi
 
