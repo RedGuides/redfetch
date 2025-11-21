@@ -31,7 +31,7 @@ console = Console()
 def get_current_version():
     return __version__
 
-_UPDATE_CACHE_TTL_SECONDS = 12 * 60 * 60  # 12 hours
+_UPDATE_CACHE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
 
 _meta_cache = None
 
@@ -47,6 +47,17 @@ def _get_meta_cache():
     except Exception:
         pass
     return Cache(api_cache_dir)
+
+
+def clear_pypi_cache() -> None:
+    """Clear cached PyPI metadata."""
+    global _meta_cache
+    if _meta_cache is None:
+        _meta_cache = _get_meta_cache()
+    try:
+        _meta_cache.clear()
+    except Exception:
+        pass
 
 
 def fetch_latest_version_cached():

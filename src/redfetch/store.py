@@ -5,6 +5,7 @@ import aiosqlite
 
 from redfetch import config
 from redfetch.models import DownloadTask, Resource
+from redfetch import meta
 
 # Unified schema version marker
 SCHEMA_VERSION = 1
@@ -152,6 +153,10 @@ def reset_download_dates(cursor) -> None:
     """Reset all download dates to force re-download and re-fetch from API."""
     cursor.execute("UPDATE downloads SET version_local=0")
     cursor.execute("UPDATE metadata SET last_fetch_time=0 WHERE id=1")
+    try:
+        meta.clear_pypi_cache()
+    except Exception:
+        pass
 
 
 def reset_download_date_for_resource(cursor, resource_id: str) -> None:
@@ -186,6 +191,11 @@ async def reset_download_dates_async(db_path: str) -> None:
         await conn.execute("UPDATE downloads SET version_local=0")
         await conn.execute("UPDATE metadata SET last_fetch_time=0 WHERE id=1")
         await conn.commit()
+    # Clear PyPI cache outside the DB transaction
+    try:
+        meta.clear_pypi_cache()
+    except Exception:
+        pass
 
 
 def list_resources(cursor) -> list[tuple[int, str]]:

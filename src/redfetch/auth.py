@@ -245,7 +245,8 @@ def get_cached_tokens():
 def logout():
     """Clear stored credentials from keyring and all disk caches."""
     from redfetch import api
-    
+    from redfetch import meta
+
     # Clear current secrets from keyring
     keyring_credentials = ['access_token', 'refresh_token', 'api_key']
     # Also clear legacy entries that may exist from older versions
@@ -261,9 +262,10 @@ def logout():
             # Credential not found, nothing to delete
             pass
 
-    # Clear the persistent cache directory
+    # Clear the persistent cache directory (API, manifest, PyPI version, etc.)
     try:
         api.clear_api_cache()
+        meta.clear_pypi_cache()
         credentials_deleted = True
     except Exception:
         pass
