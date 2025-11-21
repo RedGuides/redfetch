@@ -54,6 +54,7 @@ Label {
     grid-size: 3;
     grid-rows: auto auto auto auto 1fr;
     grid-gutter: 1;
+    min-width: 60;
 }
 #center_welcome {
     column-span: 3;
