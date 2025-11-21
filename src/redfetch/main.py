@@ -401,6 +401,73 @@ def publish_command(
 
 
 @app.command(
+    "push",
+    help="[DEPRECATED] Use 'publish' instead.",
+    rich_help_panel="📤 Publishing",
+    hidden=True,
+)
+def push_command(
+    resource_id: int = typer.Argument(..., help="Existing RedGuides resource ID"),
+    description: Optional[Path] = typer.Option(
+        None,
+        "--description",
+        "-d",
+        metavar="README.md",
+        help="Path to a description file (e.g. README.md) to become the overview description.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    version: Optional[str] = typer.Option(
+        None,
+        "--version",
+        "-v",
+        help="New version string (e.g., v1.0.1)",
+    ),
+    message: Optional[Path] = typer.Option(
+        None,
+        "--message",
+        "-m",
+        metavar="CHANGELOG.md | MESSAGE",
+        help="Path to [italic]CHANGELOG.md[/italic] (keep a changelog) or a direct message string.",
+        exists=False,
+    ),
+    file: Optional[Path] = typer.Option(
+        None,
+        "--file",
+        "-f",
+        metavar="FILE.zip",
+        help="Path to your zipped release file",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    domain: Optional[str] = typer.Option(
+        None,
+        "--domain",
+        help="If description or message is a .md file with relative URLs, resolve them to this domain (e.g., https://raw.githubusercontent.com/your/repo/main/)",
+    ),
+):
+    """Legacy alias for the old 'push' command; forwards to 'publish'."""
+    console.print(
+        "[yellow]Warning:[/yellow] 'push' is deprecated. "
+        "Use 'redfetch publish' instead."
+    )
+    publish_command(
+        resource_id=resource_id,
+        description=description,
+        version=version,
+        message=message,
+        file=file,
+        domain=domain,
+    )
+
+
+@app.command(
     "version",
     help="Show version and exit.",
     rich_help_panel="🔧 System & Utilities"
