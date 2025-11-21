@@ -401,6 +401,45 @@ def publish_command(
 
 
 @app.command(
+    "version",
+    help="Show version and exit.",
+    rich_help_panel="🔧 System & Utilities"
+)
+def version_command():
+    console.print(f"redfetch {meta.get_current_version()}")
+
+
+@app.command(
+    "uninstall",
+    help="Uninstall [bold]redfetch[/bold] and clean up data.",
+    rich_help_panel="🔧 System & Utilities"
+)
+def uninstall_command():
+    meta.uninstall()
+
+
+@app.command(
+    "logout",
+    help="Log out and clear cached token and API cache.",
+    rich_help_panel="🔧 System & Utilities"
+)
+def auth_logout():
+    config.initialize_config()
+    API_KEY = os.environ.get('REDGUIDES_API_KEY')
+    if not API_KEY:
+        auth.initialize_keyring()
+        auth.logout()
+        console.print("Logged out successfully.")
+    else:
+        console.print("Cannot logout when using API key from environment variable.")
+
+
+# ============================================================================
+# LEGACY/DEPRECATED COMMAND ALIASES
+# ============================================================================
+
+
+@app.command(
     "push",
     help="[DEPRECATED] Use 'publish' instead.",
     rich_help_panel="📤 Publishing",
@@ -465,45 +504,6 @@ def push_command(
         file=file,
         domain=domain,
     )
-
-
-@app.command(
-    "version",
-    help="Show version and exit.",
-    rich_help_panel="🔧 System & Utilities"
-)
-def version_command():
-    console.print(f"redfetch {meta.get_current_version()}")
-
-
-@app.command(
-    "uninstall",
-    help="Uninstall [bold]redfetch[/bold] and clean up data.",
-    rich_help_panel="🔧 System & Utilities"
-)
-def uninstall_command():
-    meta.uninstall()
-
-
-@app.command(
-    "logout",
-    help="Log out and clear cached token and API cache.",
-    rich_help_panel="🔧 System & Utilities"
-)
-def auth_logout():
-    config.initialize_config()
-    API_KEY = os.environ.get('REDGUIDES_API_KEY')
-    if not API_KEY:
-        auth.initialize_keyring()
-        auth.logout()
-        console.print("Logged out successfully.")
-    else:
-        console.print("Cannot logout when using API key from environment variable.")
-
-
-# ============================================================================
-# LEGACY/DEPRECATED COMMAND ALIASES
-# ============================================================================
 
 def legacy_callback_factory(new_command: str, invoke_func=None, **invoke_kwargs):
     """Factory to create deprecation callbacks that forward to new commands."""
