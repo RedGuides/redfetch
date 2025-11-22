@@ -23,7 +23,7 @@ from textual.app import App, ComposeResult
 from textual.command import Provider, Hit, Hits, DiscoveryHit
 from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log
 from textual.events import Print
-from textual.containers import ScrollableContainer, Center, Grid, ItemGrid
+from textual.containers import ScrollableContainer, Center, Grid, ItemGrid, Vertical
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState
 from textual.screen import ModalScreen
@@ -60,6 +60,7 @@ class RedfetchCommands(Provider):
             ("Stop RedGuides Interface", app.cancel_redguides_interface, "Stop the RedGuides interface"),
             ("Update Single Resource", app.handle_update_resource_id, "Update a single resource by its ID or URL"),
             ("Copy Log", app.handle_copy_log, "Copy the entire log to your clipboard"),
+            ("Clear Log", app.handle_clear_log, "Clear all text from the log view"),
             ("Manage Watched Resources", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_watched"))), "Manage the resources you're watching"),
             ("Manage Account", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_account"))), "Manage your RedGuides subscription"),
             ("Licensed Resources", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_licensed"))), "Manage your purchased resources"),
@@ -130,23 +131,45 @@ class Redfetch(App):
         yield Footer()
         with TabbedContent():
             with TabPane("Fetch", id="fetch"):
-                with ScrollableContainer(id="fetch_grid"):
-                    with Center(id="center_welcome"):
-                        yield Label("Who's this?", id="welcome_label")
-                    with Center(id="center_watched"):
-                        yield Button("Checking if Very Vanilla MQ is up. 🍦", id="update_watched", variant="default", tooltip="is MQ down?")
-                    yield Button("Update Single Resource", id="update_resource_id", variant="default", disabled=True, tooltip="Update a single resource by its ID or URL.")
-                    yield Input(placeholder=f"{input_verb} resource URL or ID", id="resource_id_input", tooltip="Update a single resource by its ID or URL.")
-                    yield Select[str](
-                        [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
-                        id="server_type_fetch",
-                        value=self.current_env,  # Use the reactive attribute
-                        allow_blank=False,
-                        tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
-                    )
-                    yield Button("RedGuides Interface 🌐", id="redguides_interface", variant="primary", tooltip="Access an interface for this script on the website.")
-                    yield Button("Copy Log", id="copy_log", variant="default", tooltip="Copy the entire log to your clipboard")
-                    yield PrintCapturingLog(id="fetch_log")
+                # Simple vertical layout: controls on top, big log on the bottom
+                with ScrollableContainer(id="fetch_scroll"):
+                    with Vertical(id="fetch_layout"):
+                        with Grid(id="fetch_grid"):
+                            with Center(id="center_welcome"):
+                                yield Label("Who's this?", id="welcome_label")
+                            with Center(id="center_watched"):
+                                yield Button(
+                                    "Checking if Very Vanilla MQ is up. 🍦",
+                                    id="update_watched",
+                                    variant="default",
+                                    tooltip="is MQ down?",
+                                )
+                            yield Button(
+                                "Update Single Resource",
+                                id="update_resource_id",
+                                variant="default",
+                                disabled=True,
+                                tooltip="Update a single resource by its ID or URL.",
+                            )
+                            yield Input(
+                                placeholder=f"{input_verb} resource URL or ID",
+                                id="resource_id_input",
+                                tooltip="Update a single resource by its ID or URL.",
+                            )
+                            yield Select[str](
+                                [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
+                                id="server_type_fetch",
+                                value=self.current_env,  # Use the reactive attribute
+                                allow_blank=False,
+                                tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers.",
+                            )
+                            yield Button(
+                                "RedGuides Interface 🌐",
+                                id="redguides_interface",
+                                variant="primary",
+                                tooltip="Access an interface for this script on the website.",
+                            )
+                        yield LogWithToolbar(id="fetch_log_container")
 
             with TabPane("Settings", id="settings"):
                 with ScrollableContainer():
@@ -261,8 +284,6 @@ class Redfetch(App):
             else:
                 # Cancel the interface; flag will be updated via workers
                 self.cancel_redguides_interface()
-        elif event.button.id == "copy_log":
-            self.handle_copy_log()
 
         # settings
         elif event.button.id == "select_dl_path":
@@ -554,13 +575,23 @@ class Redfetch(App):
         self.copy_to_clipboard(text)
 
     def handle_copy_log(self) -> None:
+        """Handler for copying log content via command palette."""
         copy_button = self.query_one("#copy_log", Button)
         log_widget = self.query_one("#fetch_log", Log)
         log_content = "\n".join(log_widget.lines)
         self.copy_to_clipboard_with_fallback(log_content)
         self.notify("Log contents copied to clipboard")
         copy_button.variant = "success"
-        self.set_timer(3, lambda: self.reset_button("copy_log", "default"))
+        self.set_timer(3, lambda: setattr(copy_button, "variant", "default"))
+
+    def handle_clear_log(self) -> None:
+        """Handler for clearing log content."""
+        clear_button = self.query_one("#clear_log", Button)
+        log_widget = self.query_one("#fetch_log", Log)
+        log_widget.clear()
+        self.notify("Log cleared")
+        clear_button.variant = "success"
+        self.set_timer(3, lambda: setattr(clear_button, "variant", "default"))
 
     def reset_button(self, button_id: str, variant: str = "default") -> None:
         # pass the button id and variant to reset
@@ -1216,6 +1247,37 @@ class PrintCapturingLog(Log):
 
     def on_print(self, event: Print) -> None:
         self.write(event.text)
+
+
+class LogWithToolbar(Vertical):
+    """A Log widget with an integrated copy button toolbar."""
+    
+    def compose(self) -> ComposeResult:
+        # Toolbar row with log actions
+        with Grid(id="log_toolbar"):
+            yield Button(
+                "Copy Log 📋",
+                id="copy_log",
+                variant="default",
+                tooltip="Copy the entire log to your clipboard",
+            )
+            yield Button(
+                "Clear Log 🧹",
+                id="clear_log",
+                variant="default",
+                tooltip="Clear all text from the log view",
+            )
+        yield PrintCapturingLog(id="fetch_log")
+    
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "copy_log":
+            app = self.app
+            assert isinstance(app, Redfetch)
+            app.handle_copy_log()
+        elif event.button.id == "clear_log":
+            app = self.app
+            assert isinstance(app, Redfetch)
+            app.handle_clear_log()
 
 
 class RunVVMQScreen(ModalScreen):

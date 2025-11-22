@@ -4,6 +4,12 @@
 /* $primary-red: $primary; */
 /* $secondary-red: $secondary; */
 
+/* App-wide minimums */
+Redfetch {
+    min-width: 80;
+    min-height: 24;
+}
+
 Header {
     color: $error-lighten-1;
     text-align: center;
@@ -15,6 +21,7 @@ TabbedContent {
 }
 TabPane {
     padding: 1 1;
+    height: 1fr;
 }
 
 TabbedContent Tab {
@@ -49,12 +56,26 @@ Label {
 
 /* Fetch Grid */
 
+#fetch_scroll {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#fetch_layout {
+    /* Two-row grid: controls on top (auto), log takes the rest (1fr) */
+    layout: grid;
+    grid-rows: auto 1fr;
+    /* Match row spacing inside the fetch grid */
+    grid-gutter: 1 0;
+    min-height: 20;
+}
+
 #fetch_grid {
     layout: grid;
     grid-size: 3;
-    grid-rows: auto auto auto auto 1fr;
+    grid-rows: auto;
     grid-gutter: 1;
-    min-width: 60;
+    min-width: 55;
 }
 #center_welcome {
     column-span: 3;
@@ -73,13 +94,16 @@ Label {
 }
 #update_resource_id {
     margin: 0 1;
+    min-width: 18;
 }
 #resource_id_input {
-    margin: 0 -10;
+    margin: 0 1 0 0;
+    min-width: 20;
 }
 #server_type_fetch {
     content-align: center middle;
     width: 26;
+    min-width: 15;
 }
 #redguides_interface {
     background: $error 29%;
@@ -87,9 +111,9 @@ Label {
     border-bottom: tall $error-darken-1 29%;
     color: $text-muted;
     column-span: 1;
-    offset: 1 0;
-    width: 24;
-    margin: 0 -10;
+    width: 1fr;
+    min-width: 20;
+    margin: 0 1;
 }
 #redguides_interface:hover {
     background: $error-darken-3 29%;
@@ -101,13 +125,32 @@ Label {
 #update_resource_id {
     column-span: 1;
 }
-#copy_log {
-    offset: 0 2;
-    margin: 0 6;
-    color: $text-muted;
-    outline: wide $secondary-background-darken-1;
-    outline-bottom: none;
+
+#fetch_log_container {
+    layout: grid;
+    grid-rows: auto 1fr;
+    grid-gutter: 0;
+    min-height: 10;
 }
+
+#log_toolbar {
+    layout: grid;
+    grid-size: 2;
+    grid-rows: auto;
+    grid-gutter: 0;
+    min-width: 30;
+}
+
+#copy_log, #clear_log {
+    width: 100%;
+    height: 1;
+    color: $text-muted;
+    background: $secondary-background-darken-1 39%;
+    border: none;
+    border-left: tall $secondary-background-darken-1;
+    border-right: tall $secondary-background-darken-1;
+}
+
 #fetch_log {
     border: round $secondary-background-darken-1;
     border-bottom: none;
@@ -115,16 +158,21 @@ Label {
     background: $secondary-background-darken-3 59%;
     column-span: 3;
     color: $text-muted;
+    height: 1fr;
+    min-height: 8;
+    overflow-y: auto;
 }
 
 /* Settings Grid */
 #settings_scroll {
     height: 1fr;
+    overflow-y: auto;
 }
 #server_type {
     column-span:4;
     content-align: center middle;
     width: 25;
+    min-width: 15;
 }
 #inputs_grid {
     margin-top: 1;
@@ -133,7 +181,8 @@ Label {
     grid-size: 4;  
     grid-rows: auto;  
     grid-gutter: 1;
-    border: round $secondary-background;      
+    border: round $secondary-background;
+    min-width: 50;
 }
 #settings_grid {
     layout: grid;
@@ -141,6 +190,7 @@ Label {
     grid-rows: auto;   
     border: round $secondary-background;  
     margin-bottom: 1;
+    min-width: 50;
 }
 #special_resources_grid {
     layout: grid;
@@ -148,10 +198,15 @@ Label {
     grid-rows: auto;   
     border: round $secondary-background;  
     margin-bottom: 1;
+    min-width: 50;
 }
 #maintenance_grid {
     grid-size: 4;   
-    border: round $secondary-background;  
+    border: round $secondary-background;
+    min-width: 50;
+}
+#dropdowns_grid {
+    min-width: 30;
 }
 #dl_path_input, #eq_path_input, #vvmq_path_input, #myseq, #ionbc, #auto_terminate_processes, #auto_run_vvmq {
     column-span: 3;
@@ -173,6 +228,7 @@ Label {
 
 #shortcuts {
     align: center middle;
+    overflow-y: auto;
 }
 
 #executables_grid {
@@ -182,6 +238,7 @@ Label {
     grid-rows: auto;        
     grid-gutter: 1;   
     max-width: 120;
+    min-width: 60;
     border: round $error-darken-3;
     border-title-color: $text-accent;
     border-title-style: bold;
@@ -194,6 +251,7 @@ Label {
     grid-rows: auto;        
     grid-gutter: 1;   
     max-width: 120;
+    min-width: 60;
     border: round $warning-darken-3;
     border-title-color: $text-accent;
     border-title-style: bold;
@@ -206,6 +264,7 @@ Label {
     grid-rows: auto;        
     grid-gutter: 1;   
     max-width: 120;
+    min-width: 60;
     border: round $primary-background-lighten-1;
     border-title-color: $text-accent;
     border-title-style: bold;
@@ -221,6 +280,7 @@ Label {
 }
 #shortcuts Button {
     width: 35;
+    min-width: 20;
     height: 3;
 }
 
@@ -263,10 +323,13 @@ Label {
 #account_grid {
     content-align: center middle;
     padding: 2;
+    overflow-y: auto;
+    min-width: 40;
 }
 
 #btn_ding {
     width: 35;
+    min-width: 25;
     height: 5;
     margin: 1 0;
     padding: 0 1;
@@ -278,6 +341,7 @@ Label {
 
 .web_link {
     width: 35;
+    min-width: 25;
     height: 3;
     margin: 1 0;
     padding: 0 1;
