@@ -148,6 +148,10 @@ def get_update_command():
             'pipx', 'upgrade', 'redfetch'
         ],
         'uv': [
+            'uv', 'tool', 'upgrade', 'redfetch',
+            '--index-url', 'https://test.pypi.org/simple/',
+            '--extra-index-url', 'https://pypi.org/simple/'
+        ] if is_test_pypi else [
             'uv', 'tool', 'upgrade', 'redfetch'
         ],
         'pyapp': None  # Handle separately with self_update()
