@@ -542,11 +542,22 @@ class Redfetch(App):
                 except ValidationError as e:
                     self.notify(f"Invalid VVMQ Path: {e}", severity="error")
 
+    def copy_to_clipboard_with_fallback(self, text: str) -> None:
+        """Copy text to the clipboard, with a pyperclip fallback on legacy Windows terminals."""
+        if detect_legacy_windows():
+            try:
+                pyperclip.copy(text)
+            except Exception as e:
+                self.notify(f"Failed to copy to clipboard: {e}", severity="error")
+            return
+
+        self.copy_to_clipboard(text)
+
     def handle_copy_log(self) -> None:
         copy_button = self.query_one("#copy_log", Button)
         log_widget = self.query_one("#fetch_log", Log)
         log_content = "\n".join(log_widget.lines)
-        pyperclip.copy(log_content)
+        self.copy_to_clipboard_with_fallback(log_content)
         self.notify("Log contents copied to clipboard")
         copy_button.variant = "success"
         self.set_timer(3, lambda: self.reset_button("copy_log", "default"))

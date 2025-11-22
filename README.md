@@ -1,6 +1,6 @@
 ![six wizards levitating a package, the word redfetch underneath](https://www.redguides.com/images/redfetchlogo.png)
 
-redfetch is for updating EverQuest multiboxing software and scripts that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". It's also open source, how nice.
+redfetch is for updating software and scripts for EverQuest that RedGuides recommends, as well as those you "[watch](https://www.redguides.com/community/watched/resources)". It's also open source, how nice.
 
 ## Installation
 
