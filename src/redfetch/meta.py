@@ -104,14 +104,21 @@ def detect_installation_method():
         # Check for PYAPP first
         if os.getenv('PYAPP'):
             return 'pyapp'
-                
+
         # Get the package location
         package_location = Path(__file__).parent.absolute()
-        
+
+        location_str = str(package_location)
+        parts_lower = {part.lower() for part in package_location.parts}
+
         # Check for pipx
-        if 'pipx' in str(package_location):
+        if 'pipx' in location_str:
             return 'pipx'
-                
+
+        # uv paths contain ".../uv/.../tools/..."
+        if 'uv' in parts_lower and 'tools' in parts_lower:
+            return 'uv'
+
         # Default to pip
         return 'pip'
     except Exception:
@@ -121,7 +128,7 @@ def detect_installation_method():
 def get_update_command():
     """Get the appropriate update command based on installation method."""
     method = detect_installation_method()
-    
+
     # Add TestPyPI index URL to commands if using TestPyPI
     is_test_pypi = "test.pypi.org" in PYPI_URL
 
@@ -140,9 +147,12 @@ def get_update_command():
         ] if is_test_pypi else [
             'pipx', 'upgrade', 'redfetch'
         ],
+        'uv': [
+            'uv', 'tool', 'upgrade', 'redfetch'
+        ],
         'pyapp': None  # Handle separately with self_update()
     }
-    
+
     return commands.get(method)
 
 
@@ -455,6 +465,8 @@ def uninstall():
         console.print("\n[bold]To uninstall redfetch, please run the following command:[/bold]")
         if install_method == 'pipx':
             console.print("  [cyan]pipx uninstall redfetch[/cyan]")
+        elif install_method == 'uv':
+            console.print("  [cyan]uv tool uninstall redfetch[/cyan]")
         else:
             console.print("  [cyan]pip uninstall redfetch[/cyan]")
         # Optionally, exit the program
