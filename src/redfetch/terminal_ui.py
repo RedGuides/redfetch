@@ -19,14 +19,13 @@ from rich.console import detect_legacy_windows
 
 # textual framework
 from textual import work
-from textual.app import App, ComposeResult
-from textual.command import Provider, Hit, Hits, DiscoveryHit
+from textual.app import App, ComposeResult, SystemCommand
 from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log
 from textual.events import Print
 from textual.containers import ScrollableContainer, Center, Grid, ItemGrid, Vertical
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.geometry import Offset
 from textual.selection import Selection
 
@@ -44,67 +43,6 @@ from redfetch import sync
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
 
-
-class RedfetchCommands(Provider):
-    '''this is textual's command palette, it's how you search for commands from the top-right corner button'''
-    async def startup(self) -> None:
-        pass
-
-    async def search(self, query: str) -> Hits:
-        app = self.app
-        assert isinstance(app, Redfetch)
-
-        matcher = self.matcher(query)
-
-        commands = [
-            ("Update Watched", app.handle_update_watched, "Update all watched & special resources"),
-            ("Start RedGuides Interface", app.handle_redguides_interface, "Start the RedGuides interface"),
-            ("Stop RedGuides Interface", app.cancel_redguides_interface, "Stop the RedGuides interface"),
-            ("Update Single Resource", app.handle_update_resource_id, "Update a single resource by its ID or URL"),
-            ("Copy Log", app.handle_copy_log, "Copy the entire log to your clipboard"),
-            ("Clear Log", app.handle_clear_log, "Clear all text from the log"),
-            ("Manage Watched Resources", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_watched"))), "Manage the resources you're watching"),
-            ("Manage Account", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_account"))), "Manage your RedGuides subscription"),
-            ("Licensed Resources", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_licensed"))), "Manage your purchased resources"),
-            ("Open RedGuides Website", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_redguides"))), "Open the RedGuides website"),
-            ("Upgrade to Level 2", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_ding"))), "Upgrade your RedGuides account to level 2"),
-        ]
-
-        for command, action, help_text in commands:
-            score = matcher.match(command)
-            if score > 0:
-                yield Hit(
-                    score,
-                    matcher.highlight(command),
-                    action,
-                    help=help_text
-                )
-
-    async def discover(self) -> Hits:
-        '''this is a sticky list of commands that are shown on first opening the command palette'''
-        app = self.app
-        assert isinstance(app, Redfetch)
-
-        yield DiscoveryHit(
-            "Update Watched",
-            app.handle_update_watched,
-            help="Update all watched & special resources"
-        )
-        yield DiscoveryHit(
-            "Manage Watched Resources",
-            lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_watched"))),
-            help="Remove resources from your watched list"
-        )
-        yield DiscoveryHit(
-            "Manage Licensed Resources",
-            lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_licensed"))),
-            help="Manage your purchased resources"
-        )
-        yield DiscoveryHit(
-            "Manage Account",
-            lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_account"))),
-            help="Manage your RedGuides 'Level 2' subscription"
-        )
 
 # the main app class
 class Redfetch(App):
@@ -132,7 +70,80 @@ class Redfetch(App):
         ("N", "search_prev"),
     ]
 
-    COMMANDS = {RedfetchCommands} | App.COMMANDS
+    def get_system_commands(self, screen: Screen):
+        """Add Redfetch-specific commands to the command palette."""
+        # Keep Textual's built-in system commands
+        yield from super().get_system_commands(screen)
+
+        # Discoverable (always shown) Redfetch commands
+        yield SystemCommand(
+            "Update Watched",
+            "Update all watched & special resources",
+            self.handle_update_watched,
+            discover=True,
+        )
+        yield SystemCommand(
+            "Manage Watched Resources",
+            "Manage the resources you're watching",
+            lambda: self.action_link("https://www.redguides.com/community/watched/resources"),
+            discover=True,
+        )
+        yield SystemCommand(
+            "Manage Licensed Resources",
+            "Manage your purchased resources",
+            lambda: self.action_link("https://www.redguides.com/community/resources/market-place-user/licenses"),
+            discover=True,
+        )
+        yield SystemCommand(
+            "Manage Account",
+            "Manage your RedGuides 'Level 2' subscription",
+            lambda: self.action_link("https://www.redguides.com/amember/member"),
+            discover=True,
+        )
+
+        # Additional Redfetch commands (searchable but not shown by default)
+        yield SystemCommand(
+            "Start RedGuides Interface",
+            "Start the RedGuides interface",
+            self.handle_redguides_interface,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Stop RedGuides Interface",
+            "Stop the RedGuides interface",
+            self.cancel_redguides_interface,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Update Single Resource",
+            "Update a single resource by its ID or URL",
+            self.handle_update_resource_id,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Copy Log",
+            "Copy the entire log to your clipboard",
+            self.handle_copy_log,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Clear Log",
+            "Clear all text from the log",
+            self.handle_clear_log,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Open RedGuides Website",
+            "Open the RedGuides website",
+            lambda: self.action_link("https://www.redguides.com/community"),
+            discover=False,
+        )
+        yield SystemCommand(
+            "Upgrade to Level 2",
+            "Upgrade your RedGuides account to level 2",
+            lambda: self.action_link("https://www.redguides.com/amember/member"),
+            discover=False,
+        )
 
     def compose(self) -> ComposeResult:
         # Determine input verb based on terminal
