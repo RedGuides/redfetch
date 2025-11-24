@@ -18,7 +18,7 @@ from textual_fspicker import SelectDirectory
 from rich.console import detect_legacy_windows
 
 # textual framework
-from textual import work
+from textual import work, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log
 from textual.events import Print
@@ -320,91 +320,200 @@ class Redfetch(App):
     # events (called by textual framework)
     #
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    # Fetch tab buttons
 
-        if event.button.id == "update_watched":
-            if not self.is_updating:
-                event.button.variant = "primary"
-                self.handle_update_watched()
-            else:
-                # Cancel the update
-                self.cancel_update_watched()
-        elif event.button.id == "update_resource_id":
-            event.button.variant = "default"
-            self.handle_update_resource_id()
-        elif event.button.id == "redguides_interface":
-            if not self.interface_running:
-                # Start the interface; flag will be updated via workers
-                self.handle_redguides_interface()
-            else:
-                # Cancel the interface; flag will be updated via workers
-                self.cancel_redguides_interface()
-        elif event.button.id == "log_search_next":
-            self.handle_log_search_next()
-        elif event.button.id == "log_search_prev":
-            self.handle_log_search_prev()
-        elif event.button.id == "copy_log":
-            self.handle_copy_log()
-        elif event.button.id == "clear_log":
-            self.handle_clear_log()
+    @on(Button.Pressed, "#update_watched")
+    def handle_update_watched_pressed(self, event: Button.Pressed) -> None:
+        """Handle presses of the 'update_watched' button."""
+        if not self.is_updating:
+            event.button.variant = "primary"
+            self.handle_update_watched()
+        else:
+            # Cancel the update
+            self.cancel_update_watched()
 
-        # settings
-        elif event.button.id == "select_dl_path":
-            self.select_directory("dl_path_input")
-        elif event.button.id == "select_eq_path":
-            self.select_directory("eq_path_input")
-        elif event.button.id == "select_vvmq_path":
-            self.select_directory("vvmq_path_input")
-        elif event.button.id == "reset_downloads":
-            self.handle_reset_downloads()
-        elif event.button.id == "uninstall":
-            self.handle_uninstall()
+    @on(Button.Pressed, "#update_resource_id")
+    def handle_update_resource_id_pressed(self, event: Button.Pressed) -> None:
+        """Handle presses of the 'update_resource_id' button."""
+        event.button.variant = "default"
+        self.handle_update_resource_id()
 
-        # shortcuts
-        elif event.button.id == "open_dl_folder":
-            self.open_folder(utils.get_current_download_folder())
-        elif event.button.id == "open_eq_folder":
-            self.open_folder(config.settings.from_env(self.current_env).EQPATH)
-        elif event.button.id == "open_vvmq_folder":
-            self.open_folder(utils.get_vvmq_path())
-        elif event.button.id == "run_macroquest":
-            self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-        elif event.button.id == "launch_everquest":
-            self.run_executable(config.settings.from_env(self.current_env).EQPATH, "LaunchPad.exe")
-        elif event.button.id == "launch_everquest_client":
-            self.run_executable(config.settings.from_env(self.current_env).EQPATH, "eqgame.exe", ["patchme"])
-        elif event.button.id == "run_myseq":
-            self.run_myseq_executable()
-        elif event.button.id == "open_myseq_folder":
-            self.open_myseq_folder()
-        elif event.button.id == "open_ionbc_folder":
-            self.open_ionbc_folder()
-        elif event.button.id == "run_ionbc":
-            self.run_ionbc_executable()
-        elif event.button.id == "run_meshupdater":
-            self.run_executable(utils.get_vvmq_path(), "MeshUpdater.exe")
-        elif event.button.id == "run_eqbcs":
-            self.run_executable(utils.get_vvmq_path(), "EQBCS.exe")
-        elif event.button.id == "open_redfetch_config":
-            self.open_redfetch_config()
-        elif event.button.id == "open_mq_config":
-            self.open_mq_config()
-        elif event.button.id == "open_eq_config":
-            self.open_eq_config()
-        elif event.button.id == "open_eq_host":
-            self.open_eq_host()
+    @on(Button.Pressed, "#redguides_interface")
+    def handle_redguides_interface_pressed(self, event: Button.Pressed) -> None:
+        """Toggle the RedGuides Interface."""
+        if not self.interface_running:
+            # Start the interface; flag will be updated via workers
+            self.handle_redguides_interface()
+        else:
+            # Cancel the interface; flag will be updated via workers
+            self.cancel_redguides_interface()
 
-        # account
-        elif event.button.id == "btn_watched":
-            self.action_link("https://www.redguides.com/community/watched/resources")
-        elif event.button.id == "btn_account":
-            self.action_link("https://www.redguides.com/amember/member")
-        elif event.button.id == "btn_licensed":
-            self.action_link("https://www.redguides.com/community/resources/market-place-user/licenses")
-        elif event.button.id == "btn_redguides":
-            self.action_link("https://www.redguides.com/community")
-        elif event.button.id == "btn_ding":
-            self.action_link("https://www.redguides.com/amember/member")
+    @on(Button.Pressed, "#log_search_next")
+    def handle_log_search_next_pressed(self, event: Button.Pressed) -> None:
+        """Go to the next log search match."""
+        self.handle_log_search_next()
+
+    @on(Button.Pressed, "#log_search_prev")
+    def handle_log_search_prev_pressed(self, event: Button.Pressed) -> None:
+        """Go to the previous log search match."""
+        self.handle_log_search_prev()
+
+    @on(Button.Pressed, "#copy_log")
+    def handle_copy_log_pressed(self, event: Button.Pressed) -> None:
+        """Copy the log contents."""
+        self.handle_copy_log()
+
+    @on(Button.Pressed, "#clear_log")
+    def handle_clear_log_pressed(self, event: Button.Pressed) -> None:
+        """Clear the log contents."""
+        self.handle_clear_log()
+
+    # Settings tab buttons
+
+    @on(Button.Pressed, "#select_dl_path")
+    def handle_select_dl_path_pressed(self, event: Button.Pressed) -> None:
+        """Open directory picker for the download path."""
+        self.select_directory("dl_path_input")
+
+    @on(Button.Pressed, "#select_eq_path")
+    def handle_select_eq_path_pressed(self, event: Button.Pressed) -> None:
+        """Open directory picker for the EverQuest path."""
+        self.select_directory("eq_path_input")
+
+    @on(Button.Pressed, "#select_vvmq_path")
+    def handle_select_vvmq_path_pressed(self, event: Button.Pressed) -> None:
+        """Open directory picker for the VVMQ path."""
+        self.select_directory("vvmq_path_input")
+
+    @on(Button.Pressed, "#reset_downloads")
+    def handle_reset_downloads_pressed(self, event: Button.Pressed) -> None:
+        """Reset all download dates."""
+        self.handle_reset_downloads()
+
+    @on(Button.Pressed, "#uninstall")
+    def handle_uninstall_pressed(self, event: Button.Pressed) -> None:
+        """Start uninstall flow."""
+        self.handle_uninstall()
+
+    # Shortcuts tab buttons (executables and folders)
+
+    @on(Button.Pressed, "#open_dl_folder")
+    def handle_open_dl_folder_pressed(self, event: Button.Pressed) -> None:
+        """Open the downloads folder."""
+        self.open_folder(utils.get_current_download_folder())
+
+    @on(Button.Pressed, "#open_eq_folder")
+    def handle_open_eq_folder_pressed(self, event: Button.Pressed) -> None:
+        """Open the EverQuest folder."""
+        self.open_folder(config.settings.from_env(self.current_env).EQPATH)
+
+    @on(Button.Pressed, "#open_vvmq_folder")
+    def handle_open_vvmq_folder_pressed(self, event: Button.Pressed) -> None:
+        """Open the VVMQ folder."""
+        self.open_folder(utils.get_vvmq_path())
+
+    @on(Button.Pressed, "#run_macroquest")
+    def handle_run_macroquest_pressed(self, event: Button.Pressed) -> None:
+        """Run the MacroQuest executable."""
+        self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+
+    @on(Button.Pressed, "#launch_everquest")
+    def handle_launch_everquest_pressed(self, event: Button.Pressed) -> None:
+        """Launch EverQuest via LaunchPad."""
+        self.run_executable(
+            config.settings.from_env(self.current_env).EQPATH,
+            "LaunchPad.exe",
+        )
+
+    @on(Button.Pressed, "#launch_everquest_client")
+    def handle_launch_everquest_client_pressed(
+        self, event: Button.Pressed
+    ) -> None:
+        """Launch the EverQuest client directly."""
+        self.run_executable(
+            config.settings.from_env(self.current_env).EQPATH,
+            "eqgame.exe",
+            ["patchme"],
+        )
+
+    @on(Button.Pressed, "#run_myseq")
+    def handle_run_myseq_pressed(self, event: Button.Pressed) -> None:
+        """Run the MySEQ executable."""
+        self.run_myseq_executable()
+
+    @on(Button.Pressed, "#open_myseq_folder")
+    def handle_open_myseq_folder_pressed(self, event: Button.Pressed) -> None:
+        """Open the MySEQ folder."""
+        self.open_myseq_folder()
+
+    @on(Button.Pressed, "#open_ionbc_folder")
+    def handle_open_ionbc_folder_pressed(self, event: Button.Pressed) -> None:
+        """Open the IonBC folder."""
+        self.open_ionbc_folder()
+
+    @on(Button.Pressed, "#run_ionbc")
+    def handle_run_ionbc_pressed(self, event: Button.Pressed) -> None:
+        """Run the IonBC executable."""
+        self.run_ionbc_executable()
+
+    @on(Button.Pressed, "#run_meshupdater")
+    def handle_run_meshupdater_pressed(self, event: Button.Pressed) -> None:
+        """Run the MeshUpdater executable."""
+        self.run_executable(utils.get_vvmq_path(), "MeshUpdater.exe")
+
+    @on(Button.Pressed, "#run_eqbcs")
+    def handle_run_eqbcs_pressed(self, event: Button.Pressed) -> None:
+        """Run the EQBCS executable."""
+        self.run_executable(utils.get_vvmq_path(), "EQBCS.exe")
+
+    @on(Button.Pressed, "#open_redfetch_config")
+    def handle_open_redfetch_config_pressed(self, event: Button.Pressed) -> None:
+        """Open the Redfetch config file."""
+        self.open_redfetch_config()
+
+    @on(Button.Pressed, "#open_mq_config")
+    def handle_open_mq_config_pressed(self, event: Button.Pressed) -> None:
+        """Open the MacroQuest config file."""
+        self.open_mq_config()
+
+    @on(Button.Pressed, "#open_eq_config")
+    def handle_open_eq_config_pressed(self, event: Button.Pressed) -> None:
+        """Open the EverQuest config file."""
+        self.open_eq_config()
+
+    @on(Button.Pressed, "#open_eq_host")
+    def handle_open_eq_host_pressed(self, event: Button.Pressed) -> None:
+        """Open the EverQuest eqhost.txt file."""
+        self.open_eq_host()
+
+    # Account tab buttons
+
+    @on(Button.Pressed, "#btn_watched")
+    def handle_btn_watched_pressed(self, event: Button.Pressed) -> None:
+        """Open watched resources page."""
+        self.action_link("https://www.redguides.com/community/watched/resources")
+
+    @on(Button.Pressed, "#btn_account")
+    def handle_btn_account_pressed(self, event: Button.Pressed) -> None:
+        """Open account management page."""
+        self.action_link("https://www.redguides.com/amember/member")
+
+    @on(Button.Pressed, "#btn_licensed")
+    def handle_btn_licensed_pressed(self, event: Button.Pressed) -> None:
+        """Open licensed resources page."""
+        self.action_link(
+            "https://www.redguides.com/community/resources/market-place-user/licenses"
+        )
+
+    @on(Button.Pressed, "#btn_redguides")
+    def handle_btn_redguides_pressed(self, event: Button.Pressed) -> None:
+        """Open main RedGuides website."""
+        self.action_link("https://www.redguides.com/community")
+
+    @on(Button.Pressed, "#btn_ding")
+    def handle_btn_ding_pressed(self, event: Button.Pressed) -> None:
+        """Open upgrade-to-level-2 page."""
+        self.action_link("https://www.redguides.com/amember/member")
 
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
