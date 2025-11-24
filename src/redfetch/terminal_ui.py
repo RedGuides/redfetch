@@ -27,6 +27,8 @@ from textual.containers import ScrollableContainer, Center, Grid, ItemGrid, Vert
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState
 from textual.screen import ModalScreen
+from textual.geometry import Offset
+from textual.selection import Selection
 
 # local
 from redfetch import store
@@ -60,7 +62,7 @@ class RedfetchCommands(Provider):
             ("Stop RedGuides Interface", app.cancel_redguides_interface, "Stop the RedGuides interface"),
             ("Update Single Resource", app.handle_update_resource_id, "Update a single resource by its ID or URL"),
             ("Copy Log", app.handle_copy_log, "Copy the entire log to your clipboard"),
-            ("Clear Log", app.handle_clear_log, "Clear all text from the log view"),
+            ("Clear Log", app.handle_clear_log, "Clear all text from the log"),
             ("Manage Watched Resources", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_watched"))), "Manage the resources you're watching"),
             ("Manage Account", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_account"))), "Manage your RedGuides subscription"),
             ("Licensed Resources", lambda: app.on_button_pressed(Button.Pressed(app.query_one("#btn_licensed"))), "Manage your purchased resources"),
@@ -115,10 +117,19 @@ class Redfetch(App):
     # Always keep eq_path as a string for Textual inputs; use empty string when unset
     eq_path = config.settings.from_env(config.settings.ENV).EQPATH or ""
 
-    # Add the theme cycling binding
+    # Log search state
+    _log_search_term: str = ""
+    _log_search_matches: list[int] = []
+    _log_search_index: int = -1
+
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
-        ("ctrl+t", "cycle_theme", "Theme")
+        ("ctrl+t", "cycle_theme", "Theme"),
+        ("ctrl+f", "focus_search", "Search Log"),
+        ("ctrl+s", "cycle_server_type", "Server Type"),
+        # Log search navigation
+        ("n", "search_next"),
+        ("N", "search_prev"),
     ]
 
     COMMANDS = {RedfetchCommands} | App.COMMANDS
@@ -169,7 +180,40 @@ class Redfetch(App):
                                 variant="primary",
                                 tooltip="Access an interface for this script on the website.",
                             )
-                        yield LogWithToolbar(id="fetch_log_container")
+                        with Vertical(id="fetch_log_container"):
+                            # Toolbar row with log actions
+                            with Grid(id="log_toolbar"):
+                                yield Input(
+                                    placeholder="Search log... 🔍", 
+                                    id="log_search",
+                                    tooltip="Search the log below.",
+                                )
+                                yield Button(
+                                    "<-",
+                                    id="log_search_prev",
+                                    variant="default",
+                                    tooltip="Previous log match (N)",
+                                )
+                                yield Button(
+                                    "->",
+                                    id="log_search_next",
+                                    variant="default",
+                                    tooltip="Next log match (n)",
+                                )
+                                yield Button(
+                                    "Copy Log 📋",
+                                    id="copy_log",
+                                    variant="default",
+                                    tooltip="Copy the entire log to your clipboard",
+                                )
+                                yield Button(
+                                    "Clear Log 🧹",
+                                    id="clear_log",
+                                    variant="default",
+                                    tooltip="Clear all text from the log view",
+                                )
+                            # Log widget that captures print statements
+                            yield PrintCapturingLog(id="fetch_log")
 
             with TabPane("Settings", id="settings"):
                 with ScrollableContainer():
@@ -284,6 +328,14 @@ class Redfetch(App):
             else:
                 # Cancel the interface; flag will be updated via workers
                 self.cancel_redguides_interface()
+        elif event.button.id == "log_search_next":
+            self.handle_log_search_next()
+        elif event.button.id == "log_search_prev":
+            self.handle_log_search_prev()
+        elif event.button.id == "copy_log":
+            self.handle_copy_log()
+        elif event.button.id == "clear_log":
+            self.handle_clear_log()
 
         # settings
         elif event.button.id == "select_dl_path":
@@ -350,6 +402,94 @@ class Redfetch(App):
             self.handle_input_update(event.input.id, input_value)
         elif event.input.id == "resource_id_input":
             self.handle_update_resource_id()
+        elif event.input.id == "log_search":
+            # Treat Enter in the search box as "next match"
+            self.action_search_next()
+
+    #
+    # Log search helpers
+    #
+
+    def _rebuild_log_search_matches(self, term: str) -> None:
+        """Recompute all matching line indices for the given term in the fetch log."""
+        log = self.query_one("#fetch_log", Log)
+        self._log_search_term = term
+
+        if not term:
+            self._log_search_matches = []
+            self._log_search_index = -1
+            self.screen.clear_selection()
+            return
+
+        term_lower = term.lower()
+        matches: list[int] = []
+
+        for i, line in enumerate(log.lines):
+            line_text = str(line)
+            if term_lower in line_text.lower():
+                matches.append(i)
+
+        self._log_search_matches = matches
+        # Start "before" the first match so the first "next" lands on index 0
+        self._log_search_index = -1
+
+    def _show_current_log_search_result(self) -> None:
+        """Scroll to and highlight the current search match, if any."""
+        log = self.query_one("#fetch_log", Log)
+
+        if not self._log_search_matches or self._log_search_index < 0:
+            self.screen.clear_selection()
+            return
+
+        line_index = self._log_search_matches[self._log_search_index]
+        if line_index >= len(log.lines):
+            self.screen.clear_selection()
+            return
+
+        line_text = str(log.lines[line_index])
+
+        # Scroll so the line is visible
+        log.scroll_to(y=line_index, animate=False, immediate=True)
+
+        # Highlight the whole line using Textual's selection machinery
+        start = Offset(0, line_index)
+        end = Offset(len(line_text), line_index)
+        self.screen.selections = {log: Selection(start, end)}
+
+    def _ensure_log_search_matches_current_term(self) -> None:
+        """Ensure matches are built for the current value in the search box."""
+        search_input = self.query_one("#log_search", Input)
+        term = search_input.value
+        if term != self._log_search_term:
+            self._rebuild_log_search_matches(term)
+
+    def handle_log_search_next(self) -> None:
+        """Move to the next search match in the log."""
+        self._ensure_log_search_matches_current_term()
+
+        if not self._log_search_matches:
+            if self._log_search_term:
+                self.notify(f"'{self._log_search_term}' not found in log.")
+            else:
+                self.notify("Enter a search term first.")
+            return
+
+        self._log_search_index = (self._log_search_index + 1) % len(self._log_search_matches)
+        self._show_current_log_search_result()
+
+    def handle_log_search_prev(self) -> None:
+        """Move to the previous search match in the log."""
+        self._ensure_log_search_matches_current_term()
+
+        if not self._log_search_matches:
+            if self._log_search_term:
+                self.notify(f"'{self._log_search_term}' not found in log.")
+            else:
+                self.notify("Enter a search term first.")
+            return
+
+        self._log_search_index = (self._log_search_index - 1) % len(self._log_search_matches)
+        self._show_current_log_search_result()
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "myseq":
@@ -362,6 +502,56 @@ class Redfetch(App):
             self.handle_toggle_auto_terminate_processes(event.value)
         
 
+    def _apply_server_type_change(self, new_env: str) -> None:
+        """Apply a change to the server type across the UI and settings."""
+        if self.current_env != new_env:
+            self.current_env = new_env
+            config.switch_environment(new_env)
+            self.update_widget_states()
+            self.check_mq_status_worker()
+            self.notify(f"Server type changed to: {new_env}")
+
+        # Keep both server type selects in sync
+        server_type = self.query_one("#server_type", Select)
+        server_type_fetch = self.query_one("#server_type_fetch", Select)
+        server_type.value = new_env
+        server_type_fetch.value = new_env
+
+        # Update the download folder input
+        dl_input = self.query_one("#dl_path_input", Input)
+        dl_input.value = utils.get_current_download_folder()
+        self.download_folder = dl_input.value
+
+        # Update eqpath input
+        self.eq_path = config.settings.from_env(self.current_env).EQPATH or ""
+        eq_input = self.query_one("#eq_path_input", Input)
+        eq_input.value = self.eq_path
+
+        # Update VVMQ path display
+        self.update_vvmq_path_display()
+        # Update MySEQ switch state
+        self.update_myseq_display()
+
+        # Update auto_run_vvmq switch
+        auto_run_vvmq_switch = self.query_one("#auto_run_vvmq", Switch)
+        auto_run_vvmq_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+        auto_run_vvmq_switch.value = auto_run_vvmq_value
+
+        # Update auto_terminate_processes switch
+        auto_terminate_switch = self.query_one("#auto_terminate_processes", Switch)
+        auto_terminate_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
+        auto_terminate_switch.value = auto_terminate_value
+
+        # Update EQ maps select state
+        eq_maps_select = self.query_one("#eq_maps", Select)
+        eq_maps_select.value = self.get_current_eq_maps_value()
+        eq_maps_select.disabled = not bool(self.eq_path)
+
+        # Apply theme for new environment
+        new_theme = config.settings.from_env(new_env).get('THEME', 'textual-dark')
+        self.theme = new_theme
+
+
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "eq_maps":
             new_value = event.value
@@ -370,44 +560,7 @@ class Redfetch(App):
 
         if event.select.id in ["server_type", "server_type_fetch"]:
             new_env = event.value
-            if self.current_env != new_env:
-                self.current_env = new_env
-                config.switch_environment(new_env)
-                self.update_widget_states()
-                self.check_mq_status_worker()
-                self.notify(f"Server type changed to: {new_env}")
-            
-            # Update the download folder input
-            dl_input = self.query_one("#dl_path_input", Input)
-            dl_input.value = utils.get_current_download_folder()
-            self.download_folder = dl_input.value
-            
-            # Update eqpath input
-            self.eq_path = config.settings.from_env(self.current_env).EQPATH or ""
-            eq_input = self.query_one("#eq_path_input", Input)
-            eq_input.value = self.eq_path
-            
-            # Update VVMQ path display
-            self.update_vvmq_path_display()
-            # Update MySEQ switch state
-            self.update_myseq_display()
-            
-            # Update auto_run_vvmq switch
-            auto_run_vvmq_switch = self.query_one("#auto_run_vvmq", Switch)
-            auto_run_vvmq_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
-            auto_run_vvmq_switch.value = auto_run_vvmq_value
-
-            # Update auto_terminate_processes switch
-            auto_terminate_switch = self.query_one("#auto_terminate_processes", Switch)
-            auto_terminate_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
-            auto_terminate_switch.value = auto_terminate_value
-
-            eq_maps_select = self.query_one("#eq_maps", Select)
-            eq_maps_select.value = self.get_current_eq_maps_value()
-            eq_maps_select.disabled = not bool(self.eq_path)
-
-            new_theme = config.settings.from_env(new_env).get('THEME', 'textual-dark')
-            self.theme = new_theme
+            self._apply_server_type_change(new_env)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "resource_id_input":
@@ -521,6 +674,43 @@ class Redfetch(App):
         # Exit the application
         self.exit()
 
+    def action_cycle_server_type(self) -> None:
+        """Cycle the server type"""
+        if self.is_updating or self.interface_running:
+            # Avoid changing environments during critical operations
+            return
+
+        order = ["LIVE", "TEST", "EMU"]
+        current = self.current_env
+        try:
+            index = order.index(current)
+        except ValueError:
+            index = 0
+        new_env = order[(index + 1) % len(order)]
+
+        self._apply_server_type_change(new_env)
+
+    def action_focus_search(self) -> None:
+        """Focus the log search input."""
+        try:
+            search_input = self.query_one("#log_search", Input)
+            # Switch to Fetch tab if not active
+            tabbed_content = self.query_one(TabbedContent)
+            if tabbed_content.active != "fetch":
+                tabbed_content.active = "fetch"
+            search_input.focus()
+        except Exception:
+            # Widget might not exist or be visible
+            pass
+
+    def action_search_next(self) -> None:
+        """Keyboard action: go to next log search match."""
+        self.handle_log_search_next()
+
+    def action_search_prev(self) -> None:
+        """Keyboard action: go to previous log search match."""
+        self.handle_log_search_prev()
+
     #
     # custom handlers
     #
@@ -589,6 +779,11 @@ class Redfetch(App):
         clear_button = self.query_one("#clear_log", Button)
         log_widget = self.query_one("#fetch_log", Log)
         log_widget.clear()
+        # Clear any search highlights and state
+        self.screen.clear_selection()
+        self._log_search_matches = []
+        self._log_search_index = -1
+        self._log_search_term = ""
         self.notify("Log cleared")
         clear_button.variant = "success"
         self.set_timer(3, lambda: setattr(clear_button, "variant", "default"))
@@ -1247,37 +1442,6 @@ class PrintCapturingLog(Log):
 
     def on_print(self, event: Print) -> None:
         self.write(event.text)
-
-
-class LogWithToolbar(Vertical):
-    """A Log widget with an integrated copy button toolbar."""
-    
-    def compose(self) -> ComposeResult:
-        # Toolbar row with log actions
-        with Grid(id="log_toolbar"):
-            yield Button(
-                "Copy Log 📋",
-                id="copy_log",
-                variant="default",
-                tooltip="Copy the entire log to your clipboard",
-            )
-            yield Button(
-                "Clear Log 🧹",
-                id="clear_log",
-                variant="default",
-                tooltip="Clear all text from the log view",
-            )
-        yield PrintCapturingLog(id="fetch_log")
-    
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "copy_log":
-            app = self.app
-            assert isinstance(app, Redfetch)
-            app.handle_copy_log()
-        elif event.button.id == "clear_log":
-            app = self.app
-            assert isinstance(app, Redfetch)
-            app.handle_clear_log()
 
 
 class RunVVMQScreen(ModalScreen):

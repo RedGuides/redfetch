@@ -135,28 +135,37 @@ Label {
 
 #log_toolbar {
     layout: grid;
-    grid-size: 2;
+    background: $secondary-background-darken-2;
+    grid-size: 5;
+    grid-columns: 6fr 1fr 1fr 4fr 4fr;
     grid-rows: auto;
-    grid-gutter: 0;
-    min-width: 30;
 }
 
-#copy_log, #clear_log {
+#copy_log, #clear_log, #log_search {
     width: 100%;
     height: 1;
     color: $text-muted;
     background: $secondary-background-darken-1 39%;
     border: none;
-    border-left: tall $secondary-background-darken-1;
-    border-right: tall $secondary-background-darken-1;
+    border-left: vkey $secondary-background-darken-1;
+    border-right: vkey $secondary-background-darken-1;
+}
+
+#log_search_prev, #log_search_next {
+    width: 100%;
+    height: 1;
+    color: $text-muted;
+    background: $secondary-background-darken-1 39%;
+    border: none;
 }
 
 #fetch_log {
-    border: round $secondary-background-darken-1;
+    border: vkey $secondary-background-darken-1;
     border-bottom: none;
-    border-right: none;
+    border-right: vkey $secondary-background-darken-1;
+    border-top: none;
     background: $secondary-background-darken-3 59%;
-    column-span: 3;
+    column-span: 5;
     color: $text-muted;
     height: 1fr;
     min-height: 8;
