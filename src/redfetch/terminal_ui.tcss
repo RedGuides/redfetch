@@ -235,7 +235,7 @@ Label {
 
 /* Shortcuts Grid */
 
-#shortcuts {
+#shortcuts_scroll {
     align: center middle;
     overflow-y: auto;
 }
@@ -278,7 +278,7 @@ Label {
     border-title-color: $text-accent;
     border-title-style: bold;
 }
-#shortcuts Label {
+#shortcuts_scroll Label {
     column-span: 3;
     width: 100%;
     content-align: center middle;
@@ -287,39 +287,39 @@ Label {
     text-style: bold;
     border: round $primary-background-lighten-1;     /* Adds a border with the accent color */
 }
-#shortcuts Button {
+#shortcuts_scroll Button {
     width: 35;
     min-width: 20;
     height: 3;
 }
 
-#shortcuts Button.executable {
+#shortcuts_scroll Button.executable {
     background: $error-darken-2;
     border-top: tall $error-lighten-1 35%;
     border-bottom: tall $error-darken-1 35%;
     color: $text;
 }
-#shortcuts Button.executable:hover {
+#shortcuts_scroll Button.executable:hover {
     background: $error-darken-3 70%;
     border-top: tall $error 35%;
 }
-#shortcuts Button.folder {
+#shortcuts_scroll Button.folder {
     width: 35;
     background: $warning-darken-3; /* Use a theme variable for folders */
     border-top: tall $warning 55%;
     border-bottom: tall $warning-darken-3 35%;
     color: $text;
 }
-#shortcuts Button.folder:hover {
+#shortcuts_scroll Button.folder:hover {
     width: 35;
     background: $warning-darken-3 55%;
     border-top: tall $warning 35%;
 }
-#shortcuts Button.file {
+#shortcuts_scroll Button.file {
     background: $primary-background-lighten-1;
     color: $text;
 }
-#shortcuts Button.file:hover {
+#shortcuts_scroll Button.file:hover {
     background: $primary-background-darken-1;
 }
 

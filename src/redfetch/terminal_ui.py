@@ -44,111 +44,19 @@ from redfetch import sync
 # "textual run --dev .\src\redfetch\main.py"
 
 
-# the main app class
-class Redfetch(App):
-    interface_running = reactive(False)
-    is_updating = reactive(False)
-    mq_down = reactive(None)
-    CSS_PATH = "terminal_ui.tcss"
-    current_env = config.settings.ENV 
-    download_folder = config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
-    # Always keep eq_path as a string for Textual inputs; use empty string when unset
-    eq_path = config.settings.from_env(config.settings.ENV).EQPATH or ""
+class MainScreen(Screen):
+    """The main screen containing all tabs and UI widgets."""
 
-    # Log search state
+    # Log search state (screen-local)
     _log_search_term: str = ""
     _log_search_matches: list[int] = []
     _log_search_index: int = -1
 
-    BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
-        ("ctrl+t", "cycle_theme", "Theme"),
-        ("ctrl+f", "focus_search", "Search Log"),
-        ("ctrl+s", "cycle_server_type", "Server Type"),
-        # Log search navigation
-        ("n", "search_next"),
-        ("N", "search_prev"),
-    ]
-
-    def get_system_commands(self, screen: Screen):
-        """Add Redfetch-specific commands to the command palette."""
-        # Keep Textual's built-in system commands
-        yield from super().get_system_commands(screen)
-
-        # Discoverable (always shown) Redfetch commands
-        yield SystemCommand(
-            "Update Watched",
-            "Update all watched & special resources",
-            self.handle_update_watched,
-            discover=True,
-        )
-        yield SystemCommand(
-            "Manage Watched Resources",
-            "Manage the resources you're watching",
-            lambda: self.action_link("https://www.redguides.com/community/watched/resources"),
-            discover=True,
-        )
-        yield SystemCommand(
-            "Manage Licensed Resources",
-            "Manage your purchased resources",
-            lambda: self.action_link("https://www.redguides.com/community/resources/market-place-user/licenses"),
-            discover=True,
-        )
-        yield SystemCommand(
-            "Manage Account",
-            "Manage your RedGuides 'Level 2' subscription",
-            lambda: self.action_link("https://www.redguides.com/amember/member"),
-            discover=True,
-        )
-
-        # Additional Redfetch commands (searchable but not shown by default)
-        yield SystemCommand(
-            "Start RedGuides Interface",
-            "Start the RedGuides interface",
-            self.handle_redguides_interface,
-            discover=False,
-        )
-        yield SystemCommand(
-            "Stop RedGuides Interface",
-            "Stop the RedGuides interface",
-            self.cancel_redguides_interface,
-            discover=False,
-        )
-        yield SystemCommand(
-            "Update Single Resource",
-            "Update a single resource by its ID or URL",
-            self.handle_update_resource_id,
-            discover=False,
-        )
-        yield SystemCommand(
-            "Copy Log",
-            "Copy the entire log to your clipboard",
-            self.handle_copy_log,
-            discover=False,
-        )
-        yield SystemCommand(
-            "Clear Log",
-            "Clear all text from the log",
-            self.handle_clear_log,
-            discover=False,
-        )
-        yield SystemCommand(
-            "Open RedGuides Website",
-            "Open the RedGuides website",
-            lambda: self.action_link("https://www.redguides.com/community"),
-            discover=False,
-        )
-        yield SystemCommand(
-            "Upgrade to Level 2",
-            "Upgrade your RedGuides account to level 2",
-            lambda: self.action_link("https://www.redguides.com/amember/member"),
-            discover=False,
-        )
-
     def compose(self) -> ComposeResult:
         # Determine input verb based on terminal
         input_verb = "Enter" if detect_legacy_windows() else "Paste"
-        # this function and the tcss file make up the button placement and styling
+        current_env = self.app.current_env
+
         yield Header()
         yield Footer()
         with TabbedContent():
@@ -181,7 +89,7 @@ class Redfetch(App):
                             yield Select[str](
                                 [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
                                 id="server_type_fetch",
-                                value=self.current_env,  # Use the reactive attribute
+                                value=current_env,
                                 allow_blank=False,
                                 tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers.",
                             )
@@ -227,22 +135,22 @@ class Redfetch(App):
                             yield PrintCapturingLog(id="fetch_log")
 
             with TabPane("Settings", id="settings"):
-                with ScrollableContainer():
+                with ScrollableContainer(id="settings_scroll"):
                     with ItemGrid(id="dropdowns_grid"):
                         yield Select[str](
                             [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
                             id="server_type",
                             classes="bordertitles",
-                            value=self.current_env,  # Use the reactive attribute
+                            value=current_env,
                             prompt="Select server type",
                             allow_blank=False,
                             tooltip="The type of EQ server. Live and Test are official servers, while Emu is for unofficial servers."
                         )
                     with ItemGrid(id="inputs_grid", classes="bordertitles"):
                         yield Button("Download Folder", id="select_dl_path", variant="default", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
-                        yield Input(value=config.settings.from_env(self.current_env).DOWNLOAD_FOLDER, placeholder=f"{input_verb} a basic download directory", id="dl_path_input", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
+                        yield Input(value=config.settings.from_env(current_env).DOWNLOAD_FOLDER, placeholder=f"{input_verb} a basic download directory", id="dl_path_input", tooltip="The base download folder, which by default will contain different versions of VV MQ, MySEQ, and other software.")
                         yield Button("EverQuest Folder", id="select_eq_path", variant="default", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.")
-                        yield Input(value=config.settings.from_env(self.current_env).EQPATH, placeholder=f"{input_verb} your EverQuest directory", id="eq_path_input", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.", valid_empty=True)
+                        yield Input(value=config.settings.from_env(current_env).EQPATH, placeholder=f"{input_verb} your EverQuest directory", id="eq_path_input", tooltip="The EverQuest directory, the one with eqgame.exe. Currently only used to update your maps.", valid_empty=True)
                         yield Button("Very Vanilla MQ Folder", id="select_vvmq_path", variant="default", tooltip="Your MacroQuest folder.")
                         vvmq_path = utils.get_vvmq_path()
                         if vvmq_path:
@@ -252,7 +160,7 @@ class Redfetch(App):
                     with ItemGrid(id="special_resources_grid", classes="bordertitles"):
                         yield Label("MySEQ:", classes="left_middle")
                         myseq_id = utils.get_current_myseq_id()
-                        yield Switch(id="myseq", value=config.settings.from_env(self.current_env).SPECIAL_RESOURCES.get(myseq_id, {}).get('opt_in', False), tooltip="Adds MySEQ to your 'special resources', with maps and offsets for your selected server type.")
+                        yield Switch(id="myseq", value=config.settings.from_env(current_env).SPECIAL_RESOURCES.get(myseq_id, {}).get('opt_in', False), tooltip="Adds MySEQ to your 'special resources', with maps and offsets for your selected server type.")
                         yield Label("IonBC:", classes="left_middle")
                         yield Switch(id="ionbc", value=config.settings.from_env('DEFAULT').SPECIAL_RESOURCES.get('2463', {}).get('opt_in', False), tooltip="Adds IonBC to your 'special resources'.")
                         yield Label("Maps:", classes="left_middle")
@@ -261,20 +169,20 @@ class Redfetch(App):
                             id="eq_maps",
                             prompt="Select maps",
                             allow_blank=True,
-                            value=self.get_current_eq_maps_value(),
+                            value=self.app.get_current_eq_maps_value(),
                             tooltip="Requires an EverQuest folder. Adds in-game maps to your 'special resources', with brewall and good's recommended folder structure.",
                         )
                     with ItemGrid(id="settings_grid", classes="bordertitles"):
                         yield Label("Close MQ pre-udpate:", classes="left_middle")
                         yield Switch(
                             id="auto_terminate_processes", 
-                            value=config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None),
+                            value=config.settings.from_env(current_env).get('AUTO_TERMINATE_PROCESSES', None),
                             tooltip="Automatically terminate running processes before updates."
                         )
                         yield Label("Start MQ post-update:", classes="left_middle")
                         yield Switch(
                             id="auto_run_vvmq", 
-                            value=config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', False),
+                            value=config.settings.from_env(current_env).get('AUTO_RUN_VVMQ', False),
                             tooltip="Automatically run Very Vanilla MQ after successful updates."
                         )
                     with ItemGrid(id="maintenance_grid", classes="bordertitles"):
@@ -282,7 +190,7 @@ class Redfetch(App):
                         yield Button("Uninstall", id="uninstall", variant="error", tooltip="Uninstall redfetch and guide through manual cleanup.")
 
             with TabPane("Shortcuts", id="shortcuts"):
-                with ScrollableContainer(id="shortcuts"):
+                with ScrollableContainer(id="shortcuts_scroll"):
                     with ItemGrid(id="executables_grid"):
                         yield Button("Very Vanilla MQ 🍦", id="run_macroquest", classes="executable", tooltip="Run MacroQuest, the legendary add-on platform for EverQuest.")
                         yield Button("MeshUpdater 🌐", id="run_meshupdater", classes="executable", tooltip="Update EQ zone meshes, needed for MQNav.")
@@ -316,215 +224,239 @@ class Redfetch(App):
                         yield Button("Manage Account 🧾", id="btn_account", variant="default", classes="web_link", tooltip="Manage your RedGuides 'Level 2' subscription.")
                         yield Button("RedGuides 🍻", id="btn_redguides", variant="default", classes="web_link")
 
+    def on_mount(self) -> None:
+        """Initialize the screen after widgets are mounted."""
+        # Initialize the Log widget with some content
+        log = self.query_one("#fetch_log", Log)
+        log.write_line(f"redfetch v{meta.get_current_version()} allows you to download resources from RedGuides")
+        log.write_line("Server type: " + self.app.current_env)
+        log.write_line("\n")
+
+        # Set border titles
+        self.query_one("#server_type").border_title = "Server type"
+        self.query_one("#inputs_grid").border_title = "Directories"
+        self.query_one("#settings_grid").border_title = "Settings"
+        self.query_one("#special_resources_grid").border_title = "Special Resources"
+        self.query_one("#maintenance_grid").border_title = "Maintenance"
+        self.query_one("#executables_grid").border_title = "Executables ⚡"
+        self.query_one("#folders_grid").border_title = "Folders 📁"
+        self.query_one("#files_grid").border_title = "Files 📎"
+
+        # Apply initial enabled/disabled state across the UI
+        self.update_widget_states()
+
     #
-    # events (called by textual framework)
+    # Widget state update methods
     #
 
-    # Fetch tab buttons
+    def update_widget_states(self) -> None:
+        """Update the state of all widgets based on application state."""
+        self._update_fetch_widgets()
+        self._update_settings_widgets()
+        self._update_shortcuts_widgets()
 
-    @on(Button.Pressed, "#update_watched")
-    def handle_update_watched_pressed(self, event: Button.Pressed) -> None:
-        """Handle presses of the 'update_watched' button."""
-        if not self.is_updating:
-            event.button.variant = "primary"
-            self.handle_update_watched()
+    def _update_fetch_widgets(self) -> None:
+        """Update widgets on the Fetch tab."""
+        app = self.app
+        busy = app.is_updating or app.interface_running
+
+        # Update watched button - depends on mq_down, is_updating, interface_running, download_folder
+        update_watched_button = self.query_one("#update_watched", Button)
+        if app.mq_down is None:
+            update_watched_button.label = "Checking MQ status...📞"
+            update_watched_button.tooltip = "Please wait while we check MQ status."
+            update_watched_button.disabled = True
+        elif app.mq_down:
+            update_watched_button.label = "MQ Down: Patch Day 💔"
+            update_watched_button.tooltip = (
+                "Very Vanilla MQ is down for patch day, check redguides.com for current status."
+            )
+            update_watched_button.disabled = True
+            update_watched_button.variant = "default"
         else:
-            # Cancel the update
-            self.cancel_update_watched()
+            if app.is_updating:
+                update_watched_button.label = "Stop Update 🛑"
+                update_watched_button.tooltip = "Update in progress. Click to cancel."
+                update_watched_button.disabled = False
+            else:
+                update_watched_button.label = "Easy Update Button 🍦"
+                update_watched_button.tooltip = (
+                    "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ and other staff picks. "
+                    "(Manage watched resources on the website, and opt-in or out of any 'special' resources in settings.local.toml)"
+                )
+                if update_watched_button.variant not in ["success", "error"]:
+                    update_watched_button.variant = "primary"
+                update_watched_button.disabled = busy or not bool(app.download_folder)
+            update_watched_button.refresh(layout=True)
 
-    @on(Button.Pressed, "#update_resource_id")
-    def handle_update_resource_id_pressed(self, event: Button.Pressed) -> None:
-        """Handle presses of the 'update_resource_id' button."""
-        event.button.variant = "default"
-        self.handle_update_resource_id()
+        # Resource ID input and button
+        resource_input = self.query_one("#resource_id_input", Input)
+        resource_input.disabled = busy
+        self.query_one("#update_resource_id", Button).disabled = (
+            busy or not bool(app.download_folder) or not bool(resource_input.value)
+        )
 
-    @on(Button.Pressed, "#redguides_interface")
-    def handle_redguides_interface_pressed(self, event: Button.Pressed) -> None:
-        """Toggle the RedGuides Interface."""
-        if not self.interface_running:
-            # Start the interface; flag will be updated via workers
-            self.handle_redguides_interface()
+        # RedGuides Interface button
+        redguides_interface_button = self.query_one("#redguides_interface", Button)
+        if app.interface_running:
+            redguides_interface_button.label = "Stop Interface 🛑"
+            redguides_interface_button.tooltip = "RedGuides Interface is currently running, click to stop."
+            redguides_interface_button.disabled = False
         else:
-            # Cancel the interface; flag will be updated via workers
-            self.cancel_redguides_interface()
+            redguides_interface_button.label = "RedGuides Interface 🌐"
+            redguides_interface_button.tooltip = "Access an interface for this script on the website."
+            redguides_interface_button.disabled = app.is_updating
 
-    @on(Button.Pressed, "#log_search_next")
-    def handle_log_search_next_pressed(self, event: Button.Pressed) -> None:
-        """Go to the next log search match."""
-        self.handle_log_search_next()
+        # Server type select on Fetch tab
+        server_type_fetch = self.query_one("#server_type_fetch", Select)
+        server_type_fetch.disabled = busy
+        if server_type_fetch.value != app.current_env:
+            server_type_fetch.value = app.current_env
 
-    @on(Button.Pressed, "#log_search_prev")
-    def handle_log_search_prev_pressed(self, event: Button.Pressed) -> None:
-        """Go to the previous log search match."""
-        self.handle_log_search_prev()
+    def _update_settings_widgets(self) -> None:
+        """Update widgets on the Settings tab."""
+        app = self.app
+        busy = app.is_updating or app.interface_running
+        # Cascade disabled state from the scroll container
+        settings_container = self.query_one("#settings_scroll", ScrollableContainer)
+        settings_container.disabled = busy
 
-    @on(Button.Pressed, "#copy_log")
-    def handle_copy_log_pressed(self, event: Button.Pressed) -> None:
-        """Copy the log contents."""
-        self.handle_copy_log()
+        # Path inputs
+        self.query_one("#dl_path_input", Input).disabled = False
+        self.query_one("#eq_path_input", Input).disabled = False
+        self.query_one("#vvmq_path_input", Input).disabled = not bool(app.download_folder)
 
-    @on(Button.Pressed, "#clear_log")
-    def handle_clear_log_pressed(self, event: Button.Pressed) -> None:
-        """Clear the log contents."""
-        self.handle_clear_log()
+        # Path selection buttons
+        self.query_one("#select_dl_path", Button).disabled = False
+        self.query_one("#select_eq_path", Button).disabled = False
+        self.query_one("#select_vvmq_path", Button).disabled = not bool(app.download_folder)
 
-    # Settings tab buttons
+        # Maintenance buttons
+        self.query_one("#reset_downloads", Button).disabled = False
+        self.query_one("#uninstall", Button).disabled = False
 
-    @on(Button.Pressed, "#select_dl_path")
-    def handle_select_dl_path_pressed(self, event: Button.Pressed) -> None:
-        """Open directory picker for the download path."""
-        self.select_directory("dl_path_input")
+        # Server type select on Settings tab
+        server_type = self.query_one("#server_type", Select)
+        server_type.disabled = False
+        if server_type.value != app.current_env:
+            server_type.value = app.current_env
 
-    @on(Button.Pressed, "#select_eq_path")
-    def handle_select_eq_path_pressed(self, event: Button.Pressed) -> None:
-        """Open directory picker for the EverQuest path."""
-        self.select_directory("eq_path_input")
+        # EQ maps select - depends on eq_path
+        eq_maps_select = self.query_one("#eq_maps", Select)
+        eq_maps_select.disabled = not bool(app.eq_path)
 
-    @on(Button.Pressed, "#select_vvmq_path")
-    def handle_select_vvmq_path_pressed(self, event: Button.Pressed) -> None:
-        """Open directory picker for the VVMQ path."""
-        self.select_directory("vvmq_path_input")
+        # Switches
+        self.query_one("#myseq", Switch).disabled = not bool(utils.get_current_myseq_id())
+        self.query_one("#ionbc", Switch).disabled = False
+        self.query_one("#auto_run_vvmq", Switch).disabled = False
+        self.query_one("#auto_terminate_processes", Switch).disabled = False
 
-    @on(Button.Pressed, "#reset_downloads")
-    def handle_reset_downloads_pressed(self, event: Button.Pressed) -> None:
-        """Reset all download dates."""
-        self.handle_reset_downloads()
+    def _update_shortcuts_widgets(self) -> None:
+        """Update widgets on the Shortcuts tab."""
+        app = self.app
+        busy = app.is_updating or app.interface_running
+        # Cascade disabled state from the scroll container.
+        shortcuts_container = self.query_one("#shortcuts_scroll", ScrollableContainer)
+        shortcuts_container.disabled = busy
 
-    @on(Button.Pressed, "#uninstall")
-    def handle_uninstall_pressed(self, event: Button.Pressed) -> None:
-        """Start uninstall flow."""
-        self.handle_uninstall()
-
-    # Shortcuts tab buttons (executables and folders)
-
-    @on(Button.Pressed, "#open_dl_folder")
-    def handle_open_dl_folder_pressed(self, event: Button.Pressed) -> None:
-        """Open the downloads folder."""
-        self.open_folder(utils.get_current_download_folder())
-
-    @on(Button.Pressed, "#open_eq_folder")
-    def handle_open_eq_folder_pressed(self, event: Button.Pressed) -> None:
-        """Open the EverQuest folder."""
-        self.open_folder(config.settings.from_env(self.current_env).EQPATH)
-
-    @on(Button.Pressed, "#open_vvmq_folder")
-    def handle_open_vvmq_folder_pressed(self, event: Button.Pressed) -> None:
-        """Open the VVMQ folder."""
-        self.open_folder(utils.get_vvmq_path())
-
-    @on(Button.Pressed, "#run_macroquest")
-    def handle_run_macroquest_pressed(self, event: Button.Pressed) -> None:
-        """Run the MacroQuest executable."""
-        self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-
-    @on(Button.Pressed, "#launch_everquest")
-    def handle_launch_everquest_pressed(self, event: Button.Pressed) -> None:
-        """Launch EverQuest via LaunchPad."""
-        self.run_executable(
-            config.settings.from_env(self.current_env).EQPATH,
-            "LaunchPad.exe",
+        # VVMQ-related executables
+        vvmq_path = utils.get_vvmq_path()
+        self.query_one("#run_macroquest", Button).disabled = (
+            not utils.validate_file_in_path(vvmq_path, 'MacroQuest.exe')
+        )
+        self.query_one("#run_meshupdater", Button).disabled = (
+            not utils.validate_file_in_path(vvmq_path, 'MeshUpdater.exe')
+        )
+        self.query_one("#run_eqbcs", Button).disabled = (
+            not utils.validate_file_in_path(vvmq_path, 'EQBCS.exe')
         )
 
-    @on(Button.Pressed, "#launch_everquest_client")
-    def handle_launch_everquest_client_pressed(
-        self, event: Button.Pressed
-    ) -> None:
-        """Launch the EverQuest client directly."""
-        self.run_executable(
-            config.settings.from_env(self.current_env).EQPATH,
-            "eqgame.exe",
-            ["patchme"],
+        # EQ-related executables and folders
+        eq_path = app.eq_path
+        eq_path_exists = bool(eq_path) and os.path.exists(eq_path)
+        self.query_one("#launch_everquest", Button).disabled = (
+            not utils.validate_file_in_path(eq_path, 'LaunchPad.exe')
+        )
+        self.query_one("#launch_everquest_client", Button).disabled = (
+            not utils.validate_file_in_path(eq_path, 'eqgame.exe')
+        )
+        self.query_one("#open_eq_folder", Button).disabled = not eq_path_exists
+
+        # MySEQ
+        myseq_path = utils.get_myseq_path()
+        self.query_one("#run_myseq", Button).disabled = (
+            not utils.validate_file_in_path(myseq_path, 'MySEQ.exe')
+        )
+        self.query_one("#open_myseq_folder", Button).disabled = not bool(myseq_path)
+
+        # IonBC
+        ionbc_path = utils.get_ionbc_path()
+        self.query_one("#run_ionbc", Button).disabled = (
+            not utils.validate_file_in_path(ionbc_path, 'IonBC.exe')
+        )
+        self.query_one("#open_ionbc_folder", Button).disabled = not bool(ionbc_path)
+
+        # Folder shortcuts
+        self.query_one("#open_dl_folder", Button).disabled = not bool(app.download_folder)
+        self.query_one("#open_vvmq_folder", Button).disabled = not bool(vvmq_path)
+
+        # Config file shortcuts
+        self.query_one("#open_redfetch_config", Button).disabled = (
+            not utils.validate_file_in_path(config.config_dir, 'settings.local.toml')
+        )
+        self.query_one("#open_mq_config", Button).disabled = (
+            not utils.validate_file_in_path(os.path.join(vvmq_path or '', 'config'), 'MacroQuest.ini')
+        )
+        self.query_one("#open_eq_config", Button).disabled = (
+            not utils.validate_file_in_path(eq_path, 'eqclient.ini')
+        )
+        self.query_one("#open_eq_host", Button).disabled = (
+            not utils.validate_file_in_path(eq_path, 'eqhost.txt')
         )
 
-    @on(Button.Pressed, "#run_myseq")
-    def handle_run_myseq_pressed(self, event: Button.Pressed) -> None:
-        """Run the MySEQ executable."""
-        self.run_myseq_executable()
+    #
+    # UI update helpers
+    #
 
-    @on(Button.Pressed, "#open_myseq_folder")
-    def handle_open_myseq_folder_pressed(self, event: Button.Pressed) -> None:
-        """Open the MySEQ folder."""
-        self.open_myseq_folder()
+    def update_vvmq_path_display(self) -> None:
+        vvmq_path = utils.get_vvmq_path()
+        vvmq_input_widget = self.query_one("#vvmq_path_input", Input)
+        if vvmq_path:
+            vvmq_input_widget.value = vvmq_path
+            vvmq_input_widget.disabled = False
+        else:
+            vvmq_input_widget.value = "VVMQ not found for this server type."
+            vvmq_input_widget.disabled = True
 
-    @on(Button.Pressed, "#open_ionbc_folder")
-    def handle_open_ionbc_folder_pressed(self, event: Button.Pressed) -> None:
-        """Open the IonBC folder."""
-        self.open_ionbc_folder()
+    def update_myseq_display(self) -> None:
+        myseq_switch = self.query_one("#myseq", Switch)
+        myseq_id = utils.get_current_myseq_id()
+        if myseq_id:
+            myseq_opt_in = config.settings.from_env(self.app.current_env).SPECIAL_RESOURCES[myseq_id]['opt_in']
+            myseq_switch.value = myseq_opt_in
+            myseq_switch.disabled = False
+        else:
+            myseq_switch.disabled = True
+            myseq_switch.value = False
 
-    @on(Button.Pressed, "#run_ionbc")
-    def handle_run_ionbc_pressed(self, event: Button.Pressed) -> None:
-        """Run the IonBC executable."""
-        self.run_ionbc_executable()
+    def update_welcome_label(self, greeting: str) -> None:
+        welcome_label = self.query_one("#welcome_label", Label)
+        welcome_label.update(greeting)
 
-    @on(Button.Pressed, "#run_meshupdater")
-    def handle_run_meshupdater_pressed(self, event: Button.Pressed) -> None:
-        """Run the MeshUpdater executable."""
-        self.run_executable(utils.get_vvmq_path(), "MeshUpdater.exe")
+    def update_account_label(self, greetingacct: str) -> None:
+        account_label = self.query_one("#account_label", Label)
+        account_label.update(greetingacct)
 
-    @on(Button.Pressed, "#run_eqbcs")
-    def handle_run_eqbcs_pressed(self, event: Button.Pressed) -> None:
-        """Run the EQBCS executable."""
-        self.run_executable(utils.get_vvmq_path(), "EQBCS.exe")
+    def show_ding_button(self, show: bool) -> None:
+        ding_button = self.query_one("#btn_ding", Button)
+        ding_button.display = show
 
-    @on(Button.Pressed, "#open_redfetch_config")
-    def handle_open_redfetch_config_pressed(self, event: Button.Pressed) -> None:
-        """Open the Redfetch config file."""
-        self.open_redfetch_config()
-
-    @on(Button.Pressed, "#open_mq_config")
-    def handle_open_mq_config_pressed(self, event: Button.Pressed) -> None:
-        """Open the MacroQuest config file."""
-        self.open_mq_config()
-
-    @on(Button.Pressed, "#open_eq_config")
-    def handle_open_eq_config_pressed(self, event: Button.Pressed) -> None:
-        """Open the EverQuest config file."""
-        self.open_eq_config()
-
-    @on(Button.Pressed, "#open_eq_host")
-    def handle_open_eq_host_pressed(self, event: Button.Pressed) -> None:
-        """Open the EverQuest eqhost.txt file."""
-        self.open_eq_host()
-
-    # Account tab buttons
-
-    @on(Button.Pressed, "#btn_watched")
-    def handle_btn_watched_pressed(self, event: Button.Pressed) -> None:
-        """Open watched resources page."""
-        self.action_link("https://www.redguides.com/community/watched/resources")
-
-    @on(Button.Pressed, "#btn_account")
-    def handle_btn_account_pressed(self, event: Button.Pressed) -> None:
-        """Open account management page."""
-        self.action_link("https://www.redguides.com/amember/member")
-
-    @on(Button.Pressed, "#btn_licensed")
-    def handle_btn_licensed_pressed(self, event: Button.Pressed) -> None:
-        """Open licensed resources page."""
-        self.action_link(
-            "https://www.redguides.com/community/resources/market-place-user/licenses"
-        )
-
-    @on(Button.Pressed, "#btn_redguides")
-    def handle_btn_redguides_pressed(self, event: Button.Pressed) -> None:
-        """Open main RedGuides website."""
-        self.action_link("https://www.redguides.com/community")
-
-    @on(Button.Pressed, "#btn_ding")
-    def handle_btn_ding_pressed(self, event: Button.Pressed) -> None:
-        """Open upgrade-to-level-2 page."""
-        self.action_link("https://www.redguides.com/amember/member")
-
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id in ["dl_path_input", "eq_path_input", "vvmq_path_input"]:
-            input_value = event.input.value.strip()
-            self.handle_input_update(event.input.id, input_value)
-        elif event.input.id == "resource_id_input":
-            self.handle_update_resource_id()
-        elif event.input.id == "log_search":
-            # Treat Enter in the search box as "next match"
-            self.action_search_next()
+    def reset_button(self, button_id: str, variant: str = "default") -> None:
+        button = self.query_one(f"#{button_id}", Button)
+        button.variant = variant
+        if button_id == "update_watched":
+            vvmq_button = self.query_one("#run_macroquest", Button)
+            vvmq_button.styles.border = None
 
     #
     # Log search helpers
@@ -538,7 +470,7 @@ class Redfetch(App):
         if not term:
             self._log_search_matches = []
             self._log_search_index = -1
-            self.screen.clear_selection()
+            self.clear_selection()
             return
 
         term_lower = term.lower()
@@ -550,7 +482,6 @@ class Redfetch(App):
                 matches.append(i)
 
         self._log_search_matches = matches
-        # Start "before" the first match so the first "next" lands on index 0
         self._log_search_index = -1
 
     def _show_current_log_search_result(self) -> None:
@@ -558,23 +489,20 @@ class Redfetch(App):
         log = self.query_one("#fetch_log", Log)
 
         if not self._log_search_matches or self._log_search_index < 0:
-            self.screen.clear_selection()
+            self.clear_selection()
             return
 
         line_index = self._log_search_matches[self._log_search_index]
         if line_index >= len(log.lines):
-            self.screen.clear_selection()
+            self.clear_selection()
             return
 
         line_text = str(log.lines[line_index])
-
-        # Scroll so the line is visible
         log.scroll_to(y=line_index, animate=False, immediate=True)
 
-        # Highlight the whole line using Textual's selection machinery
         start = Offset(0, line_index)
         end = Offset(len(line_text), line_index)
-        self.screen.selections = {log: Selection(start, end)}
+        self.selections = {log: Selection(start, end)}
 
     def _ensure_log_search_matches_current_term(self) -> None:
         """Ensure matches are built for the current value in the search box."""
@@ -589,9 +517,9 @@ class Redfetch(App):
 
         if not self._log_search_matches:
             if self._log_search_term:
-                self.notify(f"'{self._log_search_term}' not found in log.")
+                self.app.notify(f"'{self._log_search_term}' not found in log.")
             else:
-                self.notify("Enter a search term first.")
+                self.app.notify("Enter a search term first.")
             return
 
         self._log_search_index = (self._log_search_index + 1) % len(self._log_search_matches)
@@ -603,163 +531,412 @@ class Redfetch(App):
 
         if not self._log_search_matches:
             if self._log_search_term:
-                self.notify(f"'{self._log_search_term}' not found in log.")
+                self.app.notify(f"'{self._log_search_term}' not found in log.")
             else:
-                self.notify("Enter a search term first.")
+                self.app.notify("Enter a search term first.")
             return
 
         self._log_search_index = (self._log_search_index - 1) % len(self._log_search_matches)
         self._show_current_log_search_result()
 
-    def on_switch_changed(self, event: Switch.Changed) -> None:
-        if event.switch.id == "myseq":
-            self.handle_toggle_myseq(event.value)
-        elif event.switch.id == "ionbc":
-            self.handle_toggle_ionbc(event.value)
-        elif event.switch.id == "auto_run_vvmq":
-            self.handle_toggle_auto_run_vvmq(event.value)
-        elif event.switch.id == "auto_terminate_processes":
-            self.handle_toggle_auto_terminate_processes(event.value)
-        
+    #
+    # Event handlers for widgets on this screen
+    #
 
-    def _apply_server_type_change(self, new_env: str) -> None:
-        """Apply a change to the server type across the UI and settings."""
-        if self.current_env != new_env:
-            self.current_env = new_env
-            config.switch_environment(new_env)
-            self.update_widget_states()
-            self.check_mq_status_worker()
-            self.notify(f"Server type changed to: {new_env}")
+    # Fetch tab buttons
 
-        # Keep both server type selects in sync
-        server_type = self.query_one("#server_type", Select)
-        server_type_fetch = self.query_one("#server_type_fetch", Select)
-        server_type.value = new_env
-        server_type_fetch.value = new_env
+    @on(Button.Pressed, "#update_watched")
+    def handle_update_watched_pressed(self, event: Button.Pressed) -> None:
+        """Handle presses of the 'update_watched' button."""
+        if not self.app.is_updating:
+            event.button.variant = "primary"
+            self.app.handle_update_watched()
+        else:
+            self.app.cancel_update_watched()
 
-        # Update the download folder input
-        dl_input = self.query_one("#dl_path_input", Input)
-        dl_input.value = utils.get_current_download_folder()
-        self.download_folder = dl_input.value
+    @on(Button.Pressed, "#update_resource_id")
+    def handle_update_resource_id_pressed(self, event: Button.Pressed) -> None:
+        """Handle presses of the 'update_resource_id' button."""
+        event.button.variant = "default"
+        self.app.handle_update_resource_id()
 
-        # Update eqpath input
-        self.eq_path = config.settings.from_env(self.current_env).EQPATH or ""
-        eq_input = self.query_one("#eq_path_input", Input)
-        eq_input.value = self.eq_path
+    @on(Button.Pressed, "#redguides_interface")
+    def handle_redguides_interface_pressed(self, event: Button.Pressed) -> None:
+        """Toggle the RedGuides Interface."""
+        if not self.app.interface_running:
+            self.app.handle_redguides_interface()
+        else:
+            self.app.cancel_redguides_interface()
 
-        # Update VVMQ path display
-        self.update_vvmq_path_display()
-        # Update MySEQ switch state
-        self.update_myseq_display()
+    @on(Button.Pressed, "#log_search_next")
+    def handle_log_search_next_pressed(self, event: Button.Pressed) -> None:
+        self.handle_log_search_next()
 
-        # Update auto_run_vvmq switch
-        auto_run_vvmq_switch = self.query_one("#auto_run_vvmq", Switch)
-        auto_run_vvmq_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
-        auto_run_vvmq_switch.value = auto_run_vvmq_value
+    @on(Button.Pressed, "#log_search_prev")
+    def handle_log_search_prev_pressed(self, event: Button.Pressed) -> None:
+        self.handle_log_search_prev()
 
-        # Update auto_terminate_processes switch
-        auto_terminate_switch = self.query_one("#auto_terminate_processes", Switch)
-        auto_terminate_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
-        auto_terminate_switch.value = auto_terminate_value
+    @on(Button.Pressed, "#copy_log")
+    def handle_copy_log_pressed(self, event: Button.Pressed) -> None:
+        self.app.handle_copy_log()
 
-        # Update EQ maps select state
-        eq_maps_select = self.query_one("#eq_maps", Select)
-        eq_maps_select.value = self.get_current_eq_maps_value()
-        eq_maps_select.disabled = not bool(self.eq_path)
+    @on(Button.Pressed, "#clear_log")
+    def handle_clear_log_pressed(self, event: Button.Pressed) -> None:
+        self.app.handle_clear_log()
 
-        # Apply theme for new environment
-        new_theme = config.settings.from_env(new_env).get('THEME', 'textual-dark')
-        self.theme = new_theme
+    # Settings tab buttons
 
+    @on(Button.Pressed, "#select_dl_path")
+    def handle_select_dl_path_pressed(self, event: Button.Pressed) -> None:
+        self.app.select_directory("dl_path_input")
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "eq_maps":
-            new_value = event.value
-            if new_value != self.get_current_eq_maps_value():
-                self.update_eq_maps_settings(new_value)
+    @on(Button.Pressed, "#select_eq_path")
+    def handle_select_eq_path_pressed(self, event: Button.Pressed) -> None:
+        self.app.select_directory("eq_path_input")
 
-        if event.select.id in ["server_type", "server_type_fetch"]:
-            new_env = event.value
-            self._apply_server_type_change(new_env)
+    @on(Button.Pressed, "#select_vvmq_path")
+    def handle_select_vvmq_path_pressed(self, event: Button.Pressed) -> None:
+        self.app.select_directory("vvmq_path_input")
+
+    @on(Button.Pressed, "#reset_downloads")
+    def handle_reset_downloads_pressed(self, event: Button.Pressed) -> None:
+        self.app.handle_reset_downloads()
+
+    @on(Button.Pressed, "#uninstall")
+    def handle_uninstall_pressed(self, event: Button.Pressed) -> None:
+        self.app.handle_uninstall()
+
+    # Shortcuts tab buttons
+
+    @on(Button.Pressed, "#open_dl_folder")
+    def handle_open_dl_folder_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_folder(utils.get_current_download_folder())
+
+    @on(Button.Pressed, "#open_eq_folder")
+    def handle_open_eq_folder_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_folder(self.app.eq_path)
+
+    @on(Button.Pressed, "#open_vvmq_folder")
+    def handle_open_vvmq_folder_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_folder(utils.get_vvmq_path())
+
+    @on(Button.Pressed, "#run_macroquest")
+    def handle_run_macroquest_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+
+    @on(Button.Pressed, "#launch_everquest")
+    def handle_launch_everquest_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_executable(self.app.eq_path, "LaunchPad.exe")
+
+    @on(Button.Pressed, "#launch_everquest_client")
+    def handle_launch_everquest_client_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_executable(self.app.eq_path, "eqgame.exe", ["patchme"])
+
+    @on(Button.Pressed, "#run_myseq")
+    def handle_run_myseq_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_myseq_executable()
+
+    @on(Button.Pressed, "#open_myseq_folder")
+    def handle_open_myseq_folder_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_myseq_folder()
+
+    @on(Button.Pressed, "#open_ionbc_folder")
+    def handle_open_ionbc_folder_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_ionbc_folder()
+
+    @on(Button.Pressed, "#run_ionbc")
+    def handle_run_ionbc_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_ionbc_executable()
+
+    @on(Button.Pressed, "#run_meshupdater")
+    def handle_run_meshupdater_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_executable(utils.get_vvmq_path(), "MeshUpdater.exe")
+
+    @on(Button.Pressed, "#run_eqbcs")
+    def handle_run_eqbcs_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_executable(utils.get_vvmq_path(), "EQBCS.exe")
+
+    @on(Button.Pressed, "#open_redfetch_config")
+    def handle_open_redfetch_config_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_redfetch_config()
+
+    @on(Button.Pressed, "#open_mq_config")
+    def handle_open_mq_config_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_mq_config()
+
+    @on(Button.Pressed, "#open_eq_config")
+    def handle_open_eq_config_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_eq_config()
+
+    @on(Button.Pressed, "#open_eq_host")
+    def handle_open_eq_host_pressed(self, event: Button.Pressed) -> None:
+        self.app.open_eq_host()
+
+    # Account tab buttons
+
+    @on(Button.Pressed, "#btn_watched")
+    def handle_btn_watched_pressed(self, event: Button.Pressed) -> None:
+        self.app.action_link("https://www.redguides.com/community/watched/resources")
+
+    @on(Button.Pressed, "#btn_account")
+    def handle_btn_account_pressed(self, event: Button.Pressed) -> None:
+        self.app.action_link("https://www.redguides.com/amember/member")
+
+    @on(Button.Pressed, "#btn_licensed")
+    def handle_btn_licensed_pressed(self, event: Button.Pressed) -> None:
+        self.app.action_link("https://www.redguides.com/community/resources/market-place-user/licenses")
+
+    @on(Button.Pressed, "#btn_redguides")
+    def handle_btn_redguides_pressed(self, event: Button.Pressed) -> None:
+        self.app.action_link("https://www.redguides.com/community")
+
+    @on(Button.Pressed, "#btn_ding")
+    def handle_btn_ding_pressed(self, event: Button.Pressed) -> None:
+        self.app.action_link("https://www.redguides.com/amember/member")
+
+    # Input/Select/Switch handlers
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id in ["dl_path_input", "eq_path_input", "vvmq_path_input"]:
+            input_value = event.input.value.strip()
+            self.app.handle_input_update(event.input.id, input_value)
+        elif event.input.id == "resource_id_input":
+            self.app.handle_update_resource_id()
+        elif event.input.id == "log_search":
+            self.handle_log_search_next()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "resource_id_input":
             update_button = self.query_one("#update_resource_id", Button)
             update_button.disabled = not bool(event.value)
 
-    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        worker = event.worker
-        state = event.state
-        group = getattr(worker, "group", None)
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        if event.switch.id == "myseq":
+            self.app.handle_toggle_myseq(event.value)
+        elif event.switch.id == "ionbc":
+            self.app.handle_toggle_ionbc(event.value)
+        elif event.switch.id == "auto_run_vvmq":
+            self.app.handle_toggle_auto_run_vvmq(event.value)
+        elif event.switch.id == "auto_terminate_processes":
+            self.app.handle_toggle_auto_terminate_processes(event.value)
 
-        # Handle completion and errors for specific workers
-        if state == WorkerState.SUCCESS:
-            if worker.name == "_update_watched_worker":
-                self.update_complete(worker.result, self.query_one("#update_watched", Button))
-            elif worker.name == "_update_single_resource_worker":
-                self.update_complete(worker.result, self.query_one("#update_resource_id", Button))
-            elif worker.name == "_redguides_interface_worker":
-                self.notify("RedGuides Interface is now running.")
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "eq_maps":
+            new_value = event.value
+            if new_value != self.app.get_current_eq_maps_value():
+                self.app.update_eq_maps_settings(new_value)
 
-        elif state == WorkerState.ERROR:
-            error_message = f"Worker {worker.name} encountered an error: {worker.error}"
-            self.notify(error_message, severity="error")
-            print(error_message)  # Log the error to console as well
+        if event.select.id in ["server_type", "server_type_fetch"]:
+            new_env = event.value
+            self.app.current_env = new_env
 
-            if worker.name == "_update_watched_worker":
-                self.query_one("#update_watched", Button).variant = "error"
-            elif worker.name == "_update_single_resource_worker":
-                self.query_one("#update_resource_id", Button).variant = "error"
-            elif worker.name == "_redguides_interface_worker":
-                self.query_one("#redguides_interface", Button).variant = "error"
 
-        elif state == WorkerState.CANCELLED:
-            self.notify(f"Worker {worker.name} was cancelled.", severity="warning")
+class Redfetch(App):
+    """The main Redfetch application."""
 
-        # Centralized flag management based on worker groups
-        if group in {"update_watched_group", "single_update_group", "maintenance_group"}:
-            if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
-                self.is_updating = False
+    # Reactive state - initialized with neutral defaults; real values set when MainScreen mounts
+    interface_running: reactive[bool] = reactive(False)
+    is_updating: reactive[bool] = reactive(False)
+    mq_down: reactive[bool | None] = reactive(None)
+    download_folder: reactive[str] = reactive("")
+    eq_path: reactive[str] = reactive("")
+    current_env: reactive[str] = reactive(config.settings.ENV)
 
-        if group == "interface_group":
-            # Only clear interface_running when the long-running interface worker finishes,
-            # or when preparation fails / is cancelled before the server starts.
-            if worker.name == "_redguides_interface_worker":
-                if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
-                    self.interface_running = False
-            elif worker.name == "_prepare_redguides_interface_worker":
-                if state in {WorkerState.ERROR, WorkerState.CANCELLED}:
-                    self.interface_running = False
+    CSS_PATH = "terminal_ui.tcss"
 
-        # Update widget states based on the current application state
-        self.update_widget_states()
+    MODES = {"main": MainScreen}
 
-    def select_directory(self, input_id: str) -> None:
-        # this is an extension of textual by davep. 
-        input_widget = self.query_one(f"#{input_id}")
-        input_path = input_widget.value.strip()
-        
-        if input_path:
-            path = Path(input_path)
-            if path.is_dir():
-                start_dir = path
-            else:
-                self.notify(f"Invalid directory: {input_path}", severity="error")
-                start_dir = Path.home()
-        else:
-            start_dir = Path.home()
-        
-        self.push_screen(SelectDirectory(location=start_dir), callback=lambda path: self.update_selected_directory(path, input_id))
+    BINDINGS = [
+        ("ctrl+q", "quit", "Quit"),
+        ("ctrl+t", "cycle_theme", "Theme"),
+        ("ctrl+f", "focus_search", "Search Log"),
+        ("ctrl+s", "cycle_server_type", "Server Type"),
+        ("n", "search_next"),
+        ("N", "search_prev"),
+    ]
+
+    def get_system_commands(self, screen: Screen):
+        """Add Redfetch-specific commands to the command palette."""
+        yield from super().get_system_commands(screen)
+
+        yield SystemCommand(
+            "Update Watched",
+            "Update all watched & special resources",
+            self.handle_update_watched,
+            discover=True,
+        )
+        yield SystemCommand(
+            "Manage Watched Resources",
+            "Manage the resources you're watching",
+            lambda: self.action_link("https://www.redguides.com/community/watched/resources"),
+            discover=True,
+        )
+        yield SystemCommand(
+            "Manage Licensed Resources",
+            "Manage your purchased resources",
+            lambda: self.action_link("https://www.redguides.com/community/resources/market-place-user/licenses"),
+            discover=True,
+        )
+        yield SystemCommand(
+            "Manage Account",
+            "Manage your RedGuides 'Level 2' subscription",
+            lambda: self.action_link("https://www.redguides.com/amember/member"),
+            discover=True,
+        )
+        yield SystemCommand(
+            "Start RedGuides Interface",
+            "Start the RedGuides interface",
+            self.handle_redguides_interface,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Stop RedGuides Interface",
+            "Stop the RedGuides interface",
+            self.cancel_redguides_interface,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Update Single Resource",
+            "Update a single resource by its ID or URL",
+            self.handle_update_resource_id,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Copy Log",
+            "Copy the entire log to your clipboard",
+            self.handle_copy_log,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Clear Log",
+            "Clear all text from the log",
+            self.handle_clear_log,
+            discover=False,
+        )
+        yield SystemCommand(
+            "Open RedGuides Website",
+            "Open the RedGuides website",
+            lambda: self.action_link("https://www.redguides.com/community"),
+            discover=False,
+        )
+        yield SystemCommand(
+            "Upgrade to Level 2",
+            "Upgrade your RedGuides account to level 2",
+            lambda: self.action_link("https://www.redguides.com/amember/member"),
+            discover=False,
+        )
+
+    def on_mount(self) -> None:
+        """Initialize the app and push the main screen."""
+        # Create the theme cycle from available themes
+        self.themes = cycle(self.available_themes.keys())
+
+        # Load saved theme preference
+        saved_theme = config.settings.get('THEME', 'textual-dark')
+        self.theme = saved_theme
+
+        # Initialize reactive state from config
+        self.download_folder = config.settings.from_env(self.current_env).DOWNLOAD_FOLDER or ""
+        self.eq_path = config.settings.from_env(self.current_env).EQPATH or ""
+
+        # Set app title
+        self.title = "  redfetch"
+
+        # Switch to the main mode
+        self.switch_mode("main")
+
+        # Start background tasks
+        self.load_user_level()
+        self.check_mq_status_worker()
+
+    def on_unmount(self) -> None:
+        self.workers.cancel_all()
 
     #
-    # watchers (called by textual framework)
+    # Watchers - delegate to MainScreen if it's active
     #
 
     def watch_is_updating(self, old_value: bool, new_value: bool) -> None:
-        self.update_widget_states()
+        """Update all widgets when updating state changes."""
+        self._update_main_screen()
 
     def watch_interface_running(self, old_value: bool, new_value: bool) -> None:
-        self.update_widget_states()
+        """Update all widgets when interface running state changes."""
+        self._update_main_screen()
+
+    def watch_mq_down(self, old: bool | None, new: bool | None) -> None:
+        """Update Fetch tab when MQ status changes."""
+        main_screen = self._get_main_screen()
+        if main_screen:
+            main_screen._update_fetch_widgets()
+
+    def watch_download_folder(self, old: str, new: str) -> None:
+        """Update relevant widgets when the download folder changes."""
+        main_screen = self._get_main_screen()
+        if main_screen:
+            main_screen._update_fetch_widgets()
+            main_screen._update_settings_widgets()
+            main_screen._update_shortcuts_widgets()
+
+    def watch_eq_path(self, old: str, new: str) -> None:
+        """Update relevant widgets when the EverQuest path changes."""
+        main_screen = self._get_main_screen()
+        if main_screen:
+            main_screen._update_settings_widgets()
+            main_screen._update_shortcuts_widgets()
+
+    def watch_current_env(self, old: str, new: str) -> None:
+        """Handle changes to the current environment."""
+        if old == new:
+            return
+
+        # Update configuration for the new environment
+        config.switch_environment(new)
+
+        settings_for_env = config.settings.from_env(new)
+
+        # Update reactive paths for the new environment
+        self.eq_path = settings_for_env.EQPATH or ""
+
+        main_screen = self._get_main_screen()
+        if main_screen:
+            # Keep both server type selects in sync
+            server_type = main_screen.query_one("#server_type", Select)
+            server_type_fetch = main_screen.query_one("#server_type_fetch", Select)
+            server_type.value = new
+            server_type_fetch.value = new
+
+            # Update the download folder input and reactive value
+            dl_input = main_screen.query_one("#dl_path_input", Input)
+            dl_input.value = utils.get_current_download_folder()
+            self.download_folder = dl_input.value
+
+            # Update EQ path input
+            eq_input = main_screen.query_one("#eq_path_input", Input)
+            eq_input.value = self.eq_path
+
+            # Update VVMQ and MySEQ displays
+            main_screen.update_vvmq_path_display()
+            main_screen.update_myseq_display()
+
+            # Update switches based on new environment settings
+            auto_run_vvmq_switch = main_screen.query_one("#auto_run_vvmq", Switch)
+            auto_run_vvmq_switch.value = settings_for_env.get('AUTO_RUN_VVMQ', None)
+
+            auto_terminate_switch = main_screen.query_one("#auto_terminate_processes", Switch)
+            auto_terminate_switch.value = settings_for_env.get('AUTO_TERMINATE_PROCESSES', None)
+
+            # Update EQ maps select state
+            eq_maps_select = main_screen.query_one("#eq_maps", Select)
+            eq_maps_select.value = self.get_current_eq_maps_value()
+
+        # Apply theme for new environment
+        new_theme = settings_for_env.get('THEME', 'textual-dark')
+        self.theme = new_theme
+
+        # Re-check MQ status and notify
+        self.check_mq_status_worker()
+        self.notify(f"Server type changed to: {new}")
 
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
@@ -770,101 +947,111 @@ class Redfetch(App):
             except Exception as e:
                 self.notify(f"Failed to save theme preference: {e}", severity="error")
 
+    def _get_main_screen(self) -> MainScreen | None:
+        """Get the MainScreen if it's the current screen."""
+        if isinstance(self.screen, MainScreen):
+            return self.screen
+        return None
+
+    def _update_main_screen(self) -> None:
+        """Update widget states on the main screen if it's active."""
+        main_screen = self._get_main_screen()
+        if main_screen:
+            main_screen.update_widget_states()
+
     #
-    # action handlers (called by textual framework)
+    # Action handlers
     #
 
     def action_link(self, href: str) -> None:
-        """
-        action to invoke webbrowser
-        """
+        """Open a URL in the default browser."""
         webbrowser.open(href)
 
     def action_quit(self) -> None:
-        """Handle the quit action by canceling ongoing workers and exiting the application."""
-        # Check if the RedGuides Interface is running and cancel it if necessary
+        """Handle the quit action by canceling ongoing workers and exiting."""
         if self.interface_running:
             self.cancel_redguides_interface()
-
-        # Check if an update is in progress and cancel it if necessary
         if self.is_updating:
-            # Change the button label to indicate cancellation is in progress
             self.cancel_update_watched()
-
-        # Exit the application
         self.exit()
 
     def action_cycle_server_type(self) -> None:
-        """Cycle the server type"""
+        """Cycle the server type."""
         if self.is_updating or self.interface_running:
-            # Avoid changing environments during critical operations
             return
 
         order = ["LIVE", "TEST", "EMU"]
-        current = self.current_env
         try:
-            index = order.index(current)
+            index = order.index(self.current_env)
         except ValueError:
             index = 0
         new_env = order[(index + 1) % len(order)]
-
-        self._apply_server_type_change(new_env)
+        self.current_env = new_env
 
     def action_focus_search(self) -> None:
         """Focus the log search input."""
-        try:
-            search_input = self.query_one("#log_search", Input)
-            # Switch to Fetch tab if not active
-            tabbed_content = self.query_one(TabbedContent)
-            if tabbed_content.active != "fetch":
-                tabbed_content.active = "fetch"
-            search_input.focus()
-        except Exception:
-            # Widget might not exist or be visible
-            pass
+        main_screen = self._get_main_screen()
+        if main_screen:
+            try:
+                search_input = main_screen.query_one("#log_search", Input)
+                tabbed_content = main_screen.query_one(TabbedContent)
+                if tabbed_content.active != "fetch":
+                    tabbed_content.active = "fetch"
+                search_input.focus()
+            except Exception:
+                pass
 
     def action_search_next(self) -> None:
         """Keyboard action: go to next log search match."""
-        self.handle_log_search_next()
+        main_screen = self._get_main_screen()
+        if main_screen:
+            main_screen.handle_log_search_next()
 
     def action_search_prev(self) -> None:
         """Keyboard action: go to previous log search match."""
-        self.handle_log_search_prev()
+        main_screen = self._get_main_screen()
+        if main_screen:
+            main_screen.handle_log_search_prev()
+
+    def action_cycle_theme(self) -> None:
+        """Cycle to the next theme."""
+        new_theme = next(self.themes)
+        self.theme = new_theme
+        self.notify(f"Theme changed to: {new_theme}")
 
     #
-    # custom handlers
+    # Input handling
     #
 
-    def handle_input_update(self, input_id: str, input_value: str):
+    def handle_input_update(self, input_id: str, input_value: str) -> None:
+        main_screen = self._get_main_screen()
+        if not main_screen:
+            return
+
         if input_id == "dl_path_input":
-            # Download folder is created if it doesn't exist, no pre-validation needed
             try:
                 config.update_setting(['DOWNLOAD_FOLDER'], input_value, env=self.current_env)
                 self.download_folder = input_value
-                self.update_vvmq_path_display()
+                main_screen.update_vvmq_path_display()
                 self.notify("Download folder updated" if input_value else "Download folder cleared")
             except ValidationError as e:
                 self.notify(f"Invalid Download Folder: {e}", severity="error")
         elif input_id == "eq_path_input":
-            # Validate EverQuest path contains eqgame.exe
             if utils.validate_file_in_path(input_value, 'eqgame.exe'):
                 try:
                     config.update_setting(['EQPATH'], input_value, env=self.current_env)
                     self.eq_path = input_value
                     self.notify("EverQuest folder updated" if input_value else "EverQuest folder cleared")
                     
-                    # Update EQ maps select widget state based on path validity
-                    eq_maps_select = self.query_one("#eq_maps", Select)
+                    eq_maps_select = main_screen.query_one("#eq_maps", Select)
                     eq_maps_select.disabled = not bool(input_value)
                     eq_maps_select.value = self.get_current_eq_maps_value()
 
-                    self.update_widget_states()
                 except ValidationError as e:
                     self.notify(f"Invalid EverQuest Path: {e}", severity="error")
             else:
                 self.notify("Invalid EverQuest folder: eqgame.exe not found", severity="error")
         elif input_id == "vvmq_path_input":
-            # VVMQ folder is created if it doesn't exist, no pre-validation needed
             vvmq_id = utils.get_current_vvmq_id()
             if vvmq_id:
                 try:
@@ -872,6 +1059,121 @@ class Redfetch(App):
                     self.notify("Very Vanilla MQ folder updated" if input_value else "Very Vanilla MQ folder cleared")
                 except ValidationError as e:
                     self.notify(f"Invalid VVMQ Path: {e}", severity="error")
+
+    def select_directory(self, input_id: str) -> None:
+        """Open a directory picker for the given input."""
+        main_screen = self._get_main_screen()
+        if not main_screen:
+            return
+
+        input_widget = main_screen.query_one(f"#{input_id}")
+        input_path = input_widget.value.strip()
+
+        if input_path:
+            path = Path(input_path)
+            if path.is_dir():
+                start_dir = path
+            else:
+                self.notify(f"Invalid directory: {input_path}", severity="error")
+                start_dir = Path.home()
+        else:
+            start_dir = Path.home()
+
+        self.push_screen(
+            SelectDirectory(location=start_dir),
+            callback=lambda path: self.update_selected_directory(path, input_id)
+        )
+
+    def update_selected_directory(self, selected_path: Path | None, input_id: str) -> None:
+        main_screen = self._get_main_screen()
+        if not main_screen:
+            return
+
+        if selected_path:
+            input_widget = main_screen.query_one(f"#{input_id}")
+            input_widget.value = str(selected_path)
+            self.notify(f"Directory selected: {selected_path}")
+            self.handle_input_update(input_id, str(selected_path))
+        else:
+            self.notify("No directory selected", severity="warning")
+
+    #
+    # Toggle handlers
+    #
+
+    def handle_toggle_myseq(self, value: bool) -> None:
+        myseq_id = utils.get_current_myseq_id()
+        if myseq_id:
+            current_opt_in = config.settings.from_env(self.current_env).SPECIAL_RESOURCES[myseq_id]['opt_in']
+            if current_opt_in != value:
+                self.update_myseq_settings(value)
+
+    def handle_toggle_ionbc(self, value: bool) -> None:
+        ionbc_id = "2463"
+        current_opt_in = config.settings.from_env('DEFAULT').SPECIAL_RESOURCES[ionbc_id]['opt_in']
+        if current_opt_in != value:
+            config.update_setting(['SPECIAL_RESOURCES', ionbc_id, 'opt_in'], value, env='DEFAULT')
+            state = "enabled" if value else "disabled"
+            self.notify(f"IonBC is now {state}")
+
+    def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
+        main_screen = self._get_main_screen()
+        current_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
+        if current_value != value:
+            config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"Auto-terminate processes is now {state}")
+        if main_screen:
+            main_screen.query_one("#auto_terminate_processes", Switch).value = value
+
+    def handle_toggle_auto_run_vvmq(self, value: bool) -> None:
+        main_screen = self._get_main_screen()
+        current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+        if current_value != value:
+            config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"Auto-run VVMQ is now {state}")
+        if main_screen:
+            main_screen.query_one("#auto_run_vvmq", Switch).value = value
+
+    #
+    # Settings updaters
+    #
+
+    def update_myseq_settings(self, opt_in: bool) -> None:
+        myseq_id = utils.get_current_myseq_id()
+        if myseq_id:
+            config.update_setting(['SPECIAL_RESOURCES', myseq_id, 'opt_in'], opt_in, env=self.current_env)
+            state = "enabled" if opt_in else "disabled"
+            self.notify(f"MySEQ for {self.current_env} is now {state}")
+        else:
+            self.notify("MySEQ is not available for the current environment", severity="error")
+
+    def update_eq_maps_settings(self, selected_value: str | None) -> None:
+        if selected_value is None or selected_value == Select.BLANK:
+            brewall_opt_in = False
+            good_opt_in = False
+        else:
+            brewall_opt_in = selected_value in ["brewall", "all"]
+            good_opt_in = selected_value in ["good", "all"]
+
+        config.update_setting(['SPECIAL_RESOURCES', '153', 'opt_in'], brewall_opt_in, env=self.current_env)
+        config.update_setting(['SPECIAL_RESOURCES', '303', 'opt_in'], good_opt_in, env=self.current_env)
+
+        if selected_value is None or selected_value == Select.BLANK:
+            self.notify("EQ Maps settings cleared")
+        else:
+            self.notify(f"EQ Maps settings updated: Brewall's Maps: {brewall_opt_in}, Good's Maps: {good_opt_in}")
+
+    def get_current_eq_maps_value(self) -> str:
+        if not self.eq_path:
+            return Select.BLANK
+        eq_maps_status = utils.get_eq_maps_status()
+        return eq_maps_status if eq_maps_status else Select.BLANK
+
+    #
+    # File/folder operations
+    #
 
     def copy_to_clipboard_with_fallback(self, text: str) -> None:
         """Copy text to the clipboard, with a pyperclip fallback on legacy Windows terminals."""
@@ -881,13 +1183,16 @@ class Redfetch(App):
             except Exception as e:
                 self.notify(f"Failed to copy to clipboard: {e}", severity="error")
             return
-
         self.copy_to_clipboard(text)
 
     def handle_copy_log(self) -> None:
-        """Handler for copying log content via command palette."""
-        copy_button = self.query_one("#copy_log", Button)
-        log_widget = self.query_one("#fetch_log", Log)
+        """Handler for copying log content."""
+        main_screen = self._get_main_screen()
+        if not main_screen:
+            return
+
+        copy_button = main_screen.query_one("#copy_log", Button)
+        log_widget = main_screen.query_one("#fetch_log", Log)
         log_content = "\n".join(log_widget.lines)
         self.copy_to_clipboard_with_fallback(log_content)
         self.notify("Log contents copied to clipboard")
@@ -896,32 +1201,20 @@ class Redfetch(App):
 
     def handle_clear_log(self) -> None:
         """Handler for clearing log content."""
-        clear_button = self.query_one("#clear_log", Button)
-        log_widget = self.query_one("#fetch_log", Log)
+        main_screen = self._get_main_screen()
+        if not main_screen:
+            return
+
+        clear_button = main_screen.query_one("#clear_log", Button)
+        log_widget = main_screen.query_one("#fetch_log", Log)
         log_widget.clear()
-        # Clear any search highlights and state
-        self.screen.clear_selection()
-        self._log_search_matches = []
-        self._log_search_index = -1
-        self._log_search_term = ""
+        main_screen.clear_selection()
+        main_screen._log_search_matches = []
+        main_screen._log_search_index = -1
+        main_screen._log_search_term = ""
         self.notify("Log cleared")
         clear_button.variant = "success"
         self.set_timer(3, lambda: setattr(clear_button, "variant", "default"))
-
-    def reset_button(self, button_id: str, variant: str = "default") -> None:
-        # pass the button id and variant to reset
-        button = self.query_one(f"#{button_id}", Button)
-        button.variant = variant
-        if button_id == "update_watched":
-            vvmq_button = self.query_one("#run_macroquest", Button)
-            vvmq_button.styles.border = None
-
-    def get_current_eq_maps_value(self) -> str:
-        if not self.eq_path:
-            return Select.BLANK
-        
-        eq_maps_status = utils.get_eq_maps_status()
-        return eq_maps_status if eq_maps_status else Select.BLANK
 
     def open_folder(self, path: str) -> None:
         """Open a folder in the default file explorer."""
@@ -939,7 +1232,7 @@ class Redfetch(App):
             self.notify(f"Directory does not exist: {path}", severity="error")
 
     def open_file(self, file_path: str, file_name: str) -> None:
-        """Open a file using the default program, falling back to Notepad on Windows or browser elsewhere."""
+        """Open a file using the default program."""
         full_path = os.path.join(file_path, file_name)
         if not os.path.isfile(full_path):
             self.notify(f"File not found: {full_path}", severity="error")
@@ -948,37 +1241,31 @@ class Redfetch(App):
         if sys.platform == 'win32':
             file_ext = os.path.splitext(file_name)[1].lower()
             try:
-                # Check if extension has a registered application
                 with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, file_ext) as key:
                     winreg.QueryValue(key, "")
                     os.startfile(full_path)
                     self.notify(f"{file_name} opened with default program.")
             except OSError:
-                # No registered application found, use Notepad
                 subprocess.Popen(['notepad.exe', full_path])
                 self.notify(f"{file_name} opened with Notepad.")
         else:
-            # Non-Windows platforms - try native opener, fall back to browser
             try:
                 if sys.platform == 'darwin':
                     subprocess.Popen(['open', full_path])
                 else:
                     subprocess.Popen(['xdg-open', full_path])
                 self.notify(f"{file_name} opened.")
-            except Exception as e:
+            except Exception:
                 file_uri = Path(full_path).as_uri()
                 webbrowser.open(file_uri)
                 self.notify(f"{file_name} opened in browser.")
 
     def open_redfetch_config(self) -> None:
-        """Open the settings.local.toml file."""
         config_file_path = os.path.join(config.config_dir, 'settings.local.toml')
         config.ensure_config_file_exists(config_file_path)
-        # Now open the file
         self.open_file(config.config_dir, 'settings.local.toml')
 
     def open_mq_config(self) -> None:
-        """Open the MacroQuest.ini file."""
         vvmq_path = utils.get_vvmq_path()
         if vvmq_path:
             self.open_file(os.path.join(vvmq_path, 'config'), 'MacroQuest.ini')
@@ -986,54 +1273,31 @@ class Redfetch(App):
             self.notify("VVMQ path not found.", severity="error")
 
     def open_eq_config(self) -> None:
-        """Open the eqclient.ini file."""
-        eq_path = config.settings.from_env(self.current_env).EQPATH
-        if eq_path:
-            self.open_file(eq_path, 'eqclient.ini')
+        if self.eq_path:
+            self.open_file(self.eq_path, "eqclient.ini")
         else:
             self.notify("EverQuest path not set.", severity="error")
 
     def open_eq_host(self) -> None:
-        """Open the eqhost.txt file."""
-        eq_path = config.settings.from_env(self.current_env).EQPATH
-        if eq_path:
-            self.open_file(eq_path, 'eqhost.txt')
+        if self.eq_path:
+            self.open_file(self.eq_path, "eqhost.txt")
         else:
             self.notify("EverQuest path not set.", severity="error")
 
-    def handle_toggle_myseq(self, value: bool) -> None:
-        myseq_id = utils.get_current_myseq_id()
-        if myseq_id:
-            current_opt_in = config.settings.from_env(self.current_env).SPECIAL_RESOURCES[myseq_id]['opt_in']
-            if current_opt_in != value:
-                self.update_myseq_settings(value)
+    def open_myseq_folder(self) -> None:
+        myseq_path = utils.get_myseq_path()
+        if myseq_path and os.path.exists(myseq_path):
+            self.open_folder(myseq_path)
+        else:
+            self.notify("MySEQ path not found.", severity="error")
 
-    def handle_toggle_ionbc(self, value: bool) -> None:
-        ionbc_id = "2463"  # Static
-        current_opt_in = config.settings.from_env('DEFAULT').SPECIAL_RESOURCES[ionbc_id]['opt_in']
-        if current_opt_in != value:
-            config.update_setting(['SPECIAL_RESOURCES', ionbc_id, 'opt_in'], value, env='DEFAULT')
-            state = "enabled" if value else "disabled"
-            self.notify(f"IonBC is now {state}")
-
-    def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
-        current_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
-        if current_value != value:
-            config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
-            state = "enabled" if value else "disabled"
-            self.notify(f"Auto-terminate processes is now {state}")
-        # Update the switch in the UI
-        self.query_one("#auto_terminate_processes", Switch).value = value
-
-    def handle_toggle_auto_run_vvmq(self, value: bool) -> None:
-        current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
-        if current_value != value:
-            config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
-            state = "enabled" if value else "disabled"
-            self.notify(f"Auto-run VVMQ is now {state}")
-        # Update the switch in the UI
-        self.query_one("#auto_run_vvmq", Switch).value = value
-
+    def open_ionbc_folder(self) -> None:
+        ionbc_path = utils.get_ionbc_path()
+        if ionbc_path and os.path.exists(ionbc_path):
+            self.open_folder(ionbc_path)
+        else:
+            self.notify("IonBC path not found.", severity="error")
+    
     def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
         """Run an executable and show appropriate notifications."""
         success = processes.run_executable(folder_path, executable_name, args)
@@ -1042,27 +1306,21 @@ class Redfetch(App):
         else:
             self.notify(f"Failed to start {executable_name}", severity="error")
 
-    def open_myseq_folder(self) -> None:
-        """Open the MySEQ folder if available."""
+    def run_myseq_executable(self) -> None:
         myseq_path = utils.get_myseq_path()
-        if myseq_path and os.path.exists(myseq_path):
-            self.open_folder(myseq_path)
+        if myseq_path:
+            myseq_executable = os.path.join(myseq_path, "MySEQ.exe")
+            if os.path.exists(myseq_executable):
+                self.run_executable(myseq_path, "MySEQ.exe")
+            else:
+                self.notify("MySEQ executable not found.", severity="error")
         else:
             self.notify("MySEQ path not found.", severity="error")
 
-    def open_ionbc_folder(self) -> None:
-        """Open the IonBC folder if available."""
-        ionbc_path = utils.get_ionbc_path()
-        if ionbc_path and os.path.exists(ionbc_path):
-            self.open_folder(ionbc_path)
-        else:
-            self.notify("IonBC path not found.", severity="error")
-    
     def run_ionbc_executable(self) -> None:
-        """Run the IonBC executable if available."""
         ionbc_path = utils.get_ionbc_path()
         if ionbc_path:
-            ionbc_executable = os.path.join(ionbc_path, "IonBC.exe")  # Adjust executable name if necessary
+            ionbc_executable = os.path.join(ionbc_path, "IonBC.exe")
             if os.path.exists(ionbc_executable):
                 self.run_executable(ionbc_path, "IonBC.exe")
             else:
@@ -1087,216 +1345,58 @@ class Redfetch(App):
 
         self.push_screen(UninstallScreen(), handle_uninstall_response)
 
-    def run_myseq_executable(self) -> None:
-        """Run the MySEQ executable if available."""
-        myseq_path = utils.get_myseq_path()
-        if myseq_path:
-            myseq_executable = os.path.join(myseq_path, "MySEQ.exe")  # Adjust if necessary
-            if os.path.exists(myseq_executable):
-                self.run_executable(myseq_path, "MySEQ.exe")
-            else:
-                self.notify("MySEQ executable not found.", severity="error")
-        else:
-            self.notify("MySEQ path not found.", severity="error")
-
-    def update_widget_states(self):
-        """Update the state of widgets based on application state."""
-
-        # Check if the current screen is the main screen
-        if self.screen != self.screen_stack[0]:
-            # If not the main screen, don't update widget states
-            return
-
-        # Fetch the update_watched_button
-        update_watched_button = self.query_one("#update_watched", Button)
-
-        if self.mq_down is None:
-            # MQ status not yet known; disable the button or set to a default state
-            update_watched_button.label = "Checking MQ status...📞"
-            update_watched_button.tooltip = "Please wait while we check MQ status."
-            update_watched_button.disabled = True
-        elif self.mq_down:
-            update_watched_button.label = "MQ Down: Patch Day 💔"
-            update_watched_button.tooltip = (
-                "Very Vanilla MQ is down for patch day, check redguides.com for current status."
-            )
-            update_watched_button.disabled = True
-            update_watched_button.variant = "default"
-        else:
-            if self.is_updating:
-                update_watched_button.label = "Stop Update 🛑"
-                update_watched_button.tooltip = "Update in progress. Click to cancel."
-                update_watched_button.disabled = False
-            else:
-                update_watched_button.label = "Easy Update Button 🍦"
-                update_watched_button.tooltip = (
-                    "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ and other staff picks. "
-                    "(Manage watched resources on the website, and opt-in or out of any 'special' resources in settings.local.toml)"
-                )
-                # Only set variant to 'primary' if it's not already 'success' or 'error'
-                if update_watched_button.variant not in ["success", "error"]:
-                    update_watched_button.variant = "primary"
-                update_watched_button.disabled = (
-                    self.is_updating or self.interface_running or not bool(self.download_folder)
-                )
-            # Refresh the button layout to reflect changes
-            update_watched_button.refresh(layout=True)
-
-        # Inputs!
-        resource_input = self.query_one("#resource_id_input", Input)
-        resource_input.disabled = self.is_updating or self.interface_running
-        self.query_one("#eq_path_input", Input).disabled = self.is_updating or self.interface_running
-        self.query_one("#dl_path_input", Input).disabled = self.is_updating or self.interface_running
-        self.query_one("#vvmq_path_input", Input).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
-
-        # Buttons!
-        self.query_one("#update_resource_id", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder) or not bool(resource_input.value)
-        redguides_interface_button = self.query_one("#redguides_interface", Button)
-        if self.interface_running:
-            redguides_interface_button.label = "Stop Interface 🛑"
-            redguides_interface_button.tooltip = "RedGuides Interface is currently running, click to stop."
-            redguides_interface_button.disabled = False
-        else:
-            redguides_interface_button.label = "RedGuides Interface 🌐"
-            redguides_interface_button.tooltip = "Access an interface for this script on the website."
-            redguides_interface_button.disabled = self.is_updating
-        self.query_one("#select_dl_path", Button).disabled = self.is_updating or self.interface_running
-        self.query_one("#select_eq_path", Button).disabled = self.is_updating or self.interface_running
-        self.query_one("#select_vvmq_path", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
-        self.query_one("#reset_downloads", Button).disabled = self.is_updating or self.interface_running
-        self.query_one("#run_macroquest", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_vvmq_path(), 'MacroQuest.exe')
-        self.query_one("#run_meshupdater", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_vvmq_path(), 'MeshUpdater.exe')
-        self.query_one("#run_eqbcs", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_vvmq_path(), 'EQBCS.exe')
-        eq_path = config.settings.from_env(self.current_env).EQPATH
-        eq_path_exists = bool(eq_path) and os.path.exists(eq_path)
-        self.query_one("#launch_everquest", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'LaunchPad.exe')
-        self.query_one("#launch_everquest_client", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'eqgame.exe')
-        self.query_one("#open_eq_folder", Button).disabled = self.is_updating or self.interface_running or not eq_path_exists
-        myseq_path = utils.get_myseq_path()
-        self.query_one("#run_myseq", Button).disabled = (self.is_updating or self.interface_running or not utils.validate_file_in_path(myseq_path, 'MySEQ.exe'))
-        self.query_one("#open_myseq_folder", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_myseq_path())
-        self.query_one("#run_ionbc", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(utils.get_ionbc_path(), 'IonBC.exe')
-        self.query_one("#open_ionbc_folder", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_ionbc_path())
-        self.query_one("#open_dl_folder", Button).disabled = self.is_updating or self.interface_running or not bool(self.download_folder)
-        self.query_one("#uninstall", Button).disabled = self.is_updating or self.interface_running
-        self.query_one("#open_vvmq_folder", Button).disabled = self.is_updating or self.interface_running or not bool(utils.get_vvmq_path())
-        self.query_one("#open_redfetch_config", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(config.config_dir, 'settings.local.toml')
-        self.query_one("#open_mq_config", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(os.path.join(utils.get_vvmq_path(), 'config'), 'MacroQuest.ini')
-        self.query_one("#open_eq_config", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'eqclient.ini')
-        self.query_one("#open_eq_host", Button).disabled = self.is_updating or self.interface_running or not utils.validate_file_in_path(eq_path, 'eqhost.txt')
-
-        # Selects!
-        server_type = self.query_one("#server_type", Select)
-        server_type_fetch = self.query_one("#server_type_fetch", Select)
-        
-        # Set disabled state for both selects
-        server_type.disabled = self.is_updating or self.interface_running
-        server_type_fetch.disabled = self.is_updating or self.interface_running
-        
-        # Keep both server type selects in sync with current_env
-        if server_type.value != self.current_env:
-            server_type.value = self.current_env
-        if server_type_fetch.value != self.current_env:
-            server_type_fetch.value = self.current_env
-        eq_maps_select = self.query_one("#eq_maps", Select)
-        eq_maps_select.disabled = self.is_updating or self.interface_running or not bool(self.eq_path)
-        
-        # Switches!
-        self.query_one("#myseq", Switch).disabled = self.is_updating or self.interface_running or not bool(utils.get_current_myseq_id())
-        self.query_one("#ionbc", Switch).disabled = self.is_updating or self.interface_running
-        self.query_one("#auto_run_vvmq", Switch).disabled = self.is_updating or self.interface_running
-        self.query_one("#auto_terminate_processes", Switch).disabled = self.is_updating or self.interface_running
-
     #
-    # setting updaters
+    # Worker handlers
     #
 
-    def update_myseq_settings(self, opt_in: bool) -> None:
-        # myseq has to figure out its resource id first
-        myseq_id = utils.get_current_myseq_id()
-        if myseq_id:
-            config.update_setting(['SPECIAL_RESOURCES', myseq_id, 'opt_in'], opt_in, env=self.current_env)
-            state = "enabled" if opt_in else "disabled"
-            self.notify(f"MySEQ for {self.current_env} is now {state}")
-        else:
-            self.notify("MySEQ is not available for the current environment", severity="error")
-        
-    def update_eq_maps_settings(self, selected_value: str | None) -> None:
-        # eq maps needed help since we have several options. 
-        if selected_value is None or selected_value == Select.BLANK:
-            # Handle blank selection
-            brewall_opt_in = False
-            good_opt_in = False
-        else:
-            brewall_opt_in = selected_value in ["brewall", "all"]
-            good_opt_in = selected_value in ["good", "all"]
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        worker = event.worker
+        state = event.state
+        group = getattr(worker, "group", None)
+        main_screen = self._get_main_screen()
 
-        # Update Brewall's Maps setting
-        config.update_setting(['SPECIAL_RESOURCES', '153', 'opt_in'], brewall_opt_in, env=self.current_env)
+        if state == WorkerState.SUCCESS:
+            if worker.name == "_update_watched_worker" and main_screen:
+                self.update_complete(worker.result, main_screen.query_one("#update_watched", Button))
+            elif worker.name == "_update_single_resource_worker" and main_screen:
+                self.update_complete(worker.result, main_screen.query_one("#update_resource_id", Button))
+            elif worker.name == "_redguides_interface_worker":
+                self.notify("RedGuides Interface is now running.")
 
-        # Update Good's Maps setting
-        config.update_setting(['SPECIAL_RESOURCES', '303', 'opt_in'], good_opt_in, env=self.current_env)
+        elif state == WorkerState.ERROR:
+            error_message = f"Worker {worker.name} encountered an error: {worker.error}"
+            self.notify(error_message, severity="error")
+            print(error_message)
 
-        if selected_value is None or selected_value == Select.BLANK:
-            self.notify("EQ Maps settings cleared")
-        else:
-            self.notify(f"EQ Maps settings updated: Brewall's Maps: {brewall_opt_in}, Good's Maps: {good_opt_in}") 
+            if main_screen:
+                if worker.name == "_update_watched_worker":
+                    main_screen.query_one("#update_watched", Button).variant = "error"
+                elif worker.name == "_update_single_resource_worker":
+                    main_screen.query_one("#update_resource_id", Button).variant = "error"
+                elif worker.name == "_redguides_interface_worker":
+                    main_screen.query_one("#redguides_interface", Button).variant = "error"
 
-    def update_selected_directory(self, selected_path: Path | None, input_id: str) -> None:
-        if selected_path:
-            input_widget = self.query_one(f"#{input_id}")
-            input_widget.value = str(selected_path)
-            self.notify(f"Directory selected: {selected_path}")
-            self.handle_input_update(input_id, str(selected_path))
-        else:
-            # Handle the case where no path was selected (e.g., user cancelled the dialog)
-            self.notify("No directory selected", severity="warning")
+        elif state == WorkerState.CANCELLED:
+            self.notify(f"Worker {worker.name} was cancelled.", severity="warning")
 
-    def update_vvmq_path_display(self):
-        vvmq_path = utils.get_vvmq_path()
-        vvmq_input_widget = self.query_one("#vvmq_path_input", Input)
-        if vvmq_path:
-            vvmq_input_widget.value = vvmq_path
-            vvmq_input_widget.disabled = False
-        else:
-            vvmq_input_widget.value = "VVMQ not found for this server type."
-            vvmq_input_widget.disabled = True
+        if group in {"update_watched_group", "single_update_group", "maintenance_group"}:
+            if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
+                self.is_updating = False
 
-    def update_myseq_display(self):
-        myseq_switch = self.query_one("#myseq", Switch)
-        myseq_id = utils.get_current_myseq_id()
-        if myseq_id:
-            myseq_opt_in = config.settings.from_env(self.current_env).SPECIAL_RESOURCES[myseq_id]['opt_in']
-            myseq_switch.value = myseq_opt_in
-            myseq_switch.disabled = False
-        else:
-            myseq_switch.disabled = True
-            myseq_switch.value = False
+        if group == "interface_group":
+            if worker.name == "_redguides_interface_worker":
+                if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
+                    self.interface_running = False
+            elif worker.name == "_prepare_redguides_interface_worker":
+                if state in {WorkerState.ERROR, WorkerState.CANCELLED}:
+                    self.interface_running = False
 
-    def update_welcome_label(self, greeting: str):
-        welcome_label = self.query_one("#welcome_label", Label)
-        welcome_label.update(greeting)
-
-    def update_account_label(self, greetingacct: str):
-        welcome_label = self.query_one("#account_label", Label)
-        welcome_label.update(greetingacct)
-
-    def show_ding_button(self, show: bool) -> None:
-        ding_button = self.query_one("#btn_ding", Button)
-        ding_button.display = show
-        
-    #
-    # worker handlers
-    #
+        self._update_main_screen()
 
     @work(exclusive=True, group="mq_status_group")
     async def check_mq_status_worker(self):
         """Background worker to check MQ status."""
         mq_down = await net.is_mq_down()
-        self.set_mq_down_status(mq_down)
-
-    def set_mq_down_status(self, mq_down: bool | None):
-        """Set the mq_down reactive variable."""
         self.mq_down = mq_down
 
     def handle_update_watched(self) -> None:
@@ -1311,7 +1411,6 @@ class Redfetch(App):
     async def _update_watched_worker(self) -> bool:
         print("Starting update of all watched & special resources, please wait...")
 
-        # Check for running processes
         mq_folder = utils.get_base_path()
         running_executables = await asyncio.to_thread(processes.are_executables_running_in_folder, mq_folder)
         if running_executables:
@@ -1331,25 +1430,20 @@ class Redfetch(App):
                     await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
                 elif response == ProcessTerminationScreen.RESPONSE_NEVER:
                     self.handle_toggle_auto_terminate_processes(False)
-                else:  # RESPONSE_SKIP
+                else:
                     self.notify("Continuing update without closing processes...", severity="warning")
 
         result = await self.run_synchronization()
         return result
     
     def cancel_update_watched(self):
-        # Textual's WorkerManager.cancel_group expects the app and group name
         cancelled_workers = self.workers.cancel_group(self, "update_watched_group")
         if cancelled_workers:
             self.notify("Update canceled.", severity="warning")
 
     async def run_synchronization(self, resource_ids=None):
         try:
-            # Get the current environment from the server_type Select widget
-            server_type_select = self.query_one("#server_type", Select)
-            current_env = server_type_select.value
-
-            db_name = f"{current_env}_resources.db"
+            db_name = f"{self.current_env}_resources.db"
             await asyncio.to_thread(store.initialize_db, db_name)
             db_path = store.get_db_path(db_name)
             headers = await api.get_api_headers()
@@ -1365,25 +1459,25 @@ class Redfetch(App):
             print(f"Error in run_synchronization: {e}")
             return False
 
-    def update_complete(self, result: bool, button: Button):
+    def update_complete(self, result: bool, button: Button) -> None:
+        main_screen = self._get_main_screen()
         if result:
             button.variant = "success"
             self.notify("All resources updated successfully.")
-            # Clear resource_id_input on success
-            if button.id == "update_resource_id":
-                input_widget = self.query_one("#resource_id_input", Input)
+            if button.id == "update_resource_id" and main_screen:
+                input_widget = main_screen.query_one("#resource_id_input", Input)
                 input_widget.value = ""
-                self.set_timer(6, lambda: self.reset_button("update_resource_id", "default"))
+                self.set_timer(6, lambda: main_screen.reset_button("update_resource_id", "default"))
             elif button.id == "update_watched":
-                # Only show MacroQuest options on Windows
                 if sys.platform == 'win32':
-                    # Check auto-run preference before showing modal
                     auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
                     if auto_run is True:
                         self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-                        self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                        if main_screen:
+                            self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
                     elif auto_run is False:
-                        self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                        if main_screen:
+                            self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
                     else:
                         def handle_vvmq_response(response: str) -> None:
                             if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
@@ -1392,22 +1486,24 @@ class Redfetch(App):
                                 self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
                             elif response == RunVVMQScreen.RESPONSE_NEVER:
                                 self.handle_toggle_auto_run_vvmq(False)
-                            self.reset_button("update_watched", "primary")
-                            self.update_widget_states()
+                            if main_screen:
+                                main_screen.reset_button("update_watched", "primary")
+                                main_screen.update_widget_states()
                         self.push_screen(RunVVMQScreen(), handle_vvmq_response)
                 else:
-                    # Non-Windows platforms just reset the button
-                    self.set_timer(6, lambda: self.reset_button("update_watched", "primary"))
+                    if main_screen:
+                        self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
         else:
             button.variant = "error"
-            print(f"Some resources failed to update.")
+            print("Some resources failed to update.")
             self.notify("Failed to update some resources.", severity="error")
 
     def handle_update_resource_id(self) -> None:
-        if self.is_updating:
+        main_screen = self._get_main_screen()
+        if self.is_updating or not main_screen:
             return
 
-        input_widget = self.query_one("#resource_id_input", Input)
+        input_widget = main_screen.query_one("#resource_id_input", Input)
         input_value = input_widget.value.strip()
         if not input_value:
             self.notify("Please enter a Resource ID or URL", severity="error")
@@ -1430,9 +1526,7 @@ class Redfetch(App):
         return result
 
     def cancel_redguides_interface(self):
-        # Cancel only interface-related workers; cancelling the worker will cancel the server task.
-        # Textual's WorkerManager.cancel_group expects the app and group name
-        cancelled_workers = self.workers.cancel_group(self, "interface_group")
+        self.workers.cancel_group(self, "interface_group")
     
     def handle_reset_downloads(self) -> None:
         if self.is_updating:
@@ -1443,7 +1537,6 @@ class Redfetch(App):
 
     @work(exclusive=True, group="maintenance_group")
     async def _reset_downloads_worker(self) -> bool:
-        """Async worker to reset all download dates using aiosqlite helper."""
         try:
             print("Resetting all download dates, please wait...")
             db_name = f"{self.current_env}_resources.db"
@@ -1456,9 +1549,7 @@ class Redfetch(App):
             self.notify("Failed to reset download dates.", severity="error")
             return False
 
-    # adding a group to the worker so that it can be cancelled
     def handle_redguides_interface(self) -> None:
-        # Mark interface as running as we begin startup; it will be cleared via worker state.
         self.interface_running = True
         self.notify("Starting RedGuides Interface...")
         self._prepare_redguides_interface_worker()
@@ -1487,13 +1578,13 @@ class Redfetch(App):
 
     @work(exclusive=True, group="interface_group")
     async def _redguides_interface_worker(self, settings, db_name, headers, special_resources, category_map) -> bool:
-        """Run the RedGuides interface server on the main asyncio loop."""
         from redfetch.listener import run_server_async
         await run_server_async(settings, db_name, headers, special_resources, category_map)
         return True
     
     @work
     async def load_user_level(self):
+        main_screen = self._get_main_screen()
         self.username = await api.get_username()
         headers = await api.get_api_headers()
         if await api.is_kiss_downloadable(headers):
@@ -1501,59 +1592,19 @@ class Redfetch(App):
             greetingacct = (
                 f"[italic][bold]{self.username}, thank you for being level 2[/bold][/italic] 💛"
             )
-            self.show_ding_button(False)
+            if main_screen:
+                main_screen.show_ding_button(False)
         else:
             greeting = f"Hey {self.username}, you're level 1 😞"
             greetingacct = (
                 f"Hey {self.username}, you're level 1 😞 some resources won't be downloaded."
             )
-            self.show_ding_button(True)
-        self.update_welcome_label(greeting)
-        self.update_account_label(greetingacct)
+            if main_screen:
+                main_screen.show_ding_button(True)
+        if main_screen:
+            main_screen.update_welcome_label(greeting)
+            main_screen.update_account_label(greetingacct)
 
-    #
-    # the start
-    #
-
-    def on_mount(self) -> None:
-        # Create the theme cycle from available themes when the app starts
-        self.themes = cycle(self.available_themes.keys())
-        
-        # Load saved theme preference
-        saved_theme = config.settings.get('THEME', 'textual-dark')
-        self.theme = saved_theme  # Use internal attribute to bypass watcher
-        
-        # Initialize the Log widget with some content
-        log = self.query_one("#fetch_log", Log)
-        log.write_line(f"redfetch v{meta.get_current_version()} allows you to download resources from RedGuides")
-        log.write_line("Server type: " + self.current_env)
-        log.write_line("\n")
-        # two spaces to make up for tcss padding of tabbedcontent and tabpane
-        self.title = "  redfetch"
-        self.load_user_level()  # background task for welcome message
-        self.check_mq_status_worker()
-        # border titles
-        self.query_one("#server_type").border_title = "Server type"
-        self.query_one("#inputs_grid").border_title = "Directories"
-        self.query_one("#settings_grid").border_title = "Settings"
-        self.query_one("#special_resources_grid").border_title = "Special Resources"
-        self.query_one("#maintenance_grid").border_title = "Maintenance"
-        self.query_one("#executables_grid").border_title = "Executables ⚡"
-        self.query_one("#folders_grid").border_title = "Folders 📁"
-        self.query_one("#files_grid").border_title = "Files 📎"
-        
-    # 
-    # the end
-    #
-
-    def on_unmount(self):
-        self.workers.cancel_all()
-
-    def action_cycle_theme(self) -> None:
-        """Cycle to the next theme."""
-        new_theme = next(self.themes)
-        self.theme = new_theme
-        self.notify(f"Theme changed to: {new_theme}")
 
 # display print statements in the log widget
 class PrintCapturingLog(Log):
@@ -1589,7 +1640,7 @@ class RunVVMQScreen(ModalScreen):
             self.dismiss(self.RESPONSE_ALWAYS)
         elif event.button.id == "nevermq":
             self.dismiss(self.RESPONSE_NEVER)
-        else:  # "nomq"
+        else:
             self.dismiss(self.RESPONSE_SKIP)
 
 
@@ -1606,11 +1657,9 @@ class ProcessTerminationScreen(ModalScreen):
         self.running_executables = running_executables
 
     def compose(self) -> ComposeResult:
-        # Check if any process contains "crashpad" in the executable path
         if any("crashpad" in exe_path.lower() for pid, exe_path in self.running_executables):
             message = "MacroQuest is running, which may interfere with updates."
         else:
-            # Create a string of just the executable names
             exe_names = ", ".join(os.path.basename(exe_path) for pid, exe_path in self.running_executables)
             message = (
                 f"These processes may interfere with updates:\n"
@@ -1634,7 +1683,7 @@ class ProcessTerminationScreen(ModalScreen):
             self.dismiss(self.RESPONSE_ALWAYS)
         elif event.button.id == "neverterminate":
             self.dismiss(self.RESPONSE_NEVER)
-        else:  # "noterminate"
+        else:
             self.dismiss(self.RESPONSE_SKIP)
 
 
@@ -1656,7 +1705,7 @@ class UninstallScreen(ModalScreen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "yes_uninstall":
             self.dismiss(self.RESPONSE_YES)
-        else:  # "no_uninstall"
+        else:
             self.dismiss(self.RESPONSE_NO)
 
 
@@ -1667,4 +1716,3 @@ def run_textual_ui():
 
 if __name__ == "__main__":
     run_textual_ui()
-
