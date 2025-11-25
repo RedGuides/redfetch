@@ -322,22 +322,13 @@ class MainScreen(Screen):
         settings_container.disabled = busy
 
         # Path inputs
-        self.query_one("#dl_path_input", Input).disabled = False
-        self.query_one("#eq_path_input", Input).disabled = False
         self.query_one("#vvmq_path_input", Input).disabled = not bool(app.download_folder)
 
         # Path selection buttons
-        self.query_one("#select_dl_path", Button).disabled = False
-        self.query_one("#select_eq_path", Button).disabled = False
         self.query_one("#select_vvmq_path", Button).disabled = not bool(app.download_folder)
-
-        # Maintenance buttons
-        self.query_one("#reset_downloads", Button).disabled = False
-        self.query_one("#uninstall", Button).disabled = False
 
         # Server type select on Settings tab
         server_type = self.query_one("#server_type", Select)
-        server_type.disabled = False
         if server_type.value != app.current_env:
             server_type.value = app.current_env
 
@@ -347,9 +338,6 @@ class MainScreen(Screen):
 
         # Switches
         self.query_one("#myseq", Switch).disabled = not bool(utils.get_current_myseq_id())
-        self.query_one("#ionbc", Switch).disabled = False
-        self.query_one("#auto_run_vvmq", Switch).disabled = False
-        self.query_one("#auto_terminate_processes", Switch).disabled = False
 
     def _update_shortcuts_widgets(self) -> None:
         """Update widgets on the Shortcuts tab."""
@@ -692,7 +680,7 @@ class MainScreen(Screen):
 
     @on(Button.Pressed, "#btn_ding")
     def handle_btn_ding_pressed(self, event: Button.Pressed) -> None:
-        self.app.action_link("https://www.redguides.com/amember/member")
+        self.app.handle_ding_check()
 
     # Input/Select/Switch handlers
 
@@ -826,7 +814,7 @@ class Redfetch(App):
             discover=False,
         )
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Initialize the app and push the main screen."""
         # Create the theme cycle from available themes
         self.themes = cycle(self.available_themes.keys())
@@ -842,10 +830,10 @@ class Redfetch(App):
         # Set app title
         self.title = "  redfetch"
 
-        # Switch to the main mode
-        self.switch_mode("main")
+        # Switch to the main mode and wait for it to be fully mounted
+        await self.switch_mode("main")
 
-        # Start background tasks
+        # Start background tasks after the UI is ready
         self.load_user_level()
         self.check_mq_status_worker()
 
@@ -1604,6 +1592,37 @@ class Redfetch(App):
         if main_screen:
             main_screen.update_welcome_label(greeting)
             main_screen.update_account_label(greetingacct)
+
+    def handle_ding_check(self) -> None:
+        """Check if user has upgraded to level 2 and update UI accordingly."""
+        self.notify("Checking your level... 🎲")
+        self._check_ding_level_worker()
+
+    @work(exclusive=True, group="ding_check_group")
+    async def _check_ding_level_worker(self) -> None:
+        """Worker to check level 2 status and update UI or redirect."""
+        main_screen = self._get_main_screen()
+        headers = await api.get_api_headers()
+        
+        # Force a fresh check, bypassing cache
+        is_level_2 = await api.is_kiss_downloadable(headers, force_refresh=True)
+        
+        if is_level_2:
+            # User is now level 2! Update the UI
+            username = getattr(self, 'username', await api.get_username())
+            greeting = f"[italic]Hail, [bold]{username}![/bold][/italic]"
+            greetingacct = (
+                f"[italic][bold]{username}, thank you for being level 2[/bold][/italic] 💛"
+            )
+            if main_screen:
+                main_screen.show_ding_button(False)
+                main_screen.update_welcome_label(greeting)
+                main_screen.update_account_label(greetingacct)
+            self.notify("🎉 DING! Welcome to level 2!", severity="information")
+        else:
+            # Still level 1, send them to the upgrade page
+            self.notify("You're still level 1. Opening upgrade page...", severity="warning")
+            self.action_link("https://www.redguides.com/amember/member")
 
 
 # display print statements in the log widget

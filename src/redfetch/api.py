@@ -149,7 +149,7 @@ async def fetch_resources_batch(client: httpx.AsyncClient, resource_ids: List[st
     return results
 
 
-_KISS_CACHE_TTL_SECONDS = 24 * 60 * 60  # 1 day
+_KISS_CACHE_TTL_SECONDS = 60  # 60 seconds
 
 
 # Persistent disk-backed cache (survives across CLI runs)
@@ -213,21 +213,19 @@ def get_token_expiry() -> Optional[str]:
     return _api_cache.get('expires_at')
 
 
-async def is_kiss_downloadable(headers):
-    """Check for level 2 access with 1-day disk cache.
-
-    XF doesn't expose secondary_groups to non-admin API, so we test by attempting
-    to fetch KISS (resource 4). Result is cached for 1 day.
-    """
+async def is_kiss_downloadable(headers, force_refresh: bool = False):
+    """Check for level 2 access by checking KISS."""
     global _api_cache
     if _api_cache is None:
         _api_cache = _get_api_cache()
     
     # Single-user install: use a singleton cache key
     cache_key = "kiss"
-    cached = _api_cache.get(cache_key)
-    if cached is not None:
-        return bool(cached)
+    
+    if not force_refresh:
+        cached = _api_cache.get(cache_key)
+        if cached is not None:
+            return bool(cached)
 
     async with httpx.AsyncClient(headers=headers, http2=True) as client:
         resource = await fetch_single_resource(client, "4")
