@@ -371,6 +371,8 @@ async def sync(
         return False
 
     print(f"Total resources to process: >>> {len(tasks)} <<<")
+    if on_event:
+        on_event(("total", len(tasks), None))
 
     download_results: List[Tuple[str, str]] = []
     try:

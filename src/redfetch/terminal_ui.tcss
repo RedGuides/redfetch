@@ -19,6 +19,7 @@ Header {
 TabbedContent {
     padding: 1 1;
 }
+
 TabPane {
     padding: 1 1;
     height: 1fr;
@@ -66,50 +67,49 @@ Label {
     layout: grid;
     grid-rows: auto 1fr;
     /* Match row spacing inside the fetch grid */
-    grid-gutter: 1 0;
+    grid-gutter: 1;
     min-height: 20;
+    height: auto;
 }
 
 #fetch_grid {
     layout: grid;
     grid-size: 3;
     grid-rows: auto;
-    grid-gutter: 1;
+    grid-gutter: 1 0;
     min-width: 55;
+    height: auto;
 }
-#center_welcome {
-    column-span: 3;
-}
-#welcome_label {
+
+#server_type_fetch {
     content-align: center middle;
+    width: 25;
+    min-width: 15;
+    column-span: 1;
 }
-#center_watched {
-    column-span: 3;
+
+#centermiddle_welcome {
+    height: auto;
 }
+
 #update_watched {
-    content-align: center middle;
     color: $text;
     text-style: bold;
     padding: 1 1;
 }
+
 #update_resource_id {
-    margin: 0 1;
     min-width: 18;
-}
-#resource_id_input {
-    margin: 0 1 0 0;
-    min-width: 20;
-}
-#server_type_fetch {
-    content-align: center middle;
-    width: 26;
-    min-width: 15;
-}
-#resource_id_input {
-    column-span: 2;
-}
-#update_resource_id {
+    width: 100%;
     column-span: 1;
+    margin-right: 0;
+}
+
+#resource_id_input, #update_progress {
+    min-width: 20;
+    width: 100%;
+    column-span: 2;
+    margin-left: 2;
 }
 
 #fetch_log_container {
@@ -163,12 +163,14 @@ Label {
     height: 1fr;
     overflow-y: auto;
 }
+
 #server_type {
-    column-span:4;
     content-align: center middle;
     width: 25;
     min-width: 15;
+    column-span: 4;
 }
+
 #inputs_grid {
     margin-top: 1;
     margin-bottom: 1;

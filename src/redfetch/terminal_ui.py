@@ -21,9 +21,9 @@ from rich.console import detect_legacy_windows
 from textual import work, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log
+from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar
 from textual.events import Print
-from textual.containers import ScrollableContainer, Center, Grid, ItemGrid, Vertical
+from textual.containers import ScrollableContainer, Center, CenterMiddle, Grid, ItemGrid, Vertical
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState
 from textual.screen import ModalScreen, Screen
@@ -55,15 +55,29 @@ class FetchTab(ScrollableContainer):
         # Simple vertical layout: controls on top, big log on the bottom
         with Vertical(id="fetch_layout"):
             with Grid(id="fetch_grid"):
-                with Center(id="center_welcome"):
-                    yield Label("Who's this?", id="welcome_label")
-                with Center(id="center_watched"):
-                    yield Button(
-                        "Checking if Very Vanilla MQ is up. 🍦",
-                        id="update_watched",
-                        variant="default",
-                        tooltip="is MQ down?",
-                    )
+                yield Select[str](
+                    [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
+                    id="server_type_fetch",
+                    classes="bordertitles",
+                    value=current_env,
+                    prompt="Select server type",
+                    allow_blank=False,
+                    tooltip=(
+                        "The type of EQ server. Live and Test are official servers, "
+                        "while Emu is for unofficial servers."
+                    ),
+                )
+                with CenterMiddle(id="centermiddle_welcome"):
+                    with Center(id="center_welcome"):
+                        yield Label("Who's this?", id="welcome_label")
+                    with Center(id="center_watched"):
+                        yield Button(
+                            "Checking if Very Vanilla MQ is up. 🍦",
+                            id="update_watched",
+                            variant="default",
+                            tooltip="is MQ down?",
+                        )
+                yield Static("", id="spacer_for_welcome_centering")
                 yield Button(
                     "Update Single Resource",
                     id="update_resource_id",
@@ -76,16 +90,7 @@ class FetchTab(ScrollableContainer):
                     id="resource_id_input",
                     tooltip="Update a single resource by its ID or URL.",
                 )
-                yield Select[str](
-                    [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
-                    id="server_type_fetch",
-                    value=current_env,
-                    allow_blank=False,
-                    tooltip=(
-                        "The type of EQ server. Live and Test are official servers, "
-                        "while Emu is for unofficial servers."
-                    ),
-                )
+                yield ProgressBar(total=None, show_eta=True, id="update_progress", classes="hidden")
             with Vertical(id="fetch_log_container"):
                 # Toolbar row with log actions
                 with Grid(id="log_toolbar"):
@@ -994,6 +999,7 @@ class MainScreen(Screen):
 
         # Set border titles
         self.query_one("#server_type").border_title = "Server type"
+        self.query_one("#server_type_fetch").border_title = "Server type"
         self.query_one("#inputs_grid").border_title = "Directories"
         self.query_one("#settings_grid").border_title = "Settings"
         self.query_one("#special_resources_grid").border_title = "Special Resources"
@@ -1750,6 +1756,34 @@ class Redfetch(App):
         if cancelled_workers:
             self.notify("Update canceled.", severity="warning")
 
+    def on_sync_event(self, event: tuple) -> None:
+        """Handle events from the sync process to update the UI."""
+        event_type, resource_id, details = event
+        self._process_sync_event(event_type, resource_id, details)
+
+    def _process_sync_event(self, event_type: str, resource_id: str | int, details: str | None) -> None:
+        """Process sync events on the main thread."""
+        main_screen = self._get_main_screen()
+        if not main_screen:
+            return
+
+        try:
+            fetch_tab = main_screen.query_one(FetchTab)
+            progress_bar = fetch_tab.query_one("#update_progress", ProgressBar)
+            resource_input = fetch_tab.query_one("#resource_id_input", Input)
+            
+            if event_type == "total":
+                total_tasks = int(resource_id)
+                if total_tasks > 0:
+                    progress_bar.total = total_tasks
+                    progress_bar.progress = 0
+                    progress_bar.remove_class("hidden")
+                    resource_input.add_class("hidden")
+            elif event_type == "done":
+                progress_bar.advance(1)
+        except Exception:
+            pass
+
     async def run_synchronization(self, resource_ids=None):
         try:
             db_name = f"{self.current_env}_resources.db"
@@ -1762,7 +1796,7 @@ class Redfetch(App):
                 )
                 if not reset_success:
                     return False
-            result = await sync.run_sync(db_path, headers, resource_ids=resource_ids)
+            result = await sync.run_sync(db_path, headers, resource_ids=resource_ids, on_event=self.on_sync_event)
             return result
         except Exception as e:
             print(f"Error in run_synchronization: {e}")
@@ -1770,6 +1804,17 @@ class Redfetch(App):
 
     def update_complete(self, result: bool, button: Button) -> None:
         main_screen = self._get_main_screen()
+        
+        if main_screen:
+            try:
+                fetch_tab = main_screen.query_one(FetchTab)
+                progress_bar = fetch_tab.query_one("#update_progress", ProgressBar)
+                resource_input = fetch_tab.query_one("#resource_id_input", Input)
+                progress_bar.add_class("hidden")
+                resource_input.remove_class("hidden")
+            except Exception:
+                pass
+
         if result:
             button.variant = "success"
             self.notify("All resources updated successfully.")
