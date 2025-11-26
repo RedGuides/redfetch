@@ -20,6 +20,7 @@ from rich.console import detect_legacy_windows
 # textual framework
 from textual import work, on
 from textual.app import App, ComposeResult, SystemCommand
+from textual.binding import Binding
 from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log
 from textual.events import Print
 from textual.containers import ScrollableContainer, Center, Grid, ItemGrid, Vertical
@@ -94,12 +95,6 @@ class FetchTab(ScrollableContainer):
                         "The type of EQ server. Live and Test are official servers, "
                         "while Emu is for unofficial servers."
                     ),
-                )
-                yield Button(
-                    "RedGuides Interface 🌐",
-                    id="redguides_interface",
-                    variant="primary",
-                    tooltip="Access an interface for this script on the website.",
                 )
             with Vertical(id="fetch_log_container"):
                 # Toolbar row with log actions
@@ -279,17 +274,6 @@ class FetchTab(ScrollableContainer):
             busy or not bool(download_folder) or not bool(resource_input.value)
         )
 
-        # RedGuides Interface button
-        redguides_interface_button = self.query_one("#redguides_interface", Button)
-        if app.interface_running:
-            redguides_interface_button.label = "Stop Interface 🛑"
-            redguides_interface_button.tooltip = "RedGuides Interface is currently running, click to stop."
-            redguides_interface_button.disabled = False
-        else:
-            redguides_interface_button.label = "RedGuides Interface 🌐"
-            redguides_interface_button.tooltip = "Access an interface for this script on the website."
-            redguides_interface_button.disabled = app.is_updating
-
         # Server type select on Fetch tab
         server_type_fetch = self.query_one("#server_type_fetch", Select)
         server_type_fetch.disabled = busy
@@ -330,14 +314,6 @@ class FetchTab(ScrollableContainer):
         """Handle presses of the 'update_resource_id' button."""
         event.button.variant = "default"
         self.app.handle_update_resource_id()
-
-    @on(Button.Pressed, "#redguides_interface")
-    def handle_redguides_interface_pressed(self, event: Button.Pressed) -> None:
-        """Toggle the RedGuides Interface."""
-        if not self.app.interface_running:
-            self.app.handle_redguides_interface()
-        else:
-            self.app.cancel_redguides_interface()
 
     @on(Button.Pressed, "#log_search_next")
     def handle_log_search_next_pressed(self, event: Button.Pressed) -> None:
@@ -1095,7 +1071,7 @@ class Redfetch(App):
     """The main Redfetch application."""
 
     # Reactive state - initialized with neutral defaults; real values set when MainScreen mounts
-    interface_running: reactive[bool] = reactive(False)
+    interface_running: reactive[bool] = reactive(False, bindings=True)
     is_updating: reactive[bool] = reactive(False)
     mq_down: reactive[bool | None] = reactive(None)
     download_folder: reactive[str] = reactive("")
@@ -1111,6 +1087,8 @@ class Redfetch(App):
         ("ctrl+t", "cycle_theme", "Theme"),
         ("ctrl+f", "focus_search", "Search Log"),
         ("ctrl+s", "cycle_server_type", "Server Type"),
+        Binding("ctrl+r", "start_interface", "RG.com Interface", tooltip="Download resources while you browse redguides.com"),
+        Binding("ctrl+r", "stop_interface", "Stop Interface", tooltip="Other buttons are disabled until you stop the interface"),
         ("n", "search_next"),
         ("N", "search_prev"),
     ]
@@ -1145,15 +1123,15 @@ class Redfetch(App):
         )
         yield SystemCommand(
             "Start RedGuides Interface",
-            "Start the RedGuides interface",
-            self.handle_redguides_interface,
-            discover=False,
+            "Start the RedGuides.com interface",
+            self.action_start_interface,
+            discover=not self.interface_running,
         )
         yield SystemCommand(
             "Stop RedGuides Interface",
-            "Stop the RedGuides interface",
-            self.cancel_redguides_interface,
-            discover=False,
+            "Stop the RedGuides.com interface",
+            self.action_stop_interface,
+            discover=self.interface_running,
         )
         yield SystemCommand(
             "Update Single Resource",
@@ -1342,6 +1320,22 @@ class Redfetch(App):
         new_theme = next(self.themes)
         self.theme = new_theme
         self.notify(f"Theme changed to: {new_theme}")
+
+    def action_start_interface(self) -> None:
+        """Start the RedGuides Interface."""
+        self.handle_redguides_interface()
+
+    def action_stop_interface(self) -> None:
+        """Stop the RedGuides Interface."""
+        self.cancel_redguides_interface()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Check if an action may run (dynamic actions)."""
+        if action == "start_interface":
+            return not self.interface_running  # Hide when running
+        if action == "stop_interface":
+            return self.interface_running  # Hide when not running
+        return True
 
     #
     # Input handling
@@ -1699,8 +1693,6 @@ class Redfetch(App):
                     main_screen.query_one("#update_watched", Button).variant = "error"
                 elif worker.name == "_update_single_resource_worker":
                     main_screen.query_one("#update_resource_id", Button).variant = "error"
-                elif worker.name == "_redguides_interface_worker":
-                    main_screen.query_one("#redguides_interface", Button).variant = "error"
 
         elif state == WorkerState.CANCELLED:
             self.notify(f"Worker {worker.name} was cancelled.", severity="warning")

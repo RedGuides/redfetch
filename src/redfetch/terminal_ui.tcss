@@ -105,20 +105,6 @@ Label {
     width: 26;
     min-width: 15;
 }
-#redguides_interface {
-    background: $error 29%;
-    border-top: tall $error-lighten-1 29%;
-    border-bottom: tall $error-darken-1 29%;
-    color: $text-muted;
-    column-span: 1;
-    width: 1fr;
-    min-width: 20;
-    margin: 0 1;
-}
-#redguides_interface:hover {
-    background: $error-darken-3 29%;
-    border-top: tall $error 29%;
-}
 #resource_id_input {
     column-span: 2;
 }
