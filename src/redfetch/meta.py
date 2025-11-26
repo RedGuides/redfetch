@@ -485,6 +485,15 @@ def uninstall():
                 shutil.rmtree(cache_dir)
             except Exception as e:
                 console.print(f"[red]Failed to delete cache directory: {e}[/red]")
+                # Provide extra context for common Windows multi-user / shared-dir scenarios
+                winerror = getattr(e, "winerror", None)
+                if os.name == "nt" and winerror == 32:
+                    console.print(
+                        "[yellow]Windows reports that the cache is in use by another process. "
+                        "This often happens when another redfetch instance is still running, "
+                        "or when multiple Windows user accounts share the same redfetch folder "
+                        "(for example under C:\\Users\\Public\\redfetch).[/yellow]"
+                    )
         
         if should_print_path(config_dir):
             existing_paths.add(config_dir)
