@@ -234,7 +234,8 @@ class FetchTab(ScrollableContainer):
     def _update_from_state(self) -> None:
         """Apply current app state to widgets."""
         app: "Redfetch" = self.app  # type: ignore[assignment]
-        busy = app.is_updating or app.interface_running
+        busy = app.is_updating
+        interface_running = app.interface_running
 
         # Update watched button - depends on mq_down, is_updating, interface_running, download_folder
         update_watched_button = self.query_one("#update_watched", Button)
@@ -276,7 +277,7 @@ class FetchTab(ScrollableContainer):
 
         # Server type select on Fetch tab
         server_type_fetch = self.query_one("#server_type_fetch", Select)
-        server_type_fetch.disabled = busy
+        server_type_fetch.disabled = busy or interface_running
         if server_type_fetch.value != app.current_env:
             # Prevent recursive Select.Changed events when we sync from app state
             with self.prevent(Select.Changed):
@@ -774,7 +775,7 @@ class ShortcutsTab(ScrollableContainer):
 
     def sync_from_app(self, app: "Redfetch") -> None:
         """Copy top-level app state into tab-local reactives."""
-        self.busy = app.is_updating or app.interface_running
+        self.busy = app.is_updating
         self.download_folder = app.download_folder
         self.eq_path = app.eq_path
 

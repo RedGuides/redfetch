@@ -15,6 +15,9 @@ from redfetch.special import SpecialResourceInfo, compute_special_status
 
 SpecialStatus = Dict[str, SpecialResourceInfo]
 
+# Global lock to serialize sync operations across all callers (TUI, CLI, listener)
+_sync_lock: asyncio.Lock | None = None
+
 # Centralized limits for download concurrency; adjust here to control
 # how many concurrent connections hit the server during the download phase.
 DOWNLOAD_MAX_CONNECTIONS = 6
@@ -412,8 +415,13 @@ async def sync(
 
 async def run_sync(db_path: str, headers: dict, resource_ids: Optional[List[str]] = None, on_event: Optional[Callable] = None) -> bool:
     """Run the async sync pipeline."""
+    global _sync_lock
+    if _sync_lock is None:
+        _sync_lock = asyncio.Lock()
+
     try:
-        return await sync(db_path, headers, resource_ids=resource_ids, on_event=on_event)
+        async with _sync_lock:
+            return await sync(db_path, headers, resource_ids=resource_ids, on_event=on_event)
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("Download cancelled by user.")
         return False
