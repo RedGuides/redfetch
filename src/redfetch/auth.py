@@ -246,6 +246,7 @@ def logout():
     """Clear stored credentials from keyring and all disk caches."""
     from redfetch import api
     from redfetch import meta
+    from redfetch import net
 
     # Clear current secrets from keyring
     keyring_credentials = ['access_token', 'refresh_token', 'api_key']
@@ -266,6 +267,7 @@ def logout():
     try:
         api.clear_api_cache()
         meta.clear_pypi_cache()
+        net.clear_manifest_cache()
         credentials_deleted = True
     except Exception:
         pass

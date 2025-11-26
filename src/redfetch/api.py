@@ -272,7 +272,10 @@ async def fetch_username(api_key, cache=True):
 
 def clear_api_cache():
     """Clear all cached API data."""
-    cache = _get_api_cache()
+    global _api_cache
+    if _api_cache is None:
+        _api_cache = _get_api_cache()
+    cache = _api_cache
     try:
         cache.clear()
     finally:
@@ -280,6 +283,7 @@ def clear_api_cache():
             cache.close()
         except Exception:
             pass
+        _api_cache = None
 
 
 async def get_username():

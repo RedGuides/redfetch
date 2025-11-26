@@ -34,6 +34,21 @@ def _get_manifest_disk_cache() -> Cache:
     return _manifest_disk_cache
 
 
+def clear_manifest_cache() -> None:
+    """Clear and close both in-memory and disk manifest caches."""
+    global _manifest_disk_cache
+    _manifest_cache.clear()
+    if _manifest_disk_cache is not None:
+        try:
+            _manifest_disk_cache.clear()
+        finally:
+            try:
+                _manifest_disk_cache.close()
+            except Exception:
+                pass
+            _manifest_disk_cache = None
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
