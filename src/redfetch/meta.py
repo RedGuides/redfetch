@@ -508,6 +508,7 @@ def uninstall():
             self_remove()
         else:
             console.print("[yellow]Uninstallation canceled.[/yellow]")
+            sys.exit(0)
     else:
         # If executable_path is not set, guide the user to uninstall via pip or pipx
         console.print("\n[bold]To uninstall redfetch, please run the following command:[/bold]")
