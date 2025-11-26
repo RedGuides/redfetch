@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2025-11-26
+
+### Added
+- TUI: Search log, progress bar. ([#12](https://github.com/RedGuides/redfetch/issues/12))
+- Handling for uv install/uninstall.
+
+### Changed
+- Refactored the TUI and moved some buttons around.
+
+### Fixed
+- Fixed cache deletion on uninstall.
+- Maps not going to the right place with myseq checked. ([#11](https://github.com/RedGuides/redfetch/issues/11))
+
 ## [0.9.1] - 2025-11-21
 
 ### Fixed
