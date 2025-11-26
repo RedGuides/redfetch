@@ -233,25 +233,23 @@ class FetchTab(ScrollableContainer):
         self._log_search_term = ""
 
     def sync_from_app(self, app: "Redfetch") -> None:
-        """Copy top-level app state into tab-local reactives."""
-        self._is_updating = app.is_updating
-        self._interface_running = app.interface_running
-        self.busy = app.is_updating or app.interface_running
-        self.mq_down = app.mq_down
-        self.download_folder = app.download_folder
-        self.current_env = app.current_env
+        """Update this tab's widgets from top-level app state."""
+        self._update_from_state()
 
     def _update_from_state(self) -> None:
-        """Apply current tab-local state to widgets."""
-        busy = self.busy
+        """Apply current app state to widgets."""
+        app: "Redfetch" = self.app  # type: ignore[assignment]
+        busy = app.is_updating or app.interface_running
 
         # Update watched button - depends on mq_down, is_updating, interface_running, download_folder
         update_watched_button = self.query_one("#update_watched", Button)
-        if self.mq_down is None:
+        mq_down = app.mq_down
+        download_folder = app.download_folder
+        if mq_down is None:
             update_watched_button.label = "Checking MQ status...📞"
             update_watched_button.tooltip = "Please wait while we check MQ status."
             update_watched_button.disabled = True
-        elif self.mq_down:
+        elif mq_down:
             update_watched_button.label = "MQ Down: Patch Day 💔"
             update_watched_button.tooltip = (
                 "Very Vanilla MQ is down for patch day, check redguides.com for current status."
@@ -259,7 +257,7 @@ class FetchTab(ScrollableContainer):
             update_watched_button.disabled = True
             update_watched_button.variant = "default"
         else:
-            if self._is_updating:
+            if app.is_updating:
                 update_watched_button.label = "Stop Update 🛑"
                 update_watched_button.tooltip = "Update in progress. Click to cancel."
                 update_watched_button.disabled = False
@@ -271,34 +269,34 @@ class FetchTab(ScrollableContainer):
                 )
                 if update_watched_button.variant not in ["success", "error"]:
                     update_watched_button.variant = "primary"
-                update_watched_button.disabled = busy or not bool(self.download_folder)
+                update_watched_button.disabled = busy or not bool(download_folder)
             update_watched_button.refresh(layout=True)
 
         # Resource ID input and button
         resource_input = self.query_one("#resource_id_input", Input)
         resource_input.disabled = busy
         self.query_one("#update_resource_id", Button).disabled = (
-            busy or not bool(self.download_folder) or not bool(resource_input.value)
+            busy or not bool(download_folder) or not bool(resource_input.value)
         )
 
         # RedGuides Interface button
         redguides_interface_button = self.query_one("#redguides_interface", Button)
-        if self._interface_running:
+        if app.interface_running:
             redguides_interface_button.label = "Stop Interface 🛑"
             redguides_interface_button.tooltip = "RedGuides Interface is currently running, click to stop."
             redguides_interface_button.disabled = False
         else:
             redguides_interface_button.label = "RedGuides Interface 🌐"
             redguides_interface_button.tooltip = "Access an interface for this script on the website."
-            redguides_interface_button.disabled = self._is_updating
+            redguides_interface_button.disabled = app.is_updating
 
         # Server type select on Fetch tab
         server_type_fetch = self.query_one("#server_type_fetch", Select)
         server_type_fetch.disabled = busy
-        if server_type_fetch.value != self.current_env:
+        if server_type_fetch.value != app.current_env:
             # Prevent recursive Select.Changed events when we sync from app state
             with self.prevent(Select.Changed):
-                server_type_fetch.value = self.current_env
+                server_type_fetch.value = app.current_env
 
     # Reactive watchers – keep widgets in sync when tab-local state changes
 
