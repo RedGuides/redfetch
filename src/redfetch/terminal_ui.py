@@ -47,16 +47,6 @@ from redfetch import sync
 class FetchTab(ScrollableContainer):
     """Content for the Fetch tab."""
 
-    # Tab-local view of top-level app state
-    busy: reactive[bool] = reactive(False)
-    mq_down: reactive[bool | None] = reactive(None)
-    download_folder: reactive[str] = reactive("")
-    current_env: reactive[str] = reactive(config.settings.ENV)
-
-    # Internal flags copied from the app, but not reactive themselves.
-    _is_updating: bool = False
-    _interface_running: bool = False
-
     def compose(self) -> ComposeResult:
         # Determine input verb based on terminal
         input_verb = "Enter" if detect_legacy_windows() else "Paste"
