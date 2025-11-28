@@ -93,6 +93,14 @@ def initialize_config():
     # Perform first-run setup
     config_dir = first_run_setup()
     os.environ['REDFETCH_CONFIG_DIR'] = config_dir
+    
+    # Data dir: Linux default uses XDG data dir (~/.local/share), else same as config
+    import platform
+    from platformdirs import user_config_dir, user_data_dir
+    is_linux_default = platform.system() == "Linux" and config_dir == user_config_dir("redfetch", "RedGuides")
+    data_dir = user_data_dir("redfetch", "RedGuides") if is_linux_default else config_dir
+    os.makedirs(data_dir, exist_ok=True)
+    os.environ['REDFETCH_DATA_DIR'] = data_dir
 
     # Path to the .env file
     env_file_path = os.path.join(config_dir, '.env')
