@@ -399,7 +399,7 @@ class SettingsTab(ScrollableContainer):
                 ),
             )
             yield Input(
-                value=config.settings.from_env(current_env).EQPATH,
+                value=config.settings.from_env(current_env).EQPATH or "",
                 placeholder=f"{input_verb} your EverQuest directory",
                 id="eq_path_input",
                 tooltip=(
@@ -559,7 +559,7 @@ class SettingsTab(ScrollableContainer):
         dl_input.value = utils.get_current_download_folder()
 
         eq_input = self.query_one("#eq_path_input", Input)
-        eq_input.value = self.eq_path
+        eq_input.value = settings_for_env.EQPATH or ""
 
         # Update VVMQ and MySEQ displays for the new environment
         self.update_vvmq_path_display()
