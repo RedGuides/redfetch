@@ -37,41 +37,27 @@ When you open a new terminal window, you'll be able to run redfetch by typing `r
 ### 1) Double-click [`redfetch.exe`](https://www.redguides.com/community/resources/redfetch.3177/download) to run the script. 
 Take a moment to consider your configuration and the settings tab.
 
-### 2) Click the big blue "Easy Update" button. 
-![a screenshot showing the easy update button](https://www.redguides.com/images/redfetchupdate.png)  
-Wait until it completes. (It's updating *Very Vanilla MQ* and any of its scripts or plugins you have [watched on RedGuides](https://www.redguides.com/community/watched/resources), your licensed resources, and scripts recommended by staff. If you're watching thousands of resources, your first run will take a long time.)
+### 2) Click the big blue "Easy Update" button, and then "Yes" or "Always" on the popup. 
+![a screenshot showing the easy update button](https://www.redguides.com/images/redfetchupdate.gif)  
+(It's updating *Very Vanilla MQ* and any of its scripts or plugins you have [watched on RedGuides](https://www.redguides.com/community/watched/resources), your licensed resources, and scripts recommended by staff. You can customize this if you like.)
 
-### 3) In the shortcuts tab, click the "Very Vanilla MQ" button
-![a screenshot showing the shortcuts tab](https://www.redguides.com/images/redfetchrunmq.png)
-
-This starts MacroQuest, and now you're ready to multibox EQ.
-
+Now you're ready to play EQ with the big boys.
 
 ## Add more MQ Scripts
-To add more MacroQuest scripts, "watch" them on RedGuides, and then run the *Easy Update* button again.
+To add more MacroQuest scripts, "watch" resources on RedGuides, and then run the *Easy Update* button again.
 
-![a screenshot showing the watch button on a resource page](https://www.redguides.com/images/watch.png)
+![a screenshot showing the watch button on a resource page](https://www.redguides.com/images/clickwatch.gif)
 
 If there are non-MQ resources you'd like to keep in sync with redfetch, you can add them as a "special resource" in the local settings file, as shown in settings section.
 
-## Alternative Interfaces
-
-### Command Line
-
-To update everything you've watched from the command line (as well as special resources):
+## Command Line
+To run redfetch from the command line:
 
 | .exe file | python |
 |---------|-----------|
 | `.\redfetch.exe update` | `redfetch update` |
 
-### Web UI
-Another UI option! Run this command and then browse https://www.redguides.com/community/resources
-
-| .exe file | python |
-|---------|-----------|
-| `.\redfetch.exe web` | `redfetch web` |
-
-![redfetch Web UI, with a hastily drawn circle around the install button](https://www.redguides.com/images/webui.png)
+![a screenshot showing the command line interface](https://www.redguides.com/images/redfetchcliupdate.gif)
 
 ## Command Line Reference
 
@@ -157,7 +143,6 @@ Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 
 ## Trailmap
 - Re-write auth for Xenforo 2.4 (when available).
-- Make "fetch" ui tab responsive at smaller sizes.
 - Add custom buttons for "fetch" tab.
 - Option: Close after update
 - Launch programs with cli options

@@ -370,7 +370,9 @@ async def sync(
         print(f"No valid resources found for IDs: {resource_ids}. Are you in the right server env? Did you opt_in in your settings.local.toml?")
         return False
 
-    print(f"Total resources to process: >>> {len(tasks)} <<<")
+    print(f"Resources to consider: >>> {len(tasks)} <<<")
+    needs_update_count = sum(1 for task in tasks if task.needs_download)
+    print(f"Resources to download: >>> {needs_update_count} <<<")
     if on_event:
         on_event(("total", len(tasks), None))
 
