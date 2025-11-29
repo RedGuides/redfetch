@@ -36,7 +36,6 @@ def are_executables_running_in_folder(folder_path: str) -> List[Tuple[int, str]]
     try:
         exec_paths = _normalized_executables(folder_path)
         if not exec_paths:
-            print(f"No executable files found in {folder_path}")
             return running
 
         for proc in psutil.process_iter(["pid", "exe"]):
@@ -62,34 +61,22 @@ def terminate_executables_in_folder(folder_path: str) -> None:
         print("Terminating executables is only supported on Windows platforms.")
         return
 
-    try:
-        exec_paths = _normalized_executables(folder_path)
-        if not exec_paths:
-            print(f"No executable files found in {folder_path}")
-            return
-
-        for proc in psutil.process_iter(["pid", "exe"]):
-            try:
-                exe_path = proc.info.get("exe")
-                if not exe_path or not os.path.isfile(exe_path):
-                    continue
-                normalized = os.path.normcase(os.path.normpath(exe_path))
-                if normalized in exec_paths:
-                    proc.terminate()
-                    proc.wait(timeout=5)
-                    print(f"Terminated process '{exe_path}' (PID {proc.pid}).")
-            except psutil.NoSuchProcess:
-                # Process already gone (e.g., child process terminated with parent) - this is fine
-                pass
-            except (psutil.AccessDenied, psutil.ZombieProcess) as err:
-                print(f"Could not terminate process: {err}")
-
+    running = are_executables_running_in_folder(folder_path)
+    for pid, exe_path in running:
         try:
-            force_remote_unload()
-        except Exception as exc:
-            print(f"Error unloading MacroQuest: {exc}")
+            proc = psutil.Process(pid)
+            proc.terminate()
+            proc.wait(timeout=5)
+            print(f"Terminated process '{exe_path}' (PID {pid}).")
+        except psutil.NoSuchProcess:
+            pass
+        except (psutil.AccessDenied, psutil.ZombieProcess) as err:
+            print(f"Could not terminate process: {err}")
+
+    try:
+        force_remote_unload()
     except Exception as exc:
-        print(f"An error occurred while terminating processes: {exc}")
+        print(f"Error unloading MacroQuest: {exc}")
 
 
 def run_executable(folder_path: str, executable_name: str, args: Sequence[str] | None = None) -> bool:
