@@ -14,7 +14,6 @@ from packaging import version
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.prompt import Confirm
 
 # Local
@@ -219,47 +218,22 @@ def check_for_update():
 
 def pip_update_redfetch(update_command, latest_version):
     try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
+        console.print(f"\n[bold]Updating redfetch to version {latest_version}...[/bold]\n")
         
-        console.print(f"\n[bold]Updating redfetch to version {latest_version} in {script_dir}[/bold]")
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TimeRemainingColumn(),
-            console=console
-        ) as progress:
-            update_task = progress.add_task("[cyan]Updating redfetch...", total=100)
-            
-            process = subprocess.Popen(
-                update_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                if output:
-                    progress.update(update_task, advance=10)
-            
-            returncode = process.poll()
+        # Run the update command and let it print directly to console
+        result = subprocess.run(update_command)
+        returncode = result.returncode
         
         if returncode == 0:
-            console.print("[bold green]redfetch has been successfully updated. 🫎[/bold green]")
+            console.print("\n[bold green]redfetch has been successfully updated. 🫎[/bold green]")
             console.print("[yellow]Please run redfetch again to use the updated version.[/yellow]")
             sys.exit(0)
         else:
-            error_output = process.stderr.read()
-            console.print(f"[bold red]Error updating redfetch:[/bold red] {error_output}")
-            return False
+            console.print("\n[bold red]Update failed. See output above for details.[/bold red]")
+            sys.exit(1)
     except Exception as e:
         console.print(f"[bold red]Error during update process:[/bold red] {e}")
-        return False
+        sys.exit(1)
 
 
 def self_update():
