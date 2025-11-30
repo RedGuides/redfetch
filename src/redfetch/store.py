@@ -52,6 +52,7 @@ def initialize_db(db_name: str) -> None:
         _ensure_downloads_table(cursor)
         _normalize_parent_ids(cursor)
         _ensure_indexes(cursor)
+        _ensure_navmesh_tables(cursor)
 
 
 def _ensure_downloads_table(cursor) -> None:
@@ -119,6 +120,29 @@ def _ensure_indexes(cursor) -> None:
         # Best-effort; continue even if index creation fails
         pass
 
+
+def _ensure_navmesh_tables(cursor) -> None:
+    """Create navmesh tracking tables if they don't exist."""
+    # NavMesh file tracking (local file state cache)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS navmesh_files (
+            filename TEXT PRIMARY KEY,
+            md5_hash TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL
+        )
+    """)
+
+    # NavMesh manifest cache metadata (per environment)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS navmesh_cache (
+            env TEXT PRIMARY KEY,
+            etag TEXT,
+            last_modified TEXT,
+            manifest_json TEXT
+        )
+    """)
+
 def _reset_to_unified_schema(cursor) -> None:
     # Drop any existing tables (legacy or previous unified) and recreate unified
     cursor.execute("DROP TABLE IF EXISTS downloads")
@@ -153,6 +177,9 @@ def reset_download_dates(cursor) -> None:
     """Reset all download dates to force re-download and re-fetch from API."""
     cursor.execute("UPDATE downloads SET version_local=0")
     cursor.execute("UPDATE metadata SET last_fetch_time=0 WHERE id=1")
+    # Clear navmesh cache tables
+    cursor.execute("DELETE FROM navmesh_files")
+    cursor.execute("DELETE FROM navmesh_cache")
     try:
         meta.clear_pypi_cache()
     except Exception:
@@ -190,6 +217,9 @@ async def reset_download_dates_async(db_path: str) -> None:
             pass
         await conn.execute("UPDATE downloads SET version_local=0")
         await conn.execute("UPDATE metadata SET last_fetch_time=0 WHERE id=1")
+        # Clear navmesh cache tables
+        await conn.execute("DELETE FROM navmesh_files")
+        await conn.execute("DELETE FROM navmesh_cache")
         await conn.commit()
     # Clear PyPI cache outside the DB transaction
     try:

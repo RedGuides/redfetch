@@ -444,13 +444,13 @@ class SettingsTab(ScrollableContainer):
                     "for your selected server type."
                 ),
             )
-            yield Label("IonBC:", classes="left_middle")
+            yield Label("Nav Meshes:", classes="left_middle")
             yield Switch(
-                id="ionbc",
-                value=config.settings.from_env("DEFAULT")
-                .SPECIAL_RESOURCES.get("2463", {})
-                .get("opt_in", False),
-                tooltip="Adds IonBC to your 'special resources'.",
+                id="navmesh",
+                value=config.settings.from_env(current_env).get("NAVMESH_OPT_IN", False),
+                tooltip=(
+                    "Download pre-made navigation meshes for the Nav plugin (recommended). "
+                ),
             )
             yield Label("Maps:", classes="left_middle")
             yield Select(
@@ -460,10 +460,18 @@ class SettingsTab(ScrollableContainer):
                 allow_blank=True,
                 value=self.app.get_current_eq_maps_value(),
                 tooltip=(
-                    "Requires an EverQuest folder. Adds in-game maps to your "
-                    "'special resources', with brewall and good's recommended "
-                    "folder structure."
+                    "Requires an EverQuest folder. Adds maps to your "
+                    "normal EverQuest map, using Brewall and Good's folders."
                 ),
+            )
+            yield Static(classes="spacer_for_special_resources")
+            yield Label("IonBC:", classes="left_middle")
+            yield Switch(
+                id="ionbc",
+                value=config.settings.from_env("DEFAULT")
+                .SPECIAL_RESOURCES.get("2463", {})
+                .get("opt_in", False),
+                tooltip="Adds IonBC to your 'special resources'.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
             yield Label("Close MQ pre-udpate:", classes="left_middle")
@@ -532,6 +540,9 @@ class SettingsTab(ScrollableContainer):
         # MySEQ switch availability
         self.query_one("#myseq", Switch).disabled = not bool(utils.get_current_myseq_id())
 
+        # NavMesh switch - requires VVMQ path to be configured
+        self.query_one("#navmesh", Switch).disabled = not bool(utils.get_vvmq_path())
+
     # Reactive watchers – keep widgets in sync when tab-local state changes
 
     def _watch_busy(self, old: bool, new: bool) -> None:
@@ -553,6 +564,9 @@ class SettingsTab(ScrollableContainer):
 
         auto_terminate_switch = self.query_one("#auto_terminate_processes", Switch)
         auto_terminate_switch.value = settings_for_env.get("AUTO_TERMINATE_PROCESSES", None)
+
+        navmesh_switch = self.query_one("#navmesh", Switch)
+        navmesh_switch.value = settings_for_env.get("NAVMESH_OPT_IN", False)
 
         # Update inputs that depend on the current environment
         dl_input = self.query_one("#dl_path_input", Input)
@@ -636,6 +650,8 @@ class SettingsTab(ScrollableContainer):
             self.app.handle_toggle_myseq(event.value)
         elif event.switch.id == "ionbc":
             self.app.handle_toggle_ionbc(event.value)
+        elif event.switch.id == "navmesh":
+            self.app.handle_toggle_navmesh(event.value)
         elif event.switch.id == "auto_run_vvmq":
             self.app.handle_toggle_auto_run_vvmq(event.value)
         elif event.switch.id == "auto_terminate_processes":
@@ -1432,6 +1448,14 @@ class Redfetch(App):
             state = "enabled" if value else "disabled"
             self.notify(f"IonBC is now {state}")
 
+    def handle_toggle_navmesh(self, value: bool) -> None:
+        current_opt_in = config.settings.from_env(self.current_env).get('NAVMESH_OPT_IN', None)
+        # Always save if not set yet, or if value changed
+        if current_opt_in is None or current_opt_in != value:
+            config.update_setting(['NAVMESH_OPT_IN'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"navmesh downloads for {self.current_env} are now {state}")
+
     def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
         main_screen = self._get_main_screen()
         current_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
@@ -1748,8 +1772,39 @@ class Redfetch(App):
                 else:
                     self.notify("Continuing update without closing processes...", severity="warning")
 
-        result = await self.run_synchronization()
+        # Check navmesh preference (prompt if not configured and VVMQ exists)
+        navmesh_override = await self._prompt_navmesh_opt_in()
+
+        result = await self.run_synchronization(navmesh_override=navmesh_override)
         return result
+
+    async def _prompt_navmesh_opt_in(self) -> bool | None:
+        """Prompt user about navmesh downloads if not configured."""
+        from redfetch import navmesh
+        
+        # Check if VVMQ path exists (navmesh requires it)
+        vvmq_path = utils.get_vvmq_path()
+        if not vvmq_path:
+            return None  # Can't do navmesh without VVMQ
+        
+        opt_in = navmesh.get_navmesh_opt_in()
+        
+        if opt_in is not None:
+            return None  # Already configured, use existing setting
+        
+        # Prompt user
+        response = await self.push_screen_wait(NavMeshPromptScreen())
+        
+        if response == NavMeshPromptScreen.RESPONSE_YES:
+            return True  # One-time yes
+        elif response == NavMeshPromptScreen.RESPONSE_ALWAYS:
+            self.handle_toggle_navmesh(True)
+            return None  # Config is now set, use it
+        elif response == NavMeshPromptScreen.RESPONSE_NEVER:
+            self.handle_toggle_navmesh(False)
+            return None  # Config is now set, use it
+        else:  # RESPONSE_NO
+            return False  # One-time no
     
     def cancel_update_watched(self):
         cancelled_workers = self.workers.cancel_group(self, "update_watched_group")
@@ -1779,12 +1834,17 @@ class Redfetch(App):
                     progress_bar.progress = 0
                     progress_bar.remove_class("hidden")
                     resource_input.add_class("hidden")
+            elif event_type == "add_total":
+                # Extend total (e.g., for navmesh phase)
+                additional = int(resource_id)
+                if additional > 0:
+                    progress_bar.total = (progress_bar.total or 0) + additional
             elif event_type == "done":
                 progress_bar.advance(1)
         except Exception:
             pass
 
-    async def run_synchronization(self, resource_ids=None):
+    async def run_synchronization(self, resource_ids=None, navmesh_override=None):
         try:
             db_name = f"{self.current_env}_resources.db"
             await asyncio.to_thread(store.initialize_db, db_name)
@@ -1796,7 +1856,12 @@ class Redfetch(App):
                 )
                 if not reset_success:
                     return False
-            result = await sync.run_sync(db_path, headers, resource_ids=resource_ids, on_event=self.on_sync_event)
+            result = await sync.run_sync(
+                db_path, headers,
+                resource_ids=resource_ids,
+                on_event=self.on_sync_event,
+                navmesh_override=navmesh_override,
+            )
             return result
         except Exception as e:
             print(f"Error in run_synchronization: {e}")
@@ -1892,7 +1957,7 @@ class Redfetch(App):
     @work(exclusive=True, group="maintenance_group")
     async def _reset_downloads_worker(self) -> bool:
         try:
-            print("Resetting all download dates, please wait...")
+            print("Resetting all download dates")
             db_name = f"{self.current_env}_resources.db"
             db_path = store.get_db_path(db_name)
             await store.reset_download_dates_async(db_path)
@@ -2027,6 +2092,35 @@ class RunVVMQScreen(ModalScreen):
             self.dismiss(self.RESPONSE_NEVER)
         else:
             self.dismiss(self.RESPONSE_SKIP)
+
+
+class NavMeshPromptScreen(ModalScreen):
+    """A modal screen to ask if the user wants to download navmeshes."""
+
+    RESPONSE_YES = "yes"
+    RESPONSE_ALWAYS = "always"
+    RESPONSE_NEVER = "never"
+    RESPONSE_NO = "no"
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label("🧭 Download navigation meshes? (recommended)", id="question"),
+            Button("Yes", variant="primary", id="yesmq"),
+            Button("No", variant="default", id="nomq"),
+            Center(Button("Always", variant="primary", id="alwaysmq")),
+            Center(Button("Never", variant="default", id="nevermq")),
+            id="dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "yesmq":
+            self.dismiss(self.RESPONSE_YES)
+        elif event.button.id == "alwaysmq":
+            self.dismiss(self.RESPONSE_ALWAYS)
+        elif event.button.id == "nevermq":
+            self.dismiss(self.RESPONSE_NEVER)
+        else:
+            self.dismiss(self.RESPONSE_NO)
 
 
 class ProcessTerminationScreen(ModalScreen):

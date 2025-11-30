@@ -13,6 +13,7 @@ Downloads/
 
 # One-offs and garbage
 garbage/
+vendor/
 
 # Build files
 build/

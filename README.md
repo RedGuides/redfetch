@@ -127,6 +127,7 @@ If there are local files you don't want overwritten by a resource, you can add t
 [LIVE.PROTECTED_FILES_BY_RESOURCE]
 1974 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
 153 = ["citymist.txt", "innothule.txt", "oasis.txt"]
+navmesh = ["befallen.navmesh", "innothuleb.navmesh"]
 ```
 
 ## Tinkerers

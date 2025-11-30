@@ -44,6 +44,7 @@ Label {
 
 .left_middle {
     content-align: left middle;
+    column-span: 1;
     grid-gutter: 0;
 }
 
@@ -205,20 +206,22 @@ Label {
 #dropdowns_grid {
     min-width: 30;
 }
-#dl_path_input, #eq_path_input, #vvmq_path_input, #myseq, #ionbc, #auto_terminate_processes, #auto_run_vvmq {
+#dl_path_input, #eq_path_input, #vvmq_path_input, #auto_terminate_processes, #auto_run_vvmq {
+    column-span: 3;
+}
+#myseq, #ionbc, #navmesh {
     column-span: 3;
 }
 #eq_maps {
     column-span: 2;
 }
+.spacer_for_special_resources {
+    column-span: 1;
+}
 .bordertitles {
     border: round $secondary-background;
     border-title-color: $text-secondary;
     border-title-style: bold;
-}
-#myseq, #ionbc {
-    column-span: 3;
-    grid-gutter: 0;
 }
 
 /* Shortcuts Grid */
@@ -362,6 +365,15 @@ RunVVMQScreen {
 }
 
 RunVVMQScreen Button {
+    width: 100%;
+}
+
+NavMeshPromptScreen {
+    align: center top;
+    background: $background-darken-2 70%; 
+}
+
+NavMeshPromptScreen Button {
     width: 100%;
 }
 

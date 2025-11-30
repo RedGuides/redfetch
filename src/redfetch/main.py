@@ -64,77 +64,104 @@ def initialize_db_only():
     return db_name, db_path
 
 
-async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
-    """Run the main 'update watched' flow using async network calls."""
-    if await net.is_mq_down():
-        console.print(
-            "[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work."
-        )
-        continue_download = Confirm.ask(
-            "Do you want to continue with the download?", default=False
-        )
-        if not continue_download:
-            console.print("Download cancelled by user.")
-            return False
+# ===== CLI prompt helpers =====
 
-    mq_folder = utils.get_base_path()
+def prompt_terminate_processes(mq_folder: str) -> None:
+    """Handle the 'AUTO_TERMINATE_PROCESSES' prompt and action."""
     # Check if MQ or any other executable is running
-    if processes.are_executables_running_in_folder(mq_folder):
-        # Check auto-terminate setting
-        auto_terminate = config.settings.from_env(config.settings.ENV).get(
-            "AUTO_TERMINATE_PROCESSES", None
-        )
-        if auto_terminate:
-            processes.terminate_executables_in_folder(mq_folder)
-        else:
-            user_choice = Prompt.ask(
-                "Processes are running from the folder. Attempt to close them?",
-                choices=["yes", "no", "always", "never"],
-                default="yes",
-            )
-            if user_choice == "yes":
-                processes.terminate_executables_in_folder(mq_folder)
-            elif user_choice == "always":
-                processes.terminate_executables_in_folder(mq_folder)
-                config.update_setting(["AUTO_TERMINATE_PROCESSES"], True)
-                console.print("Updated settings to always terminate processes.")
-            elif user_choice == "never":
-                console.print("Continuing update without closing processes...")
-                config.update_setting(["AUTO_TERMINATE_PROCESSES"], False)
-                console.print("Updated settings to never terminate processes.")
-            else:  # user_choice == "no"
-                console.print("Continuing update without closing processes...")
-
-    # Perform the download via async pipeline
-    success = await sync_pipeline.run_sync(db_path, headers)
-    if success:
-        handle_auto_run_macroquest()
-        return True
-    return False
-
-
-def handle_auto_run_macroquest():
-    # Skip if we're in CI or not on Windows
-    if os.environ.get('CI') == 'true' or sys.platform != 'win32':
+    if not processes.are_executables_running_in_folder(mq_folder):
         return
 
-    auto_run = config.settings.from_env(config.settings.ENV).get('AUTO_RUN_VVMQ', None)
+    auto_terminate = config.settings.from_env(config.settings.ENV).get(
+        "AUTO_TERMINATE_PROCESSES", None
+    )
+
+    if auto_terminate is True:
+        processes.terminate_executables_in_folder(mq_folder)
+        return
+
+    if auto_terminate is False:
+        console.print("Continuing update without closing processes...")
+        return
+
+    # auto_terminate is None -> ask the user
+    user_choice = Prompt.ask(
+        "Processes are running from the folder. Attempt to close them?",
+        choices=["yes", "no", "always", "never"],
+        default="yes",
+    )
+    if user_choice == "yes":
+        processes.terminate_executables_in_folder(mq_folder)
+    elif user_choice == "always":
+        processes.terminate_executables_in_folder(mq_folder)
+        config.update_setting(["AUTO_TERMINATE_PROCESSES"], True)
+        console.print("Updated settings to always terminate processes.")
+    elif user_choice == "never":
+        console.print("Continuing update without closing processes...")
+        config.update_setting(["AUTO_TERMINATE_PROCESSES"], False)
+        console.print("Updated settings to never terminate processes.")
+    else:  # "no"
+        console.print("Continuing update without closing processes...")
+
+
+def prompt_navmesh_opt_in() -> bool | None:
+    """Prompt user about navmesh downloads if not configured."""
+    from redfetch import navmesh
+
+    # Check if VVMQ path exists (navmesh requires it)
+    vvmq_path = utils.get_vvmq_path()
+    if not vvmq_path:
+        return None  # Can't do navmesh without VVMQ
+
+    opt_in = navmesh.get_navmesh_opt_in()
+
+    if opt_in is not None:
+        return None  # Already configured, use existing setting
+
+    # Prompt user
+    user_choice = Prompt.ask(
+        "🧭 Download navigation meshes? (will overwrite, protect your custom meshes in settings.local.toml)",
+        choices=["yes", "no", "always", "never"],
+        default="yes",
+    )
+
+    if user_choice == "yes":
+        return True  # One-time yes
+    elif user_choice == "always":
+        config.update_setting(["NAVMESH_OPT_IN"], True)
+        console.print("Updated settings to always download navmeshes.")
+        return None  # Config is now set, use it
+    elif user_choice == "never":
+        config.update_setting(["NAVMESH_OPT_IN"], False)
+        console.print("Updated settings to never download navmeshes.")
+        return None  # Config is now set, use it
+    else:  # "no"
+        return False  # One-time no
+
+
+def prompt_auto_run_macroquest() -> None:
+    """Prompt to start MacroQuest after a successful update, if not configured."""
+    # Skip if we're in CI or not on Windows
+    if os.environ.get("CI") == "true" or sys.platform != "win32":
+        return
+
+    auto_run = config.settings.from_env(config.settings.ENV).get("AUTO_RUN_VVMQ", None)
     should_run = False
 
     if auto_run is None:
         user_choice = Prompt.ask(
             "Do you want to start MacroQuest now?",
             choices=["yes", "no", "always", "never"],
-            default="yes"
+            default="yes",
         )
         if user_choice == "yes":
             should_run = True
         elif user_choice == "always":
-            config.update_setting(['AUTO_RUN_VVMQ'], True)
+            config.update_setting(["AUTO_RUN_VVMQ"], True)
             console.print("Updated settings to always run MacroQuest after updates.")
             should_run = True
         elif user_choice == "never":
-            config.update_setting(['AUTO_RUN_VVMQ'], False)
+            config.update_setting(["AUTO_RUN_VVMQ"], False)
             console.print("Updated settings to never run MacroQuest after updates.")
             return  # Do not run MQ
         else:  # user_choice == "no"
@@ -153,6 +180,35 @@ def handle_auto_run_macroquest():
         processes.run_executable(mq_path, exe_name)
     else:
         console.print("MacroQuest path not found. Please check your configuration.")
+
+
+async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
+    """Run the main 'update watched' flow using async network calls."""
+    if await net.is_mq_down():
+        console.print(
+            "[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work."
+        )
+        continue_download = Confirm.ask(
+            "Do you want to continue with the download?", default=False
+        )
+        if not continue_download:
+            console.print("Download cancelled by user.")
+            return False
+
+    mq_folder = utils.get_base_path()
+    prompt_terminate_processes(mq_folder)
+
+    # Check navmesh preference (prompt if not configured)
+    navmesh_override = prompt_navmesh_opt_in()
+
+    # Perform the download via async pipeline
+    success = await sync_pipeline.run_sync(
+        db_path, headers, navmesh_override=navmesh_override
+    )
+    if success:
+        prompt_auto_run_macroquest()
+        return True
+    return False
 
 
 async def update_command_async(db_name: str, db_path: str, force: bool) -> None:

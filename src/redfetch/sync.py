@@ -417,7 +417,13 @@ async def sync(
         return True
 
 
-async def run_sync(db_path: str, headers: dict, resource_ids: Optional[List[str]] = None, on_event: Optional[Callable] = None) -> bool:
+async def run_sync(
+    db_path: str,
+    headers: dict,
+    resource_ids: Optional[List[str]] = None,
+    on_event: Optional[Callable] = None,
+    navmesh_override: Optional[bool] = None,
+) -> bool:
     """Run the async sync pipeline."""
     global _sync_lock
     if _sync_lock is None:
@@ -425,7 +431,16 @@ async def run_sync(db_path: str, headers: dict, resource_ids: Optional[List[str]
 
     try:
         async with _sync_lock:
-            return await sync(db_path, headers, resource_ids=resource_ids, on_event=on_event)
+            result = await sync(db_path, headers, resource_ids=resource_ids, on_event=on_event)
+
+            # After regular resource sync, do navmesh if enabled (only for full syncs)
+            if resource_ids is None:
+                from redfetch import navmesh
+                navmesh_ok = await navmesh.sync_navmeshes(db_path, headers, on_event=on_event, override=navmesh_override)
+                if not navmesh_ok:
+                    print("navmesh sync encountered errors")
+
+            return result
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("Download cancelled by user.")
         return False
