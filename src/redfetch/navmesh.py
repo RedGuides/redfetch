@@ -271,11 +271,8 @@ async def sync_navmeshes(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            # Tier 1: Check if manifest changed
-            manifest, changed = await fetch_manifest_cached(db_path, client)
-            if not changed:
-                print("All navmesh files are up-to-date.")
-                return True
+            # Tier 1: Fetch manifest (may be cached); always validate local state
+            manifest, _ = await fetch_manifest_cached(db_path, client)
 
             # Tier 2: Get local file state (using cached hashes where possible)
             local_state = await get_local_navmesh_state(db_path, navmesh_dir)
@@ -348,15 +345,28 @@ async def sync_navmeshes(
 
             if failed:
                 print(f"navmesh: {failed} meshes failed to download")
+                # Invalidate manifest cache so next run re-checks everything
+                async with aiosqlite.connect(db_path, timeout=30.0) as conn:
+                    await conn.execute(
+                        "DELETE FROM navmesh_cache WHERE env = ?",
+                        (config.settings.ENV,)
+                    )
+                    await conn.commit()
                 return False
 
             print("All navmesh files downloaded successfully")
             return True
 
-        except httpx.HTTPError as e:
-            print(f"navmesh sync warning: Network error fetching manifest: {e}")
-            return True  # Don't fail the whole sync for navmesh network issues
-        except json.JSONDecodeError as e:
-            print(f"navmesh sync warning: Invalid manifest JSON: {e}")
-            return True
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            print(f"navmesh sync warning: Error during navmesh sync: {e}")
+            try:
+                async with aiosqlite.connect(db_path, timeout=30.0) as conn:
+                    await conn.execute(
+                        "DELETE FROM navmesh_cache WHERE env = ?",
+                        (config.settings.ENV,),
+                    )
+                    await conn.commit()
+            except Exception as cache_err:
+                print(f"Warning: Failed to clear navmesh manifest cache after error: {cache_err}")
+            return False
 

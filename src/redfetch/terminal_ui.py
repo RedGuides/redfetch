@@ -278,20 +278,6 @@ class FetchTab(ScrollableContainer):
             with self.prevent(Select.Changed):
                 server_type_fetch.value = app.current_env
 
-    # Reactive watchers – keep widgets in sync when tab-local state changes
-
-    def _watch_busy(self, old: bool, new: bool) -> None:
-        self._update_from_state()
-
-    def _watch_mq_down(self, old: bool | None, new: bool | None) -> None:
-        self._update_from_state()
-
-    def _watch_download_folder(self, old: str, new: str) -> None:
-        self._update_from_state()
-
-    def _watch_current_env(self, old: str, new: str) -> None:
-        self._update_from_state()
-
     #
     # Event handlers for widgets on this tab
     #
@@ -346,12 +332,6 @@ class FetchTab(ScrollableContainer):
 
 class SettingsTab(ScrollableContainer):
     """Content for the Settings tab."""
-
-    # Tab-local view of top-level app state
-    busy: reactive[bool] = reactive(False)
-    download_folder: reactive[str] = reactive("")
-    eq_path: reactive[str] = reactive("")
-    current_env: reactive[str] = reactive(config.settings.ENV)
 
     def compose(self) -> ComposeResult:
         input_verb = "Enter" if detect_legacy_windows() else "Paste"
@@ -449,7 +429,7 @@ class SettingsTab(ScrollableContainer):
                 id="navmesh",
                 value=config.settings.from_env(current_env).get("NAVMESH_OPT_IN", False),
                 tooltip=(
-                    "Download pre-made navigation meshes for the Nav plugin (recommended). "
+                    "Download pre-made navigation meshes for the Nav plugin (via mqmesh.com). "
                 ),
             )
             yield Label("Maps:", classes="left_middle")
@@ -508,34 +488,27 @@ class SettingsTab(ScrollableContainer):
             )
 
     def sync_from_app(self, app: "Redfetch") -> None:
-        """Copy top-level app state into tab-local reactives."""
-        self.busy = app.is_updating or app.interface_running
-        self.download_folder = app.download_folder
-        self.eq_path = app.eq_path
-        self.current_env = app.current_env
-
-    def _update_from_state(self) -> None:
-        """Apply current tab-local state to widgets."""
-        busy = self.busy
+        """Apply top-level app state to Settings tab widgets."""
+        busy = app.is_updating or app.interface_running
 
         # Disable entire tab while busy
         self.disabled = busy
 
         # Path inputs and selection buttons depend on download folder
-        has_download = bool(self.download_folder)
+        has_download = bool(app.download_folder)
         self.query_one("#vvmq_path_input", Input).disabled = not has_download
         self.query_one("#select_vvmq_path", Button).disabled = not has_download
 
         # Server type select on Settings tab
         server_type = self.query_one("#server_type", Select)
-        if server_type.value != self.current_env:
+        if server_type.value != app.current_env:
             # Prevent recursive Select.Changed events when we sync from app state
             with self.prevent(Select.Changed):
-                server_type.value = self.current_env
+                server_type.value = app.current_env
 
         # EQ maps select - depends on eq_path
         eq_maps_select = self.query_one("#eq_maps", Select)
-        eq_maps_select.disabled = not bool(self.eq_path)
+        eq_maps_select.disabled = not bool(app.eq_path)
 
         # MySEQ switch availability
         self.query_one("#myseq", Switch).disabled = not bool(utils.get_current_myseq_id())
@@ -543,20 +516,8 @@ class SettingsTab(ScrollableContainer):
         # NavMesh switch - requires VVMQ path to be configured
         self.query_one("#navmesh", Switch).disabled = not bool(utils.get_vvmq_path())
 
-    # Reactive watchers – keep widgets in sync when tab-local state changes
-
-    def _watch_busy(self, old: bool, new: bool) -> None:
-        self._update_from_state()
-
-    def _watch_download_folder(self, old: str, new: str) -> None:
-        self._update_from_state()
-
-    def _watch_eq_path(self, old: str, new: str) -> None:
-        self._update_from_state()
-
-    def _watch_current_env(self, old: str, new: str) -> None:
-        # Environment changed – refresh controls from config for the new env.
-        settings_for_env = config.settings.from_env(new)
+        # Environment-specific settings for the current env
+        settings_for_env = config.settings.from_env(app.current_env)
 
         # Update env-specific switches
         auto_run_vvmq_switch = self.query_one("#auto_run_vvmq", Switch)
@@ -575,20 +536,16 @@ class SettingsTab(ScrollableContainer):
         eq_input = self.query_one("#eq_path_input", Input)
         eq_input.value = settings_for_env.EQPATH or ""
 
-        # Update VVMQ and MySEQ displays for the new environment
+        # Update VVMQ and MySEQ displays for the current environment
         self.update_vvmq_path_display()
         self.update_myseq_display()
 
-        # Update EQ maps select value based on new environment
-        eq_maps_select = self.query_one("#eq_maps", Select)
-        new_eq_maps_value = self.app.get_current_eq_maps_value()
+        # Update EQ maps select value based on current environment
+        new_eq_maps_value = app.get_current_eq_maps_value()
         if eq_maps_select.value != new_eq_maps_value:
             # Avoid triggering on_select_changed when we are just syncing state
             with self.prevent(Select.Changed):
                 eq_maps_select.value = new_eq_maps_value
-
-        # Finally, apply generic state-based updates
-        self._update_from_state()
 
     def update_vvmq_path_display(self) -> None:
         """Update the VVMQ path input based on the current environment."""
@@ -670,11 +627,6 @@ class SettingsTab(ScrollableContainer):
 
 class ShortcutsTab(ScrollableContainer):
     """Content for the Shortcuts tab."""
-
-    # Tab-local view of top-level app state
-    busy: reactive[bool] = reactive(False)
-    download_folder: reactive[str] = reactive("")
-    eq_path: reactive[str] = reactive("")
 
     def compose(self) -> ComposeResult:
         with ItemGrid(id="executables_grid"):
@@ -785,14 +737,8 @@ class ShortcutsTab(ScrollableContainer):
             )
 
     def sync_from_app(self, app: "Redfetch") -> None:
-        """Copy top-level app state into tab-local reactives."""
-        self.busy = app.is_updating
-        self.download_folder = app.download_folder
-        self.eq_path = app.eq_path
-
-    def _update_from_state(self) -> None:
-        """Apply current tab-local state to widgets."""
-        busy = self.busy
+        """Apply top-level app state to Shortcuts tab widgets."""
+        busy = app.is_updating
 
         # Disable entire tab while busy.
         self.disabled = busy
@@ -810,7 +756,7 @@ class ShortcutsTab(ScrollableContainer):
         )
 
         # EQ-related executables and folders
-        eq_path = self.eq_path
+        eq_path = app.eq_path
         eq_path_exists = bool(eq_path) and os.path.exists(eq_path)
         self.query_one("#launch_everquest", Button).disabled = (
             not utils.validate_file_in_path(eq_path, "LaunchPad.exe")
@@ -835,19 +781,8 @@ class ShortcutsTab(ScrollableContainer):
         self.query_one("#open_ionbc_folder", Button).disabled = not bool(ionbc_path)
 
         # Folder shortcuts
-        self.query_one("#open_dl_folder", Button).disabled = not bool(self.download_folder)
+        self.query_one("#open_dl_folder", Button).disabled = not bool(app.download_folder)
         self.query_one("#open_vvmq_folder", Button).disabled = not bool(vvmq_path)
-
-    # Reactive watchers – keep widgets in sync when tab-local state changes
-
-    def _watch_busy(self, old: bool, new: bool) -> None:
-        self._update_from_state()
-
-    def _watch_download_folder(self, old: str, new: str) -> None:
-        self._update_from_state()
-
-    def _watch_eq_path(self, old: str, new: str) -> None:
-        self._update_from_state()
 
     #
     # Event handlers for widgets on this tab
@@ -1673,7 +1608,6 @@ class Redfetch(App):
         """Handle the uninstall button press."""
         def handle_uninstall_response(response: str) -> None:
             if response == UninstallScreen.RESPONSE_YES:
-                from . import meta
                 try:
                     with self.suspend():
                         meta.uninstall()
