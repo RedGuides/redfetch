@@ -53,6 +53,31 @@ default_path = "@format {this.eqpath}/maps/Goods_Maps"
 custom_path = ""
 opt_in = false
 
+# LIVE staff picks
+# guildclicky
+[LIVE.SPECIAL_RESOURCES.2318]
+opt_in = true
+
+# buttonmaster
+[LIVE.SPECIAL_RESOURCES.3003]
+opt_in = true
+
+# alertmaster
+[LIVE.SPECIAL_RESOURCES.2062]
+opt_in = true
+
+# rgmercs
+[LIVE.SPECIAL_RESOURCES.3040]
+opt_in = true
+
+# lootly
+[LIVE.SPECIAL_RESOURCES.2196]
+opt_in = true
+
+# boxhud
+[LIVE.SPECIAL_RESOURCES.2088]
+opt_in = true
+
 # ========================================
 # TEST ENVIRONMENT SETTINGS
 # ========================================
@@ -92,6 +117,31 @@ default_path = "@format {this.eqpath}/maps/Goods_Maps"
 custom_path = ""
 opt_in = false
 
+# TEST staff picks
+# guildclicky
+[TEST.SPECIAL_RESOURCES.2318]
+opt_in = true
+
+# buttonmaster
+[TEST.SPECIAL_RESOURCES.3003]
+opt_in = true
+
+# alertmaster
+[TEST.SPECIAL_RESOURCES.2062]
+opt_in = true
+
+# rgmercs
+[TEST.SPECIAL_RESOURCES.3040]
+opt_in = true
+
+# lootly
+[TEST.SPECIAL_RESOURCES.2196]
+opt_in = true
+
+# boxhud
+[TEST.SPECIAL_RESOURCES.2088]
+opt_in = true
+
 # ========================================
 # EMULATOR ENVIRONMENT SETTINGS
 # ========================================
@@ -115,3 +165,32 @@ opt_in = false
 default_path = "@format {this.eqpath}/maps/Goods_Maps"
 custom_path = ""
 opt_in = false
+
+# EMU staff picks
+# guildclicky
+[EMU.SPECIAL_RESOURCES.2318]
+opt_in = true
+
+# buttonmaster
+[EMU.SPECIAL_RESOURCES.3003]
+opt_in = true
+
+# alertmaster
+[EMU.SPECIAL_RESOURCES.2062]
+opt_in = true
+
+# rgmercs
+[EMU.SPECIAL_RESOURCES.3040]
+opt_in = true
+
+# lootly
+[EMU.SPECIAL_RESOURCES.2196]
+opt_in = true
+
+# boxhud
+[EMU.SPECIAL_RESOURCES.2088]
+opt_in = true
+
+# lootnscoot (EMU only)
+[EMU.SPECIAL_RESOURCES.2675]
+opt_in = true

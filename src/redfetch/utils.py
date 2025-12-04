@@ -76,8 +76,8 @@ def get_special_resource_path(resource_id):
         if is_resource_opted_in(resource_id):
             ensure_directory_exists(path)
     else:
-        # If neither path is specified, return the DOWNLOAD_FOLDER
-        path = config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER
+        # callers handle the case where no path is found
+        return None
 
     # Normalize the path
     return os.path.normpath(path)

@@ -44,6 +44,13 @@ from redfetch import sync
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
 
+# Staff pick resource IDs by environment
+STAFF_PICKS_BY_ENV: dict[str, list[str]] = {
+    "LIVE": ["2318", "3003", "2062", "3040", "2196", "2088"],
+    "TEST": ["2318", "3003", "2062", "3040", "2196", "2088"],
+    "EMU": ["2318", "3003", "2062", "3040", "2196", "2088", "2675"],
+}
+
 class FetchTab(ScrollableContainer):
     """Content for the Fetch tab."""
 
@@ -453,6 +460,17 @@ class SettingsTab(ScrollableContainer):
                 .get("opt_in", False),
                 tooltip="Adds IonBC to your 'special resources'.",
             )
+            yield Label("Staff Picks:", classes="left_middle")
+            yield Switch(
+                id="staff_picks",
+                value=all(
+                    config.settings.from_env(current_env)
+                    .SPECIAL_RESOURCES.get(rid, {})
+                    .get("opt_in", False)
+                    for rid in STAFF_PICKS_BY_ENV.get(current_env, [])
+                ),
+                tooltip="Keeps Staff Picks (scripts/tools) up to date for this server type.",
+            )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
             yield Label("Close MQ pre-udpate:", classes="left_middle")
             yield Switch(
@@ -528,6 +546,16 @@ class SettingsTab(ScrollableContainer):
 
         navmesh_switch = self.query_one("#navmesh", Switch)
         navmesh_switch.value = settings_for_env.get("NAVMESH_OPT_IN", False)
+
+        # Staff picks switch - per-environment setting
+        staff_switch = self.query_one("#staff_picks", Switch)
+        env = app.current_env
+        staff_switch.value = all(
+            config.settings.from_env(env)
+            .SPECIAL_RESOURCES.get(rid, {})
+            .get("opt_in", False)
+            for rid in STAFF_PICKS_BY_ENV.get(env, [])
+        )
 
         # Update inputs that depend on the current environment
         dl_input = self.query_one("#dl_path_input", Input)
@@ -607,6 +635,8 @@ class SettingsTab(ScrollableContainer):
             self.app.handle_toggle_myseq(event.value)
         elif event.switch.id == "ionbc":
             self.app.handle_toggle_ionbc(event.value)
+        elif event.switch.id == "staff_picks":
+            self.app.handle_toggle_staff_picks(event.value)
         elif event.switch.id == "navmesh":
             self.app.handle_toggle_navmesh(event.value)
         elif event.switch.id == "auto_run_vvmq":
@@ -1382,6 +1412,27 @@ class Redfetch(App):
             config.update_setting(['SPECIAL_RESOURCES', ionbc_id, 'opt_in'], value, env='DEFAULT')
             state = "enabled" if value else "disabled"
             self.notify(f"IonBC is now {state}")
+
+    def handle_toggle_staff_picks(self, value: bool) -> None:
+        """Toggle opt-in status for staff pick resources in the current environment."""
+        env = self.current_env
+        pack_ids = STAFF_PICKS_BY_ENV.get(env, [])
+        if not pack_ids:
+            self.notify(f"No Staff Picks configured for {env}", severity="warning")
+            return
+
+        current_specials = config.settings.from_env(env).SPECIAL_RESOURCES
+
+        changed = False
+        for rid in pack_ids:
+            current_opt_in = current_specials.get(rid, {}).get('opt_in', False)
+            if current_opt_in != value:
+                config.update_setting(['SPECIAL_RESOURCES', rid, 'opt_in'], value, env=env)
+                changed = True
+
+        if changed:
+            state = "enabled" if value else "disabled"
+            self.notify(f"Staff Picks for {env} are now {state}")
 
     def handle_toggle_navmesh(self, value: bool) -> None:
         current_opt_in = config.settings.from_env(self.current_env).get('NAVMESH_OPT_IN', None)

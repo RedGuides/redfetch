@@ -44,7 +44,7 @@ Take a moment to consider your configuration and the settings tab.
 Now you're ready to play EQ with the big boys.
 
 ## Add more MQ Scripts
-To add more MacroQuest scripts, "watch" resources on RedGuides, and then run the *Easy Update* button again.
+To add more MacroQuest scripts, "watch" them on [www.redguides.com/community/resources](https://www.redguides.com/community/resources), and then click the *Easy Update* button again.
 
 ![a screenshot showing the watch button on a resource page](https://www.redguides.com/images/clickwatch.gif)
 
