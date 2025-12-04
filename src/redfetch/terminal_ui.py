@@ -46,9 +46,9 @@ from redfetch import sync
 
 # Staff pick resource IDs by environment
 STAFF_PICKS_BY_ENV: dict[str, list[str]] = {
-    "LIVE": ["2318", "3003", "2062", "3040", "2196", "2088"],
-    "TEST": ["2318", "3003", "2062", "3040", "2196", "2088"],
-    "EMU": ["2318", "3003", "2062", "3040", "2196", "2088", "2675"],
+    "LIVE": ["4", "2318", "3003", "2062", "3040", "2196", "2088"],
+    "TEST": ["4", "2318", "3003", "2062", "3040", "2196", "2088"],
+    "EMU": ["4", "2318", "3003", "2062", "3040", "2196", "2088", "2675"],
 }
 
 class FetchTab(ScrollableContainer):
@@ -469,7 +469,7 @@ class SettingsTab(ScrollableContainer):
                     .get("opt_in", False)
                     for rid in STAFF_PICKS_BY_ENV.get(current_env, [])
                 ),
-                tooltip="Keeps Staff Picks (scripts/tools) up to date for this server type.",
+                tooltip="A collection of scripts for this server type that RedGuides staff recommends.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
             yield Label("Close MQ pre-udpate:", classes="left_middle")
@@ -1414,7 +1414,7 @@ class Redfetch(App):
             self.notify(f"IonBC is now {state}")
 
     def handle_toggle_staff_picks(self, value: bool) -> None:
-        """Toggle opt-in status for staff pick resources in the current environment."""
+        """Toggle opt-in status for staff picks."""
         env = self.current_env
         pack_ids = STAFF_PICKS_BY_ENV.get(env, [])
         if not pack_ids:

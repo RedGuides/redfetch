@@ -1,5 +1,6 @@
 # standard
 import os
+import re
 
 # third-party
 import tomlkit
@@ -27,6 +28,26 @@ MYSEQ_MAP = {
 EQMAPS_MAP = {
     153: "Brewall",
     303: "Goods"
+}
+
+# to make settings.local.toml easier to read, names are added in comments
+RESOURCE_NAMES = {
+    "1974": "Very Vanilla MQ Live",
+    "2218": "Very Vanilla MQ Test",
+    "60": "Very Vanilla MQ Emu",
+    "4": "KissAssist",
+    "151": "MySEQ Live",
+    "164": "MySEQ Test",
+    "153": "Brewall's EverQuest Maps",
+    "303": "Good's EverQuest Maps",
+    "2463": "IonBC",
+    "2318": "guildclicky",
+    "3003": "buttonmaster",
+    "2062": "alertmaster",
+    "3040": "rgmercs",
+    "2196": "lootly",
+    "2088": "boxhud",
+    "2675": "lootnscoot",
 }
 
 
@@ -184,10 +205,57 @@ def load_config(file_path):
         raise ValidationError(f"Error loading config file {file_path}: {e}")
 
 
+def _annotate_special_resource_comments(toml_text: str) -> str:
+    """
+    Insert comments above SPECIAL_RESOURCES sections with friendly names, when known.
+
+    This makes settings.local.toml easier for users to read by annotating lines like
+    [LIVE.SPECIAL_RESOURCES.2318] with a preceding comment such as "# guildclicky".
+    """
+    lines = toml_text.splitlines()
+    if not lines:
+        return toml_text
+
+    pattern = re.compile(r"^\[(DEFAULT|LIVE|TEST|EMU)\.SPECIAL_RESOURCES\.(\d+)\]\s*$")
+
+    new_lines = []
+    for line in lines:
+        match = pattern.match(line)
+        if not match:
+            new_lines.append(line)
+            continue
+
+        _env_name, resource_id = match.groups()
+        friendly_name = RESOURCE_NAMES.get(resource_id)
+        if not friendly_name:
+            new_lines.append(line)
+            continue
+
+        # Look back in the already-built output for the nearest non-empty line.
+        idx = len(new_lines) - 1
+        while idx >= 0 and new_lines[idx].strip() == "":
+            idx -= 1
+
+        # If there's already a comment immediately above, don't add another.
+        if idx >= 0 and new_lines[idx].lstrip().startswith("#"):
+            new_lines.append(line)
+            continue
+
+        # Insert the comment and then the header.
+        new_lines.append(f"# {friendly_name}")
+        new_lines.append(line)
+
+    # Preserve a trailing newline if the original had one.
+    ending = "\n" if toml_text.endswith("\n") else ""
+    return "\n".join(new_lines) + ending
+
+
 def save_config(file_path, config_data):
     """Save the updated configuration data to the TOML file."""
+    toml_text = tomlkit.dumps(config_data)
+    toml_text = _annotate_special_resource_comments(toml_text)
     with open(file_path, 'w') as f:
-        f.write(tomlkit.dumps(config_data))
+        f.write(toml_text)
 
 
 def update_setting(setting_path, setting_value, env=None):
