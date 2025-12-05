@@ -54,29 +54,45 @@ custom_path = ""
 opt_in = false
 
 # LIVE staff picks
+# kissassist
+[LIVE.SPECIAL_RESOURCES.4]
+opt_in = true
+staff_pick = true
+
+# lua event manager
+[LIVE.SPECIAL_RESOURCES.2539]
+opt_in = true
+staff_pick = true
+
 # guildclicky
 [LIVE.SPECIAL_RESOURCES.2318]
 opt_in = true
+staff_pick = true
 
 # buttonmaster
 [LIVE.SPECIAL_RESOURCES.3003]
 opt_in = true
+staff_pick = true
 
 # alertmaster
 [LIVE.SPECIAL_RESOURCES.2062]
 opt_in = true
+staff_pick = true
 
 # rgmercs
 [LIVE.SPECIAL_RESOURCES.3040]
 opt_in = true
+staff_pick = true
 
 # lootly
 [LIVE.SPECIAL_RESOURCES.2196]
 opt_in = true
+staff_pick = true
 
 # boxhud
 [LIVE.SPECIAL_RESOURCES.2088]
 opt_in = true
+staff_pick = true
 
 # ========================================
 # TEST ENVIRONMENT SETTINGS
@@ -118,29 +134,45 @@ custom_path = ""
 opt_in = false
 
 # TEST staff picks
+# kissassist
+[TEST.SPECIAL_RESOURCES.4]
+opt_in = true
+staff_pick = true
+
+# lua event manager
+[TEST.SPECIAL_RESOURCES.2539]
+opt_in = true
+staff_pick = true
+
 # guildclicky
 [TEST.SPECIAL_RESOURCES.2318]
 opt_in = true
+staff_pick = true
 
 # buttonmaster
 [TEST.SPECIAL_RESOURCES.3003]
 opt_in = true
+staff_pick = true
 
 # alertmaster
 [TEST.SPECIAL_RESOURCES.2062]
 opt_in = true
+staff_pick = true
 
 # rgmercs
 [TEST.SPECIAL_RESOURCES.3040]
 opt_in = true
+staff_pick = true
 
 # lootly
 [TEST.SPECIAL_RESOURCES.2196]
 opt_in = true
+staff_pick = true
 
 # boxhud
 [TEST.SPECIAL_RESOURCES.2088]
 opt_in = true
+staff_pick = true
 
 # ========================================
 # EMULATOR ENVIRONMENT SETTINGS
@@ -167,30 +199,47 @@ custom_path = ""
 opt_in = false
 
 # EMU staff picks
+# kissassist
+[EMU.SPECIAL_RESOURCES.4]
+opt_in = true
+staff_pick = true
+
+# lua event manager
+[EMU.SPECIAL_RESOURCES.2539]
+opt_in = true
+staff_pick = true
+
 # guildclicky
 [EMU.SPECIAL_RESOURCES.2318]
 opt_in = true
+staff_pick = true
 
 # buttonmaster
 [EMU.SPECIAL_RESOURCES.3003]
 opt_in = true
+staff_pick = true
 
 # alertmaster
 [EMU.SPECIAL_RESOURCES.2062]
 opt_in = true
+staff_pick = true
 
 # rgmercs
 [EMU.SPECIAL_RESOURCES.3040]
 opt_in = true
+staff_pick = true
 
 # lootly
 [EMU.SPECIAL_RESOURCES.2196]
 opt_in = true
+staff_pick = true
 
 # boxhud
 [EMU.SPECIAL_RESOURCES.2088]
 opt_in = true
+staff_pick = true
 
 # lootnscoot (EMU only)
 [EMU.SPECIAL_RESOURCES.2675]
 opt_in = true
+staff_pick = true

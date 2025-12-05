@@ -44,12 +44,18 @@ from redfetch import sync
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
 
-# Staff pick resource IDs by environment
-STAFF_PICKS_BY_ENV: dict[str, list[str]] = {
-    "LIVE": ["4", "2318", "3003", "2062", "3040", "2196", "2088"],
-    "TEST": ["4", "2318", "3003", "2062", "3040", "2196", "2088"],
-    "EMU": ["4", "2318", "3003", "2062", "3040", "2196", "2088", "2675"],
-}
+
+def get_staff_pick_ids_for_env(env: str) -> list[str]:
+    """Return resource IDs marked as staff_pick in SPECIAL_RESOURCES for the given env."""
+    env_settings = config.settings.from_env(env)
+    specials = getattr(env_settings, "SPECIAL_RESOURCES", {}) or {}
+    if not isinstance(specials, dict):
+        return []
+    return [
+        rid
+        for rid, details in specials.items()
+        if isinstance(details, dict) and details.get("staff_pick", False)
+    ]
 
 class FetchTab(ScrollableContainer):
     """Content for the Fetch tab."""
@@ -460,14 +466,16 @@ class SettingsTab(ScrollableContainer):
                 .get("opt_in", False),
                 tooltip="Adds IonBC to your 'special resources'.",
             )
+            staff_ids = get_staff_pick_ids_for_env(current_env)
             yield Label("Staff Picks:", classes="left_middle")
             yield Switch(
                 id="staff_picks",
-                value=all(
+                value=bool(staff_ids)
+                and all(
                     config.settings.from_env(current_env)
                     .SPECIAL_RESOURCES.get(rid, {})
                     .get("opt_in", False)
-                    for rid in STAFF_PICKS_BY_ENV.get(current_env, [])
+                    for rid in staff_ids
                 ),
                 tooltip="A collection of scripts for this server type that RedGuides staff recommends.",
             )
@@ -550,11 +558,12 @@ class SettingsTab(ScrollableContainer):
         # Staff picks switch - per-environment setting
         staff_switch = self.query_one("#staff_picks", Switch)
         env = app.current_env
-        staff_switch.value = all(
+        staff_ids = get_staff_pick_ids_for_env(env)
+        staff_switch.value = bool(staff_ids) and all(
             config.settings.from_env(env)
             .SPECIAL_RESOURCES.get(rid, {})
             .get("opt_in", False)
-            for rid in STAFF_PICKS_BY_ENV.get(env, [])
+            for rid in staff_ids
         )
 
         # Update inputs that depend on the current environment
@@ -1416,7 +1425,7 @@ class Redfetch(App):
     def handle_toggle_staff_picks(self, value: bool) -> None:
         """Toggle opt-in status for staff picks."""
         env = self.current_env
-        pack_ids = STAFF_PICKS_BY_ENV.get(env, [])
+        pack_ids = get_staff_pick_ids_for_env(env)
         if not pack_ids:
             self.notify(f"No Staff Picks configured for {env}", severity="warning")
             return

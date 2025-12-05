@@ -36,6 +36,7 @@ RESOURCE_NAMES = {
     "2218": "Very Vanilla MQ Test",
     "60": "Very Vanilla MQ Emu",
     "4": "KissAssist",
+    "2539": "Lua Event Manager",
     "151": "MySEQ Live",
     "164": "MySEQ Test",
     "153": "Brewall's EverQuest Maps",
