@@ -8,6 +8,7 @@ import keyring
 from diskcache import Cache
 
 from redfetch.auth import KEYRING_SERVICE_NAME
+from redfetch import auth
 from redfetch import config
 from redfetch import net
 
@@ -16,7 +17,12 @@ BASE_URL = net.BASE_URL
 
 
 async def get_api_headers():
-    """Fetch API key/user headers for authenticated API requests."""
+    """Return auth headers for XenForo API requests.
+
+    Priority order:
+    1) API key via env: `REDGUIDES_API_KEY`
+    2) Native OAuth2: cached `access_token` from keyring
+    """
     api_key = os.environ.get('REDGUIDES_API_KEY')
     if api_key:
         headers = {'XF-Api-Key': api_key}
@@ -27,18 +33,48 @@ async def get_api_headers():
                 raise Exception("Unable to retrieve user ID using the provided API key.")
         headers['XF-Api-User'] = str(user_id)
         return headers
+
+    # Prefer OAuth2 bearer tokens (XF 2.3 native OAuth2)
+    access_token = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
+    refresh_tok = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
+
+    # If any OAuth tokens exist, prefer OAuth auth.
+    if access_token or refresh_tok:
+        if access_token and auth.token_is_valid():
+            return {"Authorization": f"Bearer {access_token}"}
+
+        if refresh_tok:
+            settings = getattr(config, "settings", None)
+            client_id = os.environ.get("REDFETCH_OAUTH_CLIENT_ID") or (settings.get("OAUTH_CLIENT_ID") if settings else None)
+            client_secret = os.environ.get("REDFETCH_OAUTH_CLIENT_SECRET") or (settings.get("OAUTH_CLIENT_SECRET") if settings else None)
+            redirect_uri = os.environ.get("REDFETCH_OAUTH_REDIRECT_URI") or (settings.get("OAUTH_REDIRECT_URI") if settings else None) or "http://127.0.0.1:62897/"
+
+            if not client_id:
+                raise Exception(
+                    "OAuth refresh token is present but OAUTH_CLIENT_ID is not configured. "
+                    "Set REDFETCH_OAUTH_CLIENT_ID (or OAUTH_CLIENT_ID in settings.local.toml) and try again."
+                )
+
+            refreshed = await asyncio.to_thread(
+                auth.refresh_token,
+                str(client_id),
+                str(client_secret or ""),
+                redirect_uri=str(redirect_uri),
+            )
+            if refreshed:
+                access_token = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
+                if access_token:
+                    return {"Authorization": f"Bearer {access_token}"}
+
+            raise Exception("OAuth token refresh failed. Please run `redfetch logout` and authorize again.")
+
+        # Access token exists but is expired/missing expiry and there's no refresh token available.
+        raise Exception("OAuth access token is expired and no refresh token is available. Please authorize again.")
     
-    api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
-    if not api_key:
-        raise Exception("API key not found. Please run authorization.")
-    
-    user_id = get_user_id()
-    if not user_id:
-        user_id = await fetch_user_id_from_api(api_key)
-        if not user_id:
-            raise Exception("Unable to retrieve user ID. Please re-authorize.")
-    
-    return {"XF-Api-Key": api_key, "XF-Api-User": str(user_id)}
+    raise Exception(
+        "Not authenticated. Set REDGUIDES_API_KEY (and optionally REDGUIDES_USER_ID), "
+        "or authorize via OAuth."
+    )
 
 
 async def fetch_watched_page(client: httpx.AsyncClient, page: int) -> tuple[list, int]:
@@ -149,7 +185,7 @@ async def fetch_resources_batch(client: httpx.AsyncClient, resource_ids: List[st
     return results
 
 
-_KISS_CACHE_TTL_SECONDS = 60  # 60 seconds
+_KISS_CACHE_TTL_SECONDS = 60
 
 
 # Persistent disk-backed cache (survives across CLI runs)
@@ -219,7 +255,6 @@ async def is_kiss_downloadable(headers, force_refresh: bool = False):
     if _api_cache is None:
         _api_cache = _get_api_cache()
     
-    # Single-user install: use a singleton cache key
     cache_key = "kiss"
     
     if not force_refresh:
@@ -303,12 +338,17 @@ async def get_username():
             return username
         raise Exception("Unable to retrieve username using the provided API key.")
 
-    # Check keyring for API key (used after OAuth authorization)
-    api_key = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
-    if api_key:
-        username = await fetch_username(api_key)
-        if username != "Unknown":
-            return username
-        raise Exception("Unable to retrieve username using the stored API key.")
+    # Prefer OAuth bearer token if present (including refresh-only sessions)
+    access_token = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
+    refresh_tok = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
+    if access_token or refresh_tok:
+        headers = await get_api_headers()  # ensures refresh if needed
+        async with httpx.AsyncClient(headers=headers, http2=True) as client:
+            me = await fetch_me(client)
+        if me and me.get("username"):
+            set_username(me["username"])
+            set_user_id(me["user_id"])
+            return me["username"]
+        raise Exception("Unable to retrieve username using the stored OAuth token.")
 
-    raise Exception("Username not found. Please run authorization first.")
+    raise Exception("Username not found. Set REDGUIDES_API_KEY or authorize via OAuth.")

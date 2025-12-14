@@ -9,6 +9,14 @@
 DOWNLOAD_FOLDER = "@format {env[REDFETCH_DATA_DIR]}/Downloads"
 EQPATH = ""
 
+# ========================================
+# XenForo OAuth2
+# ========================================
+OAUTH_CLIENT_ID = "4738840279321968"
+OAUTH_CLIENT_SECRET = ""
+OAUTH_SCOPE = "user:read resource:read resource:write attachment:write"
+OAUTH_REDIRECT_URI = "http://127.0.0.1:62897/"
+
 [DEFAULT.SPECIAL_RESOURCES.2463]
 default_path = "IonBC"
 custom_path = ""

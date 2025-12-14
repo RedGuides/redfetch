@@ -1,109 +1,192 @@
+"""Can be used as a standalone script to authorize with RedGuides.
+
+redfetch supports two auth modes:
+- API key (via REDGUIDES_API_KEY env var)
+- XenForo 2.3 native OAuth2
+"""
+
 # standard
+import base64
+import hashlib
+import os
 import sys
+import time
 import webbrowser
 from datetime import datetime, timedelta
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs, urlencode
-import asyncio
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlencode, urlparse
 
 # third-party
 import httpx
 import keyring  # for storing tokens (secrets only)
 from keyring.errors import NoKeyringError
-import os
 
 # Local
 from redfetch import net
 
 # Constants
-KEYRING_SERVICE_NAME = 'redfetch'  # Name of your application/service
+KEYRING_SERVICE_NAME = "redfetch"
 BASE_URL = net.BASE_URL
+
+AUTHORIZATION_ENDPOINT = f"{BASE_URL}/oauth2/authorize"
+TOKEN_ENDPOINT = f"{BASE_URL}/api/oauth2/token"
+
+# Loopback redirect default (must match the OAuth client redirect URI exactly)
+DEFAULT_REDIRECT_URI = "http://127.0.0.1:62897/"
+DEFAULT_LOOPBACK_PORT = 62897
+_REFRESH_CODE_VERIFIER = "refresh"  # XF 2.3 requires a non-empty code_verifier even for refresh (public clients)
+
+
+def _get_setting(key: str, default=None):
+    """Get a setting from env first, then Dynaconf (if initialized)."""
+    env_key = f"REDFETCH_{key}"
+    env_val = os.environ.get(env_key)
+    if env_val not in (None, ""):
+        return env_val
+
+    try:
+        from redfetch import config
+
+        settings = getattr(config, "settings", None)
+        if settings is not None:
+            val = settings.get(key, default)
+            return default if val in ("", None) else val
+    except Exception:
+        pass
+
+    return default
 
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
+    """Capture XF OAuth2 redirect responses for loopback redirects."""
+
+    def log_message(self, format, *args):  # noqa: A002 (shadowing built-in 'format')
+        # Silence noisy default logging.
+        return
+
     def do_GET(self):
-        query_components = parse_qs(urlparse(self.path).query)
-        code = query_components.get("code")
-        if code:
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
+        query = parse_qs(urlparse(self.path).query)
+
+        error = (query.get("error") or [None])[0]
+        error_description = (query.get("error_description") or [None])[0]
+        code = (query.get("code") or [None])[0]
+        state = (query.get("state") or [None])[0]
+
+        # Some browsers will request /favicon.ico or similar first; ignore those.
+        if not error and (not code or not state):
+            self.send_response(404)
+            self.send_header("Content-type", "text/plain; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"Authorization successful. You can close this window.")
-            self.server.code = code[0]
-        else:
-            self.send_error(400, "Code not found in the request")
+            self.wfile.write(b"Waiting for OAuth response...")
+            return
+
+        if error:
+            self.server.error = f"{error} {error_description or ''}".strip()
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"Authorization failed. You can close this tab.")
+            return
+
+        self.server.code = code
+        self.server.state = state
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"Authorization successful. You can close this tab.")
 
 
-def first_authorization(client_id, client_secret):
-    # Step 1: Generate the authorization URL
+def first_authorization(client_id: str, client_secret: str | None, *, scope: str, redirect_uri: str) -> bool:
+    """Perform auth via browser and cache tokens.
+
+    Uses Authorization Code + PKCE (S256) as required by XF for public clients.
+    """
+    # Step 1: Generate PKCE + state, then build the authorize URL
+    state = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii").rstrip("=")
+    code_verifier = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii").rstrip("=")  # 43 chars base64url
+    code_challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("ascii")).digest())
+        .decode("ascii")
+        .rstrip("=")
+    )
+
     params = {
-        'response_type': 'code',
-        'client_id': client_id,
-        'redirect_uri': 'http://127.0.0.1:62897/',
-        'scope': 'read'
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": scope or "",
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
-    auth_url = f"{BASE_URL}/account/authorize?{urlencode(params)}"
+    auth_url = f"{AUTHORIZATION_ENDPOINT}?{urlencode(params)}"
 
-    # Attempt to open the URL in the default web browser
+    # Step 2: Open the authorize URL in the user's browser
     try:
-        # `webbrowser.open` returns True if it was able to open the URL
         success = webbrowser.open(auth_url)
         if success:
             print("Please login and authorize the app in your web browser.")
         else:
-            raise Exception("Browser could not be opened.")
-    except Exception as e:
-        # Fallback: Ask the user to manually open the URL
+            raise RuntimeError("Browser could not be opened.")
+    except Exception:
         print("Unable to open the web browser automatically.")
         print("Please open the following URL manually in your browser to authorize the app:")
         print(auth_url)
-    
-    # Wait for the authorization code via the local server
-    authorization_code = run_server()
 
-    # Step 2: Exchange the authorization code for an access token
-    token_url = f"{BASE_URL}/redapi/index.php?oauth/token"
+    # Step 3: Wait for the authorization code via the loopback redirect
+    authorization_code = run_server(expected_state=state, redirect_uri=redirect_uri)
+
+    # Step 4: Exchange the authorization code for tokens
     payload = {
-        'grant_type': 'authorization_code',
-        'code': authorization_code,
-        'redirect_uri': 'http://127.0.0.1:62897/',
-        'client_id': client_id,
-        'client_secret': client_secret
+        "client_id": client_id,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+        "code": authorization_code,
+        "code_verifier": code_verifier,
     }
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
-    response = httpx.post(token_url, headers=headers, data=payload, timeout=10.0)
-    if response.is_success:
-        token_data = response.json()
-        store_tokens_in_keyring(token_data)  # Store tokens securely
-        print("Authorization successful and tokens cached.")
-        # Step 3: Use the access token to get the user's XenForo API key
-        get_xenforo_api_key(token_data['access_token'], token_data['user_id'])
-        return True
-    else:
+    if client_secret:
+        payload["client_secret"] = client_secret
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
+    response = httpx.post(TOKEN_ENDPOINT, headers=headers, data=payload, timeout=10.0)
+    if not response.is_success:
         print("Failed to retrieve tokens.")
         print(response.text)
         return False
 
+    token_data = response.json()
+    if token_data.get("error"):
+        print(f"OAuth token error: {token_data.get('error')} {token_data.get('error_description', '')}".strip())
+        return False
 
-def get_client_credentials():
-    # Yes this is crap, but it's not sensitive. Replacing soon as proper oauth2 finally available in xf 2.3.
-    version = 'redfetch'
+    # Step 5: Cache tokens and basic user info
+    store_tokens_in_keyring(token_data)
+    print("Authorization successful and tokens cached.")
+
+    # Cache basic user info (best-effort; not required for API auth).
     try:
-        response = httpx.get(f'{BASE_URL}/redapi/credentials.php', params={'version': version}, timeout=10.0)
-        response.raise_for_status()  # Raises HTTPStatusError if the response was unsuccessful
-        data = response.json()
-        return data['client_id'], data['client_secret']
-    except httpx.HTTPStatusError as http_err:
-        if http_err.response is not None and http_err.response.status_code == 401:
-            raise Exception("Authentication failed. The server might be protected by htaccess.") from None
-        else:
-            raise Exception(f"HTTP error occurred while trying to retrieve client credentials: {http_err}") from None
-    except httpx.RequestError as err:
-        raise Exception(f"Failed to connect or request error while retrieving client credentials: {err}") from None
-    except Exception as e:
-        raise Exception(f"An unexpected error occurred: {e}") from None
+        _cache_user_info(token_data.get("access_token"))
+    except Exception:
+        pass
+
+    return True
+
+
+def _cache_user_info(access_token: str | None) -> None:
+    """Fetch /api/me and cache username/user_id (best-effort)."""
+    if not access_token:
+        return
+    from redfetch import api
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    resp = httpx.get(f"{BASE_URL}/api/me", headers=headers, timeout=10.0)
+    resp.raise_for_status()
+    data = resp.json()
+    me = data.get("me") or {}
+    if me.get("username"):
+        api.set_username(str(me["username"]))
+    if me.get("user_id"):
+        api.set_user_id(str(me["user_id"]))
 
 
 def authorize():
@@ -111,44 +194,71 @@ def authorize():
     if os.environ.get('REDGUIDES_API_KEY'):
         return
 
+    client_id = _get_setting("OAUTH_CLIENT_ID")
+    client_secret = _get_setting("OAUTH_CLIENT_SECRET", "")  # optional (confidential clients only)
+    scope = _get_setting("OAUTH_SCOPE", "user:read resource:read resource:write attachment:write")
+    redirect_uri = _get_setting("OAUTH_REDIRECT_URI", DEFAULT_REDIRECT_URI)
+
+    if not client_id:
+        print("OAuth client is not configured.")
+        print("Set one of the following:")
+        print("  - Environment variable: REDFETCH_OAUTH_CLIENT_ID")
+        print("  - Or add to your settings.local.toml: OAUTH_CLIENT_ID = \"...\"")
+        sys.exit(1)
+
     data = get_cached_tokens()
 
-    # Fast path: if we have a cached API key, trust it
-    if data.get('api_key') and data.get('user_id'):
+    # Fast path: valid access token already cached
+    if data.get("access_token") and token_is_valid():
         return
 
-    # Try to refresh token if available when the access token is expired or missing
-    if data.get('refresh_token') and not token_is_valid():
-        try:
-            client_id, client_secret = get_client_credentials()
-        except Exception as e:
-            print(f"Error during authorization: {e}")
-            sys.exit(1)
-        print("Attempting to refresh token...")
-        if refresh_token(client_id, client_secret):
+    # Try refresh if we have a refresh token
+    if data.get("refresh_token"):
+        print("Attempting to refresh access token...")
+        if refresh_token(client_id, client_secret, redirect_uri=redirect_uri):
             print("Token refreshed successfully.")
-            updated_data = get_cached_tokens()
-            if updated_data.get('api_key'):
-                return
-            print("Warning: Token refreshed but API key not found. Reauthorizing...")
+            return
 
-    # Fall back to full authorization (fetch client creds if not already fetched)
-    try:
-        client_id, client_secret = get_client_credentials()
-    except Exception as e:
-        print(f"Error during authorization: {e}")
-        sys.exit(1)
+    # Fall back to interactive authorization
     print("Performing full authorization...")
-    if not first_authorization(client_id, client_secret):
+    if not first_authorization(client_id, client_secret, scope=scope, redirect_uri=redirect_uri):
         print("Authorization failed.")
         sys.exit(1)
 
 
-def run_server():
-    server_address = ('', 62897)
+def _port_from_redirect_uri(redirect_uri: str) -> int:
+    try:
+        parsed = urlparse(redirect_uri)
+        if parsed.port:
+            return int(parsed.port)
+    except Exception:
+        pass
+    return DEFAULT_LOOPBACK_PORT
+
+
+def run_server(*, expected_state: str, redirect_uri: str, timeout_seconds: int = 300) -> str:
+    """Start a loopback HTTP server and wait for XF's OAuth redirect."""
+    port = _port_from_redirect_uri(redirect_uri)
+    server_address = ("127.0.0.1", port)
     httpd = HTTPServer(server_address, OAuthCallbackHandler)
-    httpd.code = None  # Default in case the callback does not set a code
-    httpd.handle_request()
+    httpd.timeout = 5  # allow periodic timeout checks
+    httpd.code = None
+    httpd.state = None
+    httpd.error = None
+
+    start = time.time()
+    while True:
+        if httpd.error:
+            raise RuntimeError(f"OAuth authorization error: {httpd.error}")
+        if httpd.code:
+            break
+        if time.time() - start > timeout_seconds:
+            raise TimeoutError("Timed out waiting for OAuth authorization response.")
+        httpd.handle_request()
+
+    if httpd.state != expected_state:
+        raise RuntimeError("Received OAuth response with invalid state.")
+
     return httpd.code
 
 
@@ -157,60 +267,44 @@ def store_tokens_in_keyring(data):
     from redfetch import api
     
     # Secrets go in keyring
-    keyring.set_password(KEYRING_SERVICE_NAME, 'access_token', data['access_token'])
-    keyring.set_password(KEYRING_SERVICE_NAME, 'refresh_token', data['refresh_token'])
+    keyring.set_password(KEYRING_SERVICE_NAME, "access_token", data["access_token"])
+    keyring.set_password(KEYRING_SERVICE_NAME, "refresh_token", data["refresh_token"])
     
     # Non-sensitive data goes in disk cache
-    expires_at = datetime.now().timestamp() + int(data.get('expires_in', 0))
+    expires_at = datetime.now().timestamp() + int(data.get("expires_in", 0) or 0)
     api.set_token_expiry(str(expires_at))
-    api.set_user_id(str(data['user_id']))
 
 
-def get_xenforo_api_key(access_token, user_id):
-    from redfetch import api
-    
-    api_url = f"{BASE_URL}/redapi/index.php/users/{user_id}/api"
-    headers = {
-        'Authorization': f'Bearer {access_token}'
-    }
-    response = httpx.post(api_url, headers=headers, timeout=10.0)
-    if response.is_success:
-        api_key_data = response.json()
-        api_key_value = api_key_data['api_key']
-        keyring.set_password(KEYRING_SERVICE_NAME, 'api_key', api_key_value)
-        # Blocking call is fine here; this runs before any async event loop is started.
-        username = asyncio.run(api.fetch_username(api_key_value))
-        if username != "Unknown":
-            print("API key and username retrieved and cached.")
-        else:
-            print("API key retrieved and cached, but username lookup failed.")
-    else:
-        print("Failed to retrieve API key.")
-        print(response.text)
+def refresh_token(client_id: str, client_secret: str | None, *, redirect_uri: str) -> bool:
+    refresh_token_value = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
+    if not refresh_token_value:
+        return False
 
-
-def refresh_token(client_id, client_secret):
-    refresh_token_value = keyring.get_password(KEYRING_SERVICE_NAME, 'refresh_token')
-    token_url = f"{BASE_URL}/redapi/index.php?oauth/token"
     payload = {
-        'grant_type': 'refresh_token',
-        'refresh_token': refresh_token_value,
-        'client_id': client_id,
-        'client_secret': client_secret
+        "client_id": client_id,
+        "grant_type": "refresh_token",
+        "redirect_uri": redirect_uri,
+        "refresh_token": refresh_token_value,
+        # XF 2.3 requires code_verifier for public clients even on refresh. A static non-empty value works.
+        "code_verifier": _REFRESH_CODE_VERIFIER,
     }
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
-    response = httpx.post(token_url, headers=headers, data=payload, timeout=10.0)
-    if response.is_success:
-        new_token_data = response.json()
-        store_tokens_in_keyring(new_token_data)  # Store refreshed tokens securely
-        print("Access token refreshed and cached.")
-        return True
-    else:
+    if client_secret:
+        payload["client_secret"] = client_secret
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
+    response = httpx.post(TOKEN_ENDPOINT, headers=headers, data=payload, timeout=10.0)
+    if not response.is_success:
         print("Failed to refresh access token.")
         print(response.text)
         return False
+
+    new_token_data = response.json()
+    if new_token_data.get("error"):
+        print(f"OAuth token error: {new_token_data.get('error')} {new_token_data.get('error_description', '')}".strip())
+        return False
+
+    store_tokens_in_keyring(new_token_data)
+    return True
 
 
 def token_is_valid():
@@ -228,17 +322,14 @@ def token_is_valid():
 
 
 def get_cached_tokens():
-    """Retrieve tokens and API key from keyring and disk cache."""
+    """Retrieve cached OAuth tokens from keyring and non-secrets from disk cache."""
     from redfetch import api
     
     data = {}
-    # Secrets from keyring
-    data['access_token'] = keyring.get_password(KEYRING_SERVICE_NAME, 'access_token')
-    data['refresh_token'] = keyring.get_password(KEYRING_SERVICE_NAME, 'refresh_token')
-    data['api_key'] = keyring.get_password(KEYRING_SERVICE_NAME, 'api_key')
-    # Non-secrets from disk cache
-    data['username'] = api.get_username_from_cache()
-    data['user_id'] = api.get_user_id()
+    data["access_token"] = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
+    data["refresh_token"] = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
+    data["username"] = api.get_username_from_cache()
+    data["user_id"] = api.get_user_id()
     return data
 
 
@@ -248,10 +339,9 @@ def logout():
     from redfetch import meta
     from redfetch import net
 
-    # Clear current secrets from keyring
-    keyring_credentials = ['access_token', 'refresh_token', 'api_key']
-    # Also clear legacy entries that may exist from older versions
-    legacy_credentials = ['user_id', 'username', 'expires_at']
+    # Clear secrets from keyring (including legacy entries that may exist from older versions)
+    keyring_credentials = ["access_token", "refresh_token", "api_key"]
+    legacy_credentials = ["user_id", "username", "expires_at"]
     
     credentials_deleted = False
 
@@ -301,4 +391,12 @@ def initialize_keyring():
 
 if __name__ == "__main__":
     initialize_keyring()
+    # Initialize config lazily if invoked directly, so this can be used as a standalone script.
+    try:
+        from redfetch import config
+
+        if getattr(config, "settings", None) is None:
+            config.initialize_config()
+    except Exception:
+        pass
     authorize()
