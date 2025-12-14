@@ -213,13 +213,40 @@ def first_run_setup():
 
             effective_env = env_from_file or os.environ.get("REDFETCH_ENV") or "LIVE"
 
-            console.print(
-                Panel(
-                    f"[bold yellow]Server type: [cyan]{effective_env}[/cyan][/bold yellow]\n"
-                    f"Configuration directory: {config_dir}",
-                    expand=False,
-                )
-            )
+            # Banner always shows server/config dir, plus effective env overrides.
+            notice_lines: list[str] = [
+                f"[bold yellow]Server type: [cyan]{effective_env}[/cyan][/bold yellow]",
+                f"Configuration directory: {config_dir}",
+            ]
+
+            # Base URL override (show if explicitly set via env).
+            base_url_override = os.environ.get("REDFETCH_BASE_URL")
+            if base_url_override:
+                notice_lines.append(f"[bold red]REDFETCH_BASE_URL:[/bold red] {base_url_override}")
+
+            # Auth overrides: API key always takes precedence over OAuth.
+            api_key_present = bool(os.environ.get("REDGUIDES_API_KEY"))
+            if api_key_present:
+                notice_lines.append("[bold yellow]Auth:[/bold yellow] API key via REDGUIDES_API_KEY")
+                # Only meaningful alongside API key (used to skip a lookup).
+                if os.environ.get("REDGUIDES_USER_ID"):
+                    notice_lines.append("[bold yellow]Auth:[/bold yellow] REDGUIDES_USER_ID set via env")
+            else:
+                # Only surface OAuth env vars when API key isn't overriding them.
+                if os.environ.get("REDFETCH_OAUTH_CLIENT_ID"):
+                    notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client ID set via env")
+                if os.environ.get("REDFETCH_OAUTH_CLIENT_SECRET"):
+                    notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client secret set via env")
+                oauth_redirect_override = os.environ.get("REDFETCH_OAUTH_REDIRECT_URI")
+                if oauth_redirect_override:
+                    notice_lines.append(f"[bold yellow]OAuth redirect:[/bold yellow] {oauth_redirect_override}")
+
+            # PyPI URL override
+            pypi_url_override = os.environ.get("REDFETCH_PYPI_URL")
+            if pypi_url_override:
+                notice_lines.append(f"[bold yellow]REDFETCH_PYPI_URL:[/bold yellow] {pypi_url_override}")
+
+            console.print(Panel("\n".join(notice_lines), expand=False))
             return config_dir
         else:
             console.print("[bold red]Environment file (.env) not found. Rerunning setup.[/bold red]")
