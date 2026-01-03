@@ -90,7 +90,12 @@ def add_xf_attachment(resource_id, upfilename, version=None):
 
 def update_resource(resource_id, version_info, upfilename=None):
     """Create a version update (message + optional attachment)."""
-    add_xf_message(resource_id, version_info['version_string'], version_info['message'])
+    message = version_info.get('message', '')
+    if message.strip():
+        add_xf_message(resource_id, version_info['version_string'], message)
+    else:
+        print("Warning: No message content provided, skipping update post.")
+
     if upfilename:
         add_xf_attachment(resource_id, upfilename, version_info['version_string'])
 

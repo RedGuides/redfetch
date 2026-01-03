@@ -228,7 +228,7 @@ def first_run_setup():
             api_key_present = bool(os.environ.get("REDGUIDES_API_KEY"))
             if api_key_present:
                 notice_lines.append("[bold yellow]Auth:[/bold yellow] API key via REDGUIDES_API_KEY")
-                # Only meaningful alongside API key (used to skip a lookup).
+                # Only meaningful alongside API key (automation keys updating as other users).
                 if os.environ.get("REDGUIDES_USER_ID"):
                     notice_lines.append("[bold yellow]Auth:[/bold yellow] REDGUIDES_USER_ID set via env")
             else:

@@ -215,7 +215,7 @@ async def run_server_async(
     await site.start()
 
     webbrowser.open_new("https://www.redguides.com/cookie/set_marker.php")
-    print("Server starting. Browse resources on https://www.redguides.com/resources")
+    print("Server starting. Browse resources on https://www.redguides.com/community/resources")
 
     try:
         # Wait indefinitely until the task is cancelled by the caller (CLI or TUI).
