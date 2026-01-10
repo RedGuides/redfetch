@@ -92,7 +92,7 @@ To run redfetch from the command line:
 >   - `resource_id` - Existing RedGuides resource ID
 >   - `--description <README.md>` / `-d` - Path to a file (e.g. `README.md`) that will become the resource's overview description
 >   - `--version <version_number>` / `-v` - New version string (e.g., `v1.0.1`)
->   - `--message <CHANGELOG.md | MESSAGE>` / `-m` - Version update message or `CHANGELOG.md` (keep a changelog) file.
+>   - `--message <CHANGELOG.md | MESSAGE>` / `-m` - Version update message, a message file (e.g. `message.md` / `message.txt`), or a `CHANGELOG.md` (keep a changelog) file.
 >   - `--file <FILE.zip>` / `-f` - Path to your zipped release file
 >   - `--domain <URL>` - Domain to prepend to relative URLs in README.md or CHANGELOG.md files. (mostly for images. e.g., `https://raw.githubusercontent.com/yourusername/yourrepo/main/`)
 

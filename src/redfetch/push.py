@@ -13,6 +13,7 @@ XF_API_URL = f'{BASE_URL}/api'
 URI_MESSAGE = f'{XF_API_URL}/resource-updates'
 URI_ATTACHMENT = f'{XF_API_URL}/attachments/new-key'
 URI_RESOURCE_VERSIONS = f'{XF_API_URL}/resource-versions'
+MAX_MESSAGE_CHARS = 10_000
 
 
 def _get_api_headers_blocking() -> dict:
@@ -106,12 +107,45 @@ def convert_markdown_to_bbcode(markdown_text, domain=None):
     return bbcode_output
 
 
-def parse_changelog(changelog_path, version, domain=None):
+def _truncate_text(text: str, max_chars: int, suffix: str = "\n\n(truncated)") -> str:
+    """Truncate text to max_chars (including suffix), if needed."""
+    if not isinstance(text, str):
+        text = str(text)
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+
+    suffix = suffix or ""
+    if len(suffix) >= max_chars:
+        return suffix[:max_chars]
+
+    allowed = max_chars - len(suffix)
+    return text[:allowed].rstrip() + suffix
+
+
+def _try_parse_keepachangelog_dict(changelog_path: str):
+    """
+    Attempt to parse a keep-a-changelog file.
+
+    Returns a non-empty dict if it looks like a changelog; otherwise returns None.
+    """
+    try:
+        changes = keepachangelog.to_dict(changelog_path)
+    except Exception:
+        return None
+
+    if not isinstance(changes, dict) or not changes:
+        return None
+
+    return changes
+
+
+def parse_changelog(changelog_path, version, domain=None, changes=None):
     """
     Parses the changelog file and returns the changelog entry for the given version as BBCode.
     """
     # Use keepachangelog to parse the changelog file
-    changes = keepachangelog.to_dict(changelog_path)
+    if changes is None:
+        changes = keepachangelog.to_dict(changelog_path)
     # Remove 'v' prefix if present
     version_key = version.lstrip('v')
     if version_key in changes:
@@ -133,18 +167,43 @@ def parse_changelog(changelog_path, version, domain=None):
 
 
 def generate_version_message(args):
-    """Build version message; optionally parse changelog markdown and convert to BBCode."""
-    if os.path.isfile(args.message):
-        if args.message.lower().endswith('.md'):
-            # If it's a markdown file (e.g., CHANGELOG.md)
-            message = parse_changelog(args.message, args.version, domain=args.domain)
+    """
+    Build a version message from `--message` (file path or literal string).
+
+    If `--message` is a keep-a-changelog file, extract the entry for `--version`; otherwise post the
+    file contents (markdown is converted to BBCode). Large messages are truncated.
+    """
+    max_chars = MAX_MESSAGE_CHARS
+
+    # message can be a literal string, or a path-like string to a real file.
+    if args.message and os.path.isfile(args.message):
+        message_path = args.message
+        ext = os.path.splitext(message_path)[1].lower()
+
+        if ext == ".md":
+            # If it looks like keep-a-changelog, post the entry for --version; otherwise post the file.
+            changes = _try_parse_keepachangelog_dict(message_path)
+            if changes is not None:
+                try:
+                    message = parse_changelog(message_path, args.version, domain=args.domain, changes=changes)
+                except ValueError as e:
+                    with open(message_path, "r", encoding="utf-8", errors="replace") as f:
+                        markdown_text = f.read()
+                    message = convert_markdown_to_bbcode(markdown_text, domain=args.domain)
+                    print(f"Warning: {e}. Posting full file contents instead.")
+            else:
+                with open(message_path, "r", encoding="utf-8", errors="replace") as f:
+                    markdown_text = f.read()
+                message = convert_markdown_to_bbcode(markdown_text, domain=args.domain)
         else:
-            # Raise an error for non-markdown files
-            raise ValueError(f"The --message file '{args.message}' must end with '.md' and follow keepachangelog format.")
-    else:
-        # If --message is a regular string, use it directly
-        message = args.message
-    return message
+            # Plain text (or other) file: post as-is.
+            with open(message_path, "r", encoding="utf-8", errors="replace") as f:
+                message = f.read()
+
+        return _truncate_text(message, max_chars)
+
+    # If --message is a regular string, use it directly (still guard against extreme length).
+    return _truncate_text(args.message, max_chars)
 
 
 def update_description(resource_id, description_path, domain=None):
@@ -161,10 +220,6 @@ def handle_cli(args):
 
     if not any([args.description, args.version, args.message, args.file]):
         print("At least one option (--description, --version, --message, or --file) must be specified.")
-        sys.exit(1)
-
-    if args.domain and not (args.description or args.message):
-        print("The --domain option requires either --description or --message to be specified.")
         sys.exit(1)
 
     if args.message and not args.version:
