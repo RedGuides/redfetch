@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -149,7 +149,7 @@ def test_handle_cli_allows_domain_with_file_only_publish(tmp_path):
         domain = "https://raw.githubusercontent.com/org/repo/main/"
 
     with patch("redfetch.push.auth.initialize_keyring"), patch("redfetch.push.auth.authorize"), patch(
-        "redfetch.push.asyncio.run", return_value={"resource_id": _Args.resource_id}
+        "redfetch.push.api.get_resource_details", new=AsyncMock(return_value={"resource_id": _Args.resource_id})
     ), patch("redfetch.push.add_xf_attachment") as attach:
         push.handle_cli(_Args())
 

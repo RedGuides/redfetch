@@ -89,11 +89,12 @@ def mock_api_responses():
 
 
 @pytest.fixture
-def mock_settings_151_only():
+def mock_settings_151_only(tmp_path):
     """Mock settings with only resource 151 opted in."""
+    download_folder = str(tmp_path / "MacroQuest")
     settings_dict = {
         'ENV': 'LIVE',
-        'DOWNLOAD_FOLDER': 'C:\\Users\\Public\\MacroQuest',
+        'DOWNLOAD_FOLDER': download_folder,
         'SPECIAL_RESOURCES': {
             '151': {
                 'opt_in': True,
@@ -120,11 +121,12 @@ def mock_settings_151_only():
 
 
 @pytest.fixture
-def mock_settings_151_and_153():
+def mock_settings_151_and_153(tmp_path):
     """Mock settings with both 151 and 153 opted in."""
+    download_folder = str(tmp_path / "MacroQuest")
     settings_dict = {
         'ENV': 'LIVE',
-        'DOWNLOAD_FOLDER': 'C:\\Users\\Public\\MacroQuest',
+        'DOWNLOAD_FOLDER': download_folder,
         'SPECIAL_RESOURCES': {
             '151': {
                 'opt_in': True,
