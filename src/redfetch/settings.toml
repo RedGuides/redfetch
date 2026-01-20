@@ -52,12 +52,12 @@ flatten = false
 opt_in = true
 
 [LIVE.SPECIAL_RESOURCES.153]
-default_path = "@format {this.eqpath}/maps/Brewall_Maps"
+default_path = "@format {this.eqpath}/maps"
 custom_path = ""
 opt_in = false
 
 [LIVE.SPECIAL_RESOURCES.303]
-default_path = "@format {this.eqpath}/maps/Goods_Maps"
+default_path = "@format {this.eqpath}/maps"
 custom_path = ""
 opt_in = false
 
@@ -132,12 +132,12 @@ flatten = false
 opt_in = true
 
 [TEST.SPECIAL_RESOURCES.153]
-default_path = "@format {this.eqpath}/maps/Brewall_Maps"
+default_path = "@format {this.eqpath}/maps"
 custom_path = ""
 opt_in = false
 
 [TEST.SPECIAL_RESOURCES.303]
-default_path = "@format {this.eqpath}/maps/Goods_Maps"
+default_path = "@format {this.eqpath}/maps"
 custom_path = ""
 opt_in = false
 
@@ -197,12 +197,12 @@ custom_path = ""
 opt_in = true
 
 [EMU.SPECIAL_RESOURCES.153]
-default_path = "@format {this.eqpath}/maps/Brewall_Maps"
+default_path = "@format {this.eqpath}/maps"
 custom_path = ""
 opt_in = false
 
 [EMU.SPECIAL_RESOURCES.303]
-default_path = "@format {this.eqpath}/maps/Goods_Maps"
+default_path = "@format {this.eqpath}/maps"
 custom_path = ""
 opt_in = false
 
