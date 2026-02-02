@@ -12,7 +12,7 @@ EQPATH = ""
 # ========================================
 # XenForo OAuth2
 # ========================================
-OAUTH_CLIENT_ID = "4738840279321968"
+OAUTH_CLIENT_ID = "4558786089326342"
 OAUTH_CLIENT_SECRET = ""
 OAUTH_SCOPE = "user:read resource:read resource:write attachment:write"
 OAUTH_REDIRECT_URI = "http://127.0.0.1:62897/"
