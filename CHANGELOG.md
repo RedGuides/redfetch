@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-02-02
+
+### Added
+- Staff picks: curated resources for LIVE/TEST/EMU. Turn it off if you don't care what we like.
+
+### Changed
+- Authentication now uses OAuth2, though you can still use an API key if you prefer.
+
+### Fixed
+- `publish`: `--message` can be a file path. If it’s a Keep a Changelog file, we'll use the matching version entry; otherwise the file contents are posted. Empty messages are skipped.
+- Corrected maps directory handling for special resources. Sorry for the bad maps dirs all this time! Please delete the old ones from your EQ directory.
+
 ## [0.9.4] - 2025-12-01
 
 ### Added
