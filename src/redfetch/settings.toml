@@ -102,6 +102,21 @@ staff_pick = true
 opt_in = true
 staff_pick = true
 
+# scriber
+[LIVE.SPECIAL_RESOURCES.2391]
+opt_in = true
+staff_pick = true
+
+# bazaar / auction helper
+[LIVE.SPECIAL_RESOURCES.3001]
+opt_in = true
+staff_pick = true
+
+# skill skillup: spells and others
+[LIVE.SPECIAL_RESOURCES.2937]
+opt_in = true
+staff_pick = true
+
 # ========================================
 # TEST ENVIRONMENT SETTINGS
 # ========================================
@@ -182,6 +197,21 @@ staff_pick = true
 opt_in = true
 staff_pick = true
 
+# scriber
+[TEST.SPECIAL_RESOURCES.2391]
+opt_in = true
+staff_pick = true
+
+# bazaar / auction helper
+[TEST.SPECIAL_RESOURCES.3001]
+opt_in = true
+staff_pick = true
+
+# skill skillup: spells and others
+[TEST.SPECIAL_RESOURCES.2937]
+opt_in = true
+staff_pick = true
+
 # ========================================
 # EMULATOR ENVIRONMENT SETTINGS
 # ========================================
@@ -237,13 +267,23 @@ staff_pick = true
 opt_in = true
 staff_pick = true
 
-# lootly
-[EMU.SPECIAL_RESOURCES.2196]
+# boxhud
+[EMU.SPECIAL_RESOURCES.2088]
 opt_in = true
 staff_pick = true
 
-# boxhud
-[EMU.SPECIAL_RESOURCES.2088]
+# scriber
+[EMU.SPECIAL_RESOURCES.2391]
+opt_in = true
+staff_pick = true
+
+# bazaar / auction helper
+[EMU.SPECIAL_RESOURCES.3001]
+opt_in = true
+staff_pick = true
+
+# skill skillup: spells and others
+[EMU.SPECIAL_RESOURCES.2937]
 opt_in = true
 staff_pick = true
 
