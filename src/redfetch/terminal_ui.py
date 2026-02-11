@@ -39,6 +39,7 @@ from redfetch import processes
 from redfetch import utils
 from redfetch import meta
 from redfetch import sync
+from redfetch import desktop_shortcut
 
 # for dev mode, from root dir:
 # "hatch shell dev" 
@@ -496,6 +497,13 @@ class SettingsTab(ScrollableContainer):
                 ),
                 tooltip="Automatically run Very Vanilla MQ after successful updates.",
             )
+            if sys.platform == "win32":
+                yield Label("Desktop shortcut:", classes="left_middle")
+                yield Switch(
+                    id="desktop_shortcut",
+                    value=desktop_shortcut.get_shortcut_path().exists(),
+                    tooltip="Create or remove a Desktop shortcut to run redfetch.",
+                )
         with ItemGrid(id="maintenance_grid", classes="bordertitles"):
             yield Button(
                 "Clear Download Cache",
@@ -584,6 +592,18 @@ class SettingsTab(ScrollableContainer):
             with self.prevent(Select.Changed):
                 eq_maps_select.value = new_eq_maps_value
 
+        # Desktop shortcut state (Windows-only)
+        if sys.platform == "win32":
+            try:
+                shortcut_switch = self.query_one("#desktop_shortcut", Switch)
+            except Exception:
+                shortcut_switch = None
+            if shortcut_switch:
+                exists = desktop_shortcut.get_shortcut_path().exists()
+                if shortcut_switch.value != exists:
+                    with self.prevent(Switch.Changed):
+                        shortcut_switch.value = exists
+
     def update_vvmq_path_display(self) -> None:
         """Update the VVMQ path input based on the current environment."""
         vvmq_path = utils.get_vvmq_path()
@@ -652,6 +672,8 @@ class SettingsTab(ScrollableContainer):
             self.app.handle_toggle_auto_run_vvmq(event.value)
         elif event.switch.id == "auto_terminate_processes":
             self.app.handle_toggle_auto_terminate_processes(event.value)
+        elif event.switch.id == "desktop_shortcut":
+            self.app.handle_toggle_desktop_shortcut(event.value)
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "eq_maps":
@@ -1941,6 +1963,21 @@ class Redfetch(App):
     def cancel_redguides_interface(self):
         self.workers.cancel_group(self, "interface_group")
     
+    def handle_toggle_desktop_shortcut(self, value: bool) -> None:
+        """Ensure the Desktop shortcut is enabled/disabled (Windows-only)."""
+        if sys.platform != "win32":
+            self.notify("Desktop shortcuts are only supported on Windows.", severity="warning")
+            return
+
+        if value:
+            shortcut_path = desktop_shortcut.create_shortcut()
+            self.notify(f"Desktop shortcut created: {shortcut_path}")
+        else:
+            desktop_shortcut.remove_shortcut()
+            self.notify("Desktop shortcut removed.")
+
+        self._update_main_screen()
+
     def handle_reset_downloads(self) -> None:
         if self.is_updating:
             return

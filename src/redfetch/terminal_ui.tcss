@@ -206,7 +206,7 @@ Label {
 #dropdowns_grid {
     min-width: 30;
 }
-#dl_path_input, #eq_path_input, #vvmq_path_input, #auto_terminate_processes, #auto_run_vvmq {
+#dl_path_input, #eq_path_input, #vvmq_path_input, #auto_terminate_processes, #auto_run_vvmq, #desktop_shortcut {
     column-span: 3;
 }
 #myseq, #ionbc, #navmesh {

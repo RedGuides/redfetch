@@ -143,18 +143,20 @@ redfetch.exe config SPECIAL_RESOURCES.2218.opt_in false --server TEST
 Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 
 ## Trailmap
-- Re-write auth for Xenforo 2.4 (when available).
 - Add custom buttons for "fetch" tab.
 - Option: Close after update
 - Launch programs with cli options
 - Indicate when updated VV is available
 - Launch more than just mq (eqbcs, etc) upon update. 
 - Run from MQ
-- Integrate with the forums
+- Deeper integration with the forums
 
 ## Contributing
 
 I'd love help, conceptually and technically. I'm not a developer and this is my first big python script. 
+
+> [!NOTE]
+> This project is built with LLM assistance.
 
 To set up a [development environment](https://hatch.pypa.io/latest/environment/),
 

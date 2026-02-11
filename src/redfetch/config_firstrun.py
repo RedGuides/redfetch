@@ -362,59 +362,77 @@ def first_run_setup():
 
     # Handle RedGuides Utility paths
     utility_paths = get_rg_utility_paths()
-    if not utility_paths:
-        return config_dir
+    if utility_paths:
+        console.print("\n[bold cyan][italic]\"Lo, we have unearthed eld halls of the RedGuides Launcher. Wilt thou make use of this trove?\"[/italic][/bold cyan]")
 
-    console.print("\n[bold cyan][italic]\"Lo, we have unearthed eld halls of the RedGuides Launcher. Wilt thou make use of this trove?\"[/italic][/bold cyan]")
+        # Map utility paths to their corresponding TOML sections and resource IDs
+        path_mappings = {
+            "MQNextInstallLocation": ("LIVE.SPECIAL_RESOURCES.1974", "Very Vanilla MQ Live"),
+            "MQNextTestInstallLocation": ("TEST.SPECIAL_RESOURCES.2218", "Very Vanilla MQ Test"),
+            "EmuInstallLocation": ("EMU.SPECIAL_RESOURCES.60", "Very Vanilla MQ Emu"),
+            "MySeqLiveInstallLocation": ("LIVE.SPECIAL_RESOURCES.151", "MySEQ Live"),
+            "MySeqTestInstallLocation": ("TEST.SPECIAL_RESOURCES.164", "MySEQ Test")
+        }
 
-    # Map utility paths to their corresponding TOML sections and resource IDs
-    path_mappings = {
-        "MQNextInstallLocation": ("LIVE.SPECIAL_RESOURCES.1974", "Very Vanilla MQ Live"),
-        "MQNextTestInstallLocation": ("TEST.SPECIAL_RESOURCES.2218", "Very Vanilla MQ Test"),
-        "EmuInstallLocation": ("EMU.SPECIAL_RESOURCES.60", "Very Vanilla MQ Emu"),
-        "MySeqLiveInstallLocation": ("LIVE.SPECIAL_RESOURCES.151", "MySEQ Live"),
-        "MySeqTestInstallLocation": ("TEST.SPECIAL_RESOURCES.164", "MySEQ Test")
-    }
+        settings_updated = False
+        for path_type, path in utility_paths.items():
+            if path_type not in path_mappings:
+                continue
 
-    settings_updated = False
-    for path_type, path in utility_paths.items():
-        if path_type not in path_mappings:
-            continue
+            table_path_str, friendly_name = path_mappings[path_type]
 
-        table_path_str, friendly_name = path_mappings[path_type]
+            # Retrieve or create the current section in the TOML document
+            current_section = get_or_create_table(doc, table_path_str)
 
-        # Retrieve or create the current section in the TOML document
-        current_section = get_or_create_table(doc, table_path_str)
+            # Set opt_in = true since we detected an existing directory
+            if not current_section.get('opt_in', False):
+                current_section['opt_in'] = True
+                settings_updated = True
 
-        # Set opt_in = true since we detected an existing directory
-        if not current_section.get('opt_in', False):
-            current_section['opt_in'] = True
-            settings_updated = True
+            # Retrieve existing path from settings
+            existing_path = current_section.get('custom_path', None)
 
-        # Retrieve existing path from settings
-        existing_path = current_section.get('custom_path', None)
-
-        if existing_path:
-            if existing_path == path:
-                console.print(f"\n[green]{friendly_name} path is already set to the detected path:[/green] [yellow]{path}[/yellow]")
-                continue  # Skip to the next path
+            if existing_path:
+                if existing_path == path:
+                    console.print(f"\n[green]{friendly_name} path is already set to the detected path:[/green] [yellow]{path}[/yellow]")
+                    continue  # Skip to the next path
+                else:
+                    console.print(f"\n[cyan]Existing {friendly_name} path found in your settings:[/cyan] [yellow]{existing_path}[/yellow]")
+                    console.print(f"[yellow]{friendly_name} detected at:[/yellow]\n[cyan]{path}[/cyan]")
+                    prompt_msg = f"Do you want to overwrite the existing {friendly_name} path with the detected one?"
             else:
-                console.print(f"\n[cyan]Existing {friendly_name} path found in your settings:[/cyan] [yellow]{existing_path}[/yellow]")
-                console.print(f"[yellow]{friendly_name} detected at:[/yellow]\n[cyan]{path}[/cyan]")
-                prompt_msg = f"Do you want to overwrite the existing {friendly_name} path with the detected one?"
-        else:
-            console.print(f"\n[yellow]{friendly_name} detected at:[/yellow]\n[cyan]{path}[/cyan]")
-            prompt_msg = f"Use this as your {friendly_name} path?"
+                console.print(f"\n[yellow]{friendly_name} detected at:[/yellow]\n[cyan]{path}[/cyan]")
+                prompt_msg = f"Use this as your {friendly_name} path?"
 
-        if CustomConfirm.ask(prompt_msg):
-            current_section['custom_path'] = path
-            settings_updated = True
-            console.print(Panel(f"[bold green]{friendly_name}: {path}[/bold green]", expand=False))
-        else:
-            console.print(f"[cyan]No changes made to {friendly_name} path.[/cyan]")
+            if CustomConfirm.ask(prompt_msg):
+                current_section['custom_path'] = path
+                settings_updated = True
+                console.print(Panel(f"[bold green]{friendly_name}: {path}[/bold green]", expand=False))
+            else:
+                console.print(f"[cyan]No changes made to {friendly_name} path.[/cyan]")
 
-    if settings_updated:
-        save_config(settings_file, doc)
+        if settings_updated:
+            save_config(settings_file, doc)
+
+    # Windows-only: optional Desktop shortcut (ask last)
+    if platform.system() == "Windows":
+        from redfetch import desktop_shortcut
+
+        # Default "yes" for standalone exe users, "no" for pipx/terminal users.
+        default_choice = bool(os.environ.get("PYAPP"))
+
+        console.print(
+            "\n[bold cyan][italic]\"Wilt thou we set a signe upon thy Desktop, whereby redfetch may be call'd forth "
+            "when thou list?\"[/italic][/bold cyan]"
+        )
+        wants_shortcut = CustomConfirm.ask(
+            "Create Desktop shortcut?",
+            default=default_choice,
+        )
+
+        if wants_shortcut:
+            shortcut_path = desktop_shortcut.create_shortcut()
+            console.print(f"[green]Desktop shortcut created:[/green] {shortcut_path}")
 
     return config_dir
 
