@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-13
+
+### Added
+- Windows: optional Desktop shortcut, toggle it in the TUI settings.
+- Staff picks: Scriber, Bazaar/Auction Helper, and Skill Skillup are now on LIVE/TEST/EMU.
+
+### Fixed
+- Staff picks: Buttonmaster was pointing at the deleted beta resource, giving everyone a 404 log line each run.
+
 ## [1.0.0] - 2026-02-02
 
 ### Added

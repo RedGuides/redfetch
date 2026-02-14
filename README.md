@@ -151,6 +151,8 @@ Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 - Run from MQ
 - Deeper integration with the forums
 
+![Watchers on RedGuides](https://www.redguides.com/community/resources/redfetch.3177/watchers-sparkline?months=12&w=500&h=180)
+
 ## Contributing
 
 I'd love help, conceptually and technically. I'm not a developer and this is my first big python script. 
