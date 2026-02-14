@@ -67,6 +67,9 @@ Source_archive = "https://github.com/RedGuides/redfetch/archive/{commit_hash}.zi
 [tool.hatch.build.targets.wheel]
 packages = ["src/redfetch"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"redfetch.ico" = "redfetch/redfetch.ico"
+
 [tool.hatch.envs.dev]
 dependencies = [
   "textual-dev>=1.7.0",
