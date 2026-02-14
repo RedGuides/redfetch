@@ -173,7 +173,7 @@ opt_in = true
 staff_pick = true
 
 # buttonmaster
-[TEST.SPECIAL_RESOURCES.3003]
+[TEST.SPECIAL_RESOURCES.2174]
 opt_in = true
 staff_pick = true
 
@@ -253,7 +253,7 @@ opt_in = true
 staff_pick = true
 
 # buttonmaster
-[EMU.SPECIAL_RESOURCES.3003]
+[EMU.SPECIAL_RESOURCES.2174]
 opt_in = true
 staff_pick = true
 
