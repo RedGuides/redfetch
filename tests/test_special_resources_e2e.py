@@ -4,6 +4,7 @@ import tempfile
 import os
 import sqlite3
 from unittest.mock import patch, MagicMock, AsyncMock
+from types import SimpleNamespace
 
 from redfetch import main, config, store
 
@@ -18,9 +19,16 @@ def temp_db():
     
     # Use the temp directory as config_dir
     config.config_dir = temp_dir
+    config.settings = MagicMock()
+    config.settings.ENV = "LIVE"
+    config.settings.from_env.return_value = SimpleNamespace(
+        DOWNLOAD_FOLDER=temp_dir,
+        EQPATH="",
+        SPECIAL_RESOURCES={},
+    )
     
     # Initialize database
-    store.initialize_db(db_name)
+    store.initialize_db(db_name, "LIVE")
     
     yield db_path, db_name, temp_dir
     

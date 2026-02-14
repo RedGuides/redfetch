@@ -1362,6 +1362,7 @@ class Redfetch(App):
                 settings_tab = main_screen.query_one(SettingsTab)
                 settings_tab.update_vvmq_path_display()
                 self.notify("Download folder updated" if input_value else "Download folder cleared")
+                self._queue_signature_reconcile()
             except ValidationError as e:
                 self.notify(f"Invalid Download Folder: {e}", severity="error")
         elif input_id == "eq_path_input":
@@ -1374,6 +1375,7 @@ class Redfetch(App):
                     eq_maps_select = main_screen.query_one("#eq_maps", Select)
                     eq_maps_select.disabled = not bool(input_value)
                     eq_maps_select.value = self.get_current_eq_maps_value()
+                    self._queue_signature_reconcile()
 
                 except ValidationError as e:
                     self.notify(f"Invalid EverQuest Path: {e}", severity="error")
@@ -1385,6 +1387,7 @@ class Redfetch(App):
                 try:
                     config.update_setting(['SPECIAL_RESOURCES', vvmq_id, 'custom_path'], input_value, env=self.current_env)
                     self.notify("Very Vanilla MQ folder updated" if input_value else "Very Vanilla MQ folder cleared")
+                    self._queue_signature_reconcile()
                 except ValidationError as e:
                     self.notify(f"Invalid VVMQ Path: {e}", severity="error")
 
@@ -1424,6 +1427,22 @@ class Redfetch(App):
             self.handle_input_update(input_id, str(selected_path))
         else:
             self.notify("No directory selected", severity="warning")
+
+    def _queue_signature_reconcile(self) -> None:
+        if self.is_updating:
+            return
+        self._reconcile_signature_worker()
+
+    @work(exclusive=True, group="signature_reconcile")
+    async def _reconcile_signature_worker(self) -> None:
+        db_name = f"{self.current_env}_resources.db"
+        result = await asyncio.to_thread(store.reconcile_install_signature, db_name, self.current_env)
+        if result:
+            if result.get("global_reset"):
+                message = f"Cache cleared for {self.current_env}; next update will re-download into the new path."
+            else:
+                message = f"Cache cleared for {self.current_env}; next update will re-download updated destinations."
+            self.notify(message)
 
     #
     # Toggle handlers
@@ -1863,7 +1882,7 @@ class Redfetch(App):
     async def run_synchronization(self, resource_ids=None, navmesh_override=None):
         try:
             db_name = f"{self.current_env}_resources.db"
-            await asyncio.to_thread(store.initialize_db, db_name)
+            await asyncio.to_thread(store.initialize_db, db_name, self.current_env)
             db_path = store.get_db_path(db_name)
             headers = await api.get_api_headers()
             if resource_ids:

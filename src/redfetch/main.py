@@ -59,7 +59,7 @@ def initialize_db_only():
     auth.initialize_keyring()
     auth.authorize()
     db_name = f"{config.settings.ENV}_resources.db"
-    store.initialize_db(db_name)
+    store.initialize_db(db_name, config.settings.ENV)
     db_path = store.get_db_path(db_name)
     return db_name, db_path
 
@@ -349,6 +349,9 @@ def config_command(
     config.initialize_config()
     setting_path_list = path.split('.')
     config.update_setting(setting_path_list, value, server.value if server else None)
+    settings_env = server.value if server else config.settings.ENV
+    db_name = f"{settings_env}_resources.db"
+    store.reconcile_install_signature(db_name, settings_env)
     console.print(f"Updated setting {path} to {value}{' for server ' + server.value if server else ''}.")
 
 

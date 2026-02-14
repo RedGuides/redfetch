@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+import json
 import os
 import sqlite3
 import aiosqlite
@@ -6,6 +7,7 @@ import aiosqlite
 from redfetch import config
 from redfetch.models import DownloadTask, Resource
 from redfetch import meta
+from redfetch import utils
 
 # Unified schema version marker
 SCHEMA_VERSION = 1
@@ -44,15 +46,19 @@ def get_db_path(db_name: str) -> str:
     return os.path.join(_get_cache_dir(), db_name)
 
 
-def initialize_db(db_name: str) -> None:
+def initialize_db(db_name: str, settings_env: str):
     """Ensure unified schema; reset once to unified schema if version is outdated."""
     with get_db_connection(db_name) as conn:
         cursor = conn.cursor()
-        _ensure_metadata(cursor)
-        _ensure_downloads_table(cursor)
-        _normalize_parent_ids(cursor)
-        _ensure_indexes(cursor)
-        _ensure_navmesh_tables(cursor)
+        _initialize_schema(cursor)
+        return _reconcile_install_signature(cursor, settings_env)
+
+
+def reconcile_install_signature(db_name: str, settings_env: str):
+    with get_db_connection(db_name) as conn:
+        cursor = conn.cursor()
+        _initialize_schema(cursor)
+        return _reconcile_install_signature(cursor, settings_env)
 
 
 def _ensure_downloads_table(cursor) -> None:
@@ -99,12 +105,117 @@ def _ensure_metadata(cursor) -> None:
     if 'schema_version' not in cols:
         cursor.execute("ALTER TABLE metadata ADD COLUMN schema_version INTEGER")
         cursor.execute("UPDATE metadata SET schema_version=0 WHERE id=1")
+    if 'install_signature' not in cols:
+        cursor.execute("ALTER TABLE metadata ADD COLUMN install_signature TEXT")
     # Check current version and reset schema if outdated
     cursor.execute("SELECT schema_version FROM metadata WHERE id=1")
     row = cursor.fetchone()
     current = int(row[0]) if row and row[0] is not None else 0
     if current < SCHEMA_VERSION:
         _reset_to_unified_schema(cursor)
+
+
+def _initialize_schema(cursor) -> None:
+    _ensure_metadata(cursor)
+    _ensure_downloads_table(cursor)
+    _normalize_parent_ids(cursor)
+    _ensure_indexes(cursor)
+    _ensure_navmesh_tables(cursor)
+
+
+def _get_vvmq_id_for_env(settings_env: str) -> str | None:
+    for resource_id, env in config.VANILLA_MAP.items():
+        if env.upper() == settings_env.upper():
+            return str(resource_id)
+    return None
+
+
+def _compute_install_signature(settings_env: str) -> dict:
+    settings_for_env = config.settings.from_env(settings_env)
+    download_folder = os.path.normpath(settings_for_env.DOWNLOAD_FOLDER)
+    eqpath = os.path.normpath(settings_for_env.EQPATH) if settings_for_env.EQPATH else ""
+
+    vvmq_id = _get_vvmq_id_for_env(settings_env)
+    vvmq_path = None
+    if vvmq_id:
+        vvmq_resource = settings_for_env.SPECIAL_RESOURCES.get(vvmq_id)
+        vvmq_path = utils.resolve_special_destination(vvmq_resource, download_folder)
+
+    base_path = vvmq_path if vvmq_path else download_folder
+
+    special_destinations: dict[str, str] = {}
+    for resource_id, resource_info in settings_for_env.SPECIAL_RESOURCES.items():
+        destination = utils.resolve_special_destination(resource_info, download_folder)
+        if destination:
+            special_destinations[str(resource_id)] = destination
+
+    return {
+        "base_path": base_path,
+        "download_folder": download_folder,
+        "eqpath": eqpath,
+        "special_destinations": special_destinations,
+    }
+
+
+def _load_install_signature(cursor) -> dict | None:
+    cursor.execute("SELECT install_signature FROM metadata WHERE id = 1")
+    row = cursor.fetchone()
+    if not row or row[0] is None:
+        return None
+    return json.loads(row[0])
+
+
+def _save_install_signature(cursor, signature: dict) -> None:
+    cursor.execute(
+        "UPDATE metadata SET install_signature = ? WHERE id = 1",
+        (json.dumps(signature, sort_keys=True),),
+    )
+
+
+def _diff_special_destinations(before: dict | None, after: dict) -> list[str]:
+    before_map = before.get("special_destinations", {}) if before else {}
+    after_map = after.get("special_destinations", {})
+    changed = []
+    for resource_id in set(before_map) | set(after_map):
+        if before_map.get(resource_id) != after_map.get(resource_id):
+            changed.append(str(resource_id))
+    return sorted(changed)
+
+
+def _reset_download_dates_for_special_resource(cursor, resource_id: str) -> None:
+    rid_int = int(resource_id)
+    cursor.execute(
+        "UPDATE downloads SET version_local=0 WHERE parent_id = 0 AND resource_id = ?",
+        (rid_int,),
+    )
+    cursor.execute(
+        "UPDATE downloads SET version_local=0 WHERE parent_id = ?",
+        (rid_int,),
+    )
+
+
+def _reconcile_install_signature(cursor, settings_env: str) -> dict | None:
+    before = _load_install_signature(cursor)
+    after = _compute_install_signature(settings_env)
+
+    if before is None:
+        _save_install_signature(cursor, after)
+        return None
+
+    if before == after:
+        return None
+
+    if before.get("base_path") != after.get("base_path"):
+        reset_download_dates(cursor)
+        _save_install_signature(cursor, after)
+        return {"global_reset": True, "changed_ids": []}
+
+    changed_ids = _diff_special_destinations(before, after)
+    for resource_id in changed_ids:
+        _reset_download_dates_for_special_resource(cursor, resource_id)
+
+    _save_install_signature(cursor, after)
+    return {"global_reset": False, "changed_ids": changed_ids}
 
 
 def _ensure_indexes(cursor) -> None:

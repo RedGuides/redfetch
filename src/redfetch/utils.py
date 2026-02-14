@@ -58,6 +58,19 @@ def ensure_directory_exists(path):
         raise
 
 
+def resolve_special_destination(special_resource: dict, download_folder: str) -> str | None:
+    """Resolve a special resource destination path without side effects."""
+    if not special_resource:
+        return None
+    custom_path = special_resource.get("custom_path")
+    if custom_path:
+        return os.path.normpath(os.path.realpath(custom_path))
+    default_path = special_resource.get("default_path")
+    if default_path:
+        return os.path.normpath(os.path.join(download_folder, default_path))
+    return None
+
+
 def get_special_resource_path(resource_id):
     """Get the path for special resources."""
     special_resource = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES.get(resource_id)
