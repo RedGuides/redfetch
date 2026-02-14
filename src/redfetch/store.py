@@ -372,19 +372,6 @@ def _normalize_parent_ids(cursor) -> None:
     cursor.execute("UPDATE downloads SET parent_id=0 WHERE parent_id IS NULL")
 
 
-def get_root_version_local(cursor, resource_id: str) -> int | None:
-    """Return version_local for a root (parent_id=0) resource, or None if absent."""
-    try:
-        cursor.execute(
-            "SELECT version_local FROM downloads WHERE parent_id = 0 AND resource_id = ?",
-            (int(resource_id),),
-        )
-        row = cursor.fetchone()
-        return row[0] if row else None
-    except Exception:
-        return None
-
-
 # ===== Async Database Operations =====
 
 async def apply_updates(db_path: str, updates: list[tuple[str, int, bool, str | None]]) -> None:

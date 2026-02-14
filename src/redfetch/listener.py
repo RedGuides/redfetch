@@ -30,7 +30,7 @@ async def cors_middleware(request: web.Request, handler):
 
 
 async def _get_root_version_local_async(db_name: str, resource_id: str) -> Optional[int]:
-    """Async equivalent of store.get_root_version_local for roots (parent_id=0)."""
+    """Async helper to fetch root version_local (parent_id=0)."""
     db_path = store.get_db_path(db_name)
     try:
         async with aiosqlite.connect(db_path, timeout=30.0) as conn:
@@ -168,7 +168,6 @@ async def handle_category_map(request: web.Request) -> web.Response:
 async def handle_special_resource_ids(request: web.Request) -> web.Response:
     status = compute_special_status(None)
     special_resource_ids = [int(rid) for rid, info in status.items() if info["is_special"]]
-    print(f"special_resource_ids: {special_resource_ids}")
     return web.json_response(special_resource_ids)
 
 
