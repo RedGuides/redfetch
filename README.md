@@ -27,7 +27,7 @@ python -m pipx ensurepath
 pipx install redfetch
 ```
 
-When you open a new terminal window, you'll be able to run redfetch by typing `redfetch` from the command line. 
+When you open a new terminal window you'll be able to run redfetch by typing `redfetch` from the command line. 
 
 </details>
 
