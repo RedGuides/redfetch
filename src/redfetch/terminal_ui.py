@@ -2027,7 +2027,7 @@ class Redfetch(App):
     async def _prepare_redguides_interface_worker(self) -> bool:
         try:
             db_name = f"{self.current_env}_resources.db"
-            await asyncio.to_thread(store.initialize_db, db_name)
+            await asyncio.to_thread(store.initialize_db, db_name, self.current_env)
             headers = await api.get_api_headers()
             settings = config.settings.from_env(self.current_env)
             special_resources = settings.SPECIAL_RESOURCES
