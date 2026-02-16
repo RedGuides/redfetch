@@ -965,7 +965,7 @@ class AccountTab(ScrollableContainer):
 
     @on(Button.Pressed, "#btn_account")
     def handle_btn_account_pressed(self, event: Button.Pressed) -> None:
-        self.app.action_link("https://www.redguides.com/amember/member")
+        self.app.action_link("https://www.redguides.com/community/amember-sso/?to=member")
 
     @on(Button.Pressed, "#btn_licensed")
     def handle_btn_licensed_pressed(self, event: Button.Pressed) -> None:
@@ -1127,7 +1127,7 @@ class Redfetch(App):
         yield SystemCommand(
             "Manage Account",
             "Manage your RedGuides 'Level 2' subscription",
-            lambda: self.action_link("https://www.redguides.com/amember/member"),
+            lambda: self.action_link("https://www.redguides.com/community/amember-sso/?to=member"),
             discover=True,
         )
         yield SystemCommand(
@@ -1169,7 +1169,7 @@ class Redfetch(App):
         yield SystemCommand(
             "Upgrade to Level 2",
             "Upgrade your RedGuides account to level 2",
-            lambda: self.action_link("https://www.redguides.com/amember/member"),
+            lambda: self.action_link("https://www.redguides.com/community/amember-sso/?to=member"),
             discover=False,
         )
 
@@ -2103,7 +2103,7 @@ class Redfetch(App):
         else:
             # Still level 1, send them to the upgrade page
             self.notify("You're still level 1. Opening upgrade page...", severity="warning")
-            self.action_link("https://www.redguides.com/amember/member")
+            self.action_link("https://www.redguides.com/community/amember-sso/?to=member")
 
 
 # display print statements in the log widget
