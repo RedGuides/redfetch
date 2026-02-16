@@ -115,7 +115,9 @@ Label {
 
 #fetch_log_container {
     layout: grid;
-    grid-rows: auto 1fr;
+    /* Fixed 1-line toolbar row.
+       Avoids Rich/Textual measuring content with a wrap width of 0 during rapid resizes. */
+    grid-rows: 1 1fr;
     grid-gutter: 0;
     min-height: 10;
 }
@@ -124,8 +126,11 @@ Label {
     layout: grid;
     background: $secondary-background-darken-2;
     grid-size: 5;
-    grid-columns: 6fr 1fr 1fr 4fr 4fr;
-    grid-rows: auto;
+    /* The prev/next buttons can end up 2-cells wide with fractional columns.
+       Rich will raise `ValueError: range() arg 3 must not be zero` if it is asked to wrap at width 0.
+       Give them fixed widths and a fixed row height to keep content-measurement safe during resizes. */
+    grid-columns: 6fr 3 3 4fr 4fr;
+    grid-rows: 1;
 }
 
 #copy_log, #clear_log, #log_search {
@@ -144,6 +149,14 @@ Label {
     color: $text-muted;
     background: $secondary-background-darken-1 39%;
     border: none;
+    text-wrap: nowrap;
+    text-overflow: clip;
+    content-align: center middle;
+}
+
+#copy_log, #clear_log {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }
 
 #fetch_log {
