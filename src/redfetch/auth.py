@@ -22,6 +22,7 @@ import keyring  # for storing tokens (secrets only)
 from keyring.errors import NoKeyringError
 
 # Local
+from redfetch import config
 from redfetch import net
 
 # Constants
@@ -38,21 +39,15 @@ _REFRESH_CODE_VERIFIER = "refresh"  # XF 2.3 requires a non-empty code_verifier 
 
 
 def _get_setting(key: str, default=None):
-    """Get a setting from env first, then Dynaconf (if initialized)."""
+    """Get a setting from env first, then initialized Dynaconf settings."""
     env_key = f"REDFETCH_{key}"
     env_val = os.environ.get(env_key)
     if env_val not in (None, ""):
         return env_val
 
-    try:
-        from redfetch import config
-
-        settings = getattr(config, "settings", None)
-        if settings is not None:
-            val = settings.get(key, default)
-            return default if val in ("", None) else val
-    except Exception:
-        pass
+    if config.settings is not None:
+        val = config.settings.get(key, default)
+        return default if val in ("", None) else val
 
     return default
 
@@ -391,12 +386,8 @@ def initialize_keyring():
 
 if __name__ == "__main__":
     initialize_keyring()
-    # Initialize config lazily if invoked directly, so this can be used as a standalone script.
-    try:
-        from redfetch import config
-
-        if getattr(config, "settings", None) is None:
+    if not os.environ.get("REDGUIDES_API_KEY"):
+        # Initialize config lazily if invoked directly, so this can be used as a standalone script.
+        if config.settings is None:
             config.initialize_config()
-    except Exception:
-        pass
     authorize()
