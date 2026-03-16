@@ -185,16 +185,26 @@ jobs:
             --set-icon "redfetch.ico"
 
       - name: Sign Executable
-        uses: dlemstra/code-sign-action@v1
-        with:
-          certificate: '${{ secrets.CERTIFICATE_PFX }}'
-          password: '${{ secrets.CERTIFICATE_PFX_PASSWORD }}'
-          files: |
-            redfetch.exe
-          description: 'redfetch executable'
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.CERTIFICATE_PFX }}"))
+
+          $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits" -Recurse -Filter "signtool.exe" |
+            Where-Object { $_.FullName -match "\\x64\\" } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $signtool) { throw "signtool.exe not found" }
+          Write-Host "Using signtool: $signtool"
+
+          & $signtool sign /f $certPath /p "${{ secrets.CERTIFICATE_PFX_PASSWORD }}" /fd sha256 /tr "http://timestamp.digicert.com" /td sha256 /v redfetch.exe
+          & $signtool verify /pa /v redfetch.exe
+
+          Remove-Item $certPath
 
       - name: Upload Executable Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: redfetch.exe
           path: redfetch.exe
@@ -207,7 +217,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v6
       - name: Download Executable Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: redfetch.exe
       - name: Redguides Publish
