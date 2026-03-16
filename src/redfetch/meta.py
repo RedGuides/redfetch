@@ -507,13 +507,16 @@ def uninstall():
 
 def generate_removal_commands(paths):
     """Generate OS-specific commands to remove the given directories."""
+    def deepest_first(path: str) -> tuple[int, str]:
+        depth = path.replace("\\", "/").rstrip("/").count("/")
+        return (-depth, path.casefold())
+
     system = platform.system()
     if system == 'Windows':
         # Generate PowerShell commands
         console.print("[bold]These directories may be removed manually after you make sure there's nothing you need from them, you can do so by running the following PowerShell commands:[/bold]\n")
         commands = []
-        for path in sorted(paths):
-            # Escape quotes and handle special characters
+        for path in sorted(paths, key=deepest_first):
             escaped_path = path.replace("'", "''")
             command = f"Remove-Item -LiteralPath '{escaped_path}' -Recurse -Force"
             commands.append(command)
@@ -522,8 +525,7 @@ def generate_removal_commands(paths):
         # Assuming Unix-like system
         console.print("[bold]You can remove these directories by running the following commands in your terminal:[/bold]\n")
         commands = []
-        for path in sorted(paths):
-            # Escape single quotes
+        for path in sorted(paths, key=deepest_first):
             escaped_path = path.replace("'", "'\\''")
             command = f"rm -rf '{escaped_path}'"
             commands.append(command)
