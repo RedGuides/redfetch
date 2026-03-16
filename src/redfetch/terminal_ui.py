@@ -1526,7 +1526,7 @@ class Redfetch(App):
             self.notify("MySEQ is not available for the current environment", severity="error")
 
     def update_eq_maps_settings(self, selected_value: str | None) -> None:
-        if selected_value is None or selected_value == Select.BLANK:
+        if selected_value is None or selected_value == Select.NULL:
             brewall_opt_in = False
             good_opt_in = False
         else:
@@ -1536,16 +1536,16 @@ class Redfetch(App):
         config.update_setting(['SPECIAL_RESOURCES', '153', 'opt_in'], brewall_opt_in, env=self.current_env)
         config.update_setting(['SPECIAL_RESOURCES', '303', 'opt_in'], good_opt_in, env=self.current_env)
 
-        if selected_value is None or selected_value == Select.BLANK:
+        if selected_value is None or selected_value == Select.NULL:
             self.notify("EQ Maps settings cleared")
         else:
             self.notify(f"EQ Maps settings updated: Brewall's Maps: {brewall_opt_in}, Good's Maps: {good_opt_in}")
 
     def get_current_eq_maps_value(self) -> str:
         if not self.eq_path:
-            return Select.BLANK
+            return Select.NULL
         eq_maps_status = utils.get_eq_maps_status()
-        return eq_maps_status if eq_maps_status else Select.BLANK
+        return eq_maps_status if eq_maps_status else Select.NULL
 
     #
     # File/folder operations
