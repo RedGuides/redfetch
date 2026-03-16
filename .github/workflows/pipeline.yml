@@ -27,13 +27,13 @@ jobs:
       package-version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0 # Ensure full Git history is available for versioning
           fetch-tags: true
 
       - name: Set Up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.x'
 
@@ -85,7 +85,7 @@ jobs:
       project-version: ${{ steps.set_version.outputs.version }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Ensure full Git history is available for versioning
 
@@ -110,7 +110,7 @@ jobs:
           Get-Content $env:GITHUB_ENV
 
       - name: Set Up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.x'
 
@@ -205,7 +205,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Download Executable Artifact
         uses: actions/download-artifact@v4
         with:
