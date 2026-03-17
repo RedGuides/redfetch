@@ -1,7 +1,6 @@
 # Standard
 import os
 import platform
-import sys
 import json
 
 # Third-party
@@ -300,7 +299,7 @@ def first_run_setup():
     elif any(word in response for word in ["no", "nope", "nah", "nay"]) or response == "n":
         console.print("\n[bold red]The wizards point to the sky with their longest finger ... \"BEGONE!\"[/bold red]")
         Prompt.ask("\nPress Enter to continue")
-        sys.exit(1)
+        raise SystemExit(1)
     elif any(phrase in response for phrase in ["xyzzy", "plugh", "hello sailor", "mailbox", "east", "leave house", "grue"]):
         console.print(
             "\nAs you utter the ancient words, the wizards eyes widen."
@@ -318,7 +317,7 @@ def first_run_setup():
     else:
         console.print("\n[bold red]The wizards shake their heads sadly, \"Your riddle eludes us. Perhaps you should go east.\"[/bold red]")
         Prompt.ask("\nPress Enter to continue")
-        sys.exit(1)
+        raise SystemExit(1)
     
     config_dir = setup_directories()
     create_first_run_flag(default_config_dir, config_dir)

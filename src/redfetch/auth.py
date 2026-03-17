@@ -9,7 +9,6 @@ redfetch supports two auth modes:
 import base64
 import hashlib
 import os
-import sys
 import time
 import webbrowser
 from datetime import datetime, timedelta
@@ -91,7 +90,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Authorization successful. You can close this tab.")
 
 
-def first_authorization(client_id: str, client_secret: str | None, *, scope: str, redirect_uri: str) -> bool:
+def first_authorization(client_id: str, client_secret: str | None, *, scope: str, redirect_uri: str) -> None:
     """Perform auth via browser and cache tokens.
 
     Uses Authorization Code + PKCE (S256) as required by XF for public clients.
@@ -145,14 +144,16 @@ def first_authorization(client_id: str, client_secret: str | None, *, scope: str
     headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
     response = httpx.post(TOKEN_ENDPOINT, headers=headers, data=payload, timeout=10.0)
     if not response.is_success:
-        print("Failed to retrieve tokens.")
-        print(response.text)
-        return False
+        details = response.text.strip()
+        if details:
+            raise RuntimeError(f"Failed to retrieve tokens.\n{details}")
+        raise RuntimeError("Failed to retrieve tokens.")
 
     token_data = response.json()
     if token_data.get("error"):
-        print(f"OAuth token error: {token_data.get('error')} {token_data.get('error_description', '')}".strip())
-        return False
+        raise RuntimeError(
+            f"OAuth token error: {token_data.get('error')} {token_data.get('error_description', '')}".strip()
+        )
 
     # Step 5: Cache tokens and basic user info
     store_tokens_in_keyring(token_data)
@@ -163,8 +164,6 @@ def first_authorization(client_id: str, client_secret: str | None, *, scope: str
         _cache_user_info(token_data.get("access_token"))
     except Exception:
         pass
-
-    return True
 
 
 def _cache_user_info(access_token: str | None) -> None:
@@ -195,11 +194,7 @@ def authorize():
     redirect_uri = _get_setting("OAUTH_REDIRECT_URI", DEFAULT_REDIRECT_URI)
 
     if not client_id:
-        print("OAuth client is not configured.")
-        print("Set one of the following:")
-        print("  - Environment variable: REDFETCH_OAUTH_CLIENT_ID")
-        print("  - Or add to your settings.local.toml: OAUTH_CLIENT_ID = \"...\"")
-        sys.exit(1)
+        raise RuntimeError("OAuth client is not configured.")
 
     data = get_cached_tokens()
 
@@ -216,9 +211,7 @@ def authorize():
 
     # Fall back to interactive authorization
     print("Performing full authorization...")
-    if not first_authorization(client_id, client_secret, scope=scope, redirect_uri=redirect_uri):
-        print("Authorization failed.")
-        sys.exit(1)
+    first_authorization(client_id, client_secret, scope=scope, redirect_uri=redirect_uri)
 
 
 def _port_from_redirect_uri(redirect_uri: str) -> int:
@@ -372,16 +365,18 @@ def initialize_keyring():
         # Attempt to use the keyring to trigger any potential errors
         keyring.get_password('test_service', 'test_user')
     except (NoKeyringError, ModuleNotFoundError):
-        print("No suitable keyring backend found, probably because you're not on Windows.")
-        print("Please install `keyrings.alt` by running:")
-        print("    pip install keyrings.alt")
-        print("Then restart the application.")
-        sys.exit(1)
+        raise RuntimeError(
+            "No suitable keyring backend found, probably because you're not on Windows.\n\n"
+            "Please install `keyrings.alt` by running:\n"
+            "    pip install keyrings.alt\n\n"
+            "Then restart the application."
+        )
     except Exception as e:
         # Catch any other exceptions that may occur and handle them gracefully
-        print(f"An error occurred while initializing keyring: {e}")
-        print("Please ensure that a suitable keyring backend is available.")
-        sys.exit(1)
+        raise RuntimeError(
+            f"An error occurred while initializing keyring: {e}\n\n"
+            "Please ensure that a suitable keyring backend is available."
+        ) from e
 
 
 if __name__ == "__main__":

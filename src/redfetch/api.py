@@ -30,7 +30,7 @@ async def get_api_headers():
         if not user_id:
             user_id = await fetch_user_id_from_api(api_key)
             if not user_id:
-                raise Exception("Unable to retrieve user ID using the provided API key.")
+                raise RuntimeError("Unable to retrieve user ID using the provided API key.")
         headers['XF-Api-User'] = str(user_id)
         return headers
 
@@ -50,10 +50,7 @@ async def get_api_headers():
             redirect_uri = os.environ.get("REDFETCH_OAUTH_REDIRECT_URI") or (settings.get("OAUTH_REDIRECT_URI") if settings else None) or "http://127.0.0.1:62897/"
 
             if not client_id:
-                raise Exception(
-                    "OAuth refresh token is present but OAUTH_CLIENT_ID is not configured. "
-                    "Set REDFETCH_OAUTH_CLIENT_ID (or OAUTH_CLIENT_ID in settings.local.toml) and try again."
-                )
+                raise RuntimeError("OAuth client is not configured.")
 
             refreshed = await asyncio.to_thread(
                 auth.refresh_token,
@@ -66,12 +63,12 @@ async def get_api_headers():
                 if access_token:
                     return {"Authorization": f"Bearer {access_token}"}
 
-            raise Exception("OAuth token refresh failed. Please run `redfetch logout` and authorize again.")
+            raise RuntimeError("OAuth token refresh failed. Please run `redfetch logout` and authorize again.")
 
         # Access token exists but is expired/missing expiry and there's no refresh token available.
-        raise Exception("OAuth access token is expired and no refresh token is available. Please authorize again.")
+        raise RuntimeError("OAuth access token is expired and no refresh token is available. Please authorize again.")
     
-    raise Exception(
+    raise RuntimeError(
         "Not authenticated. Set REDGUIDES_API_KEY (and optionally REDGUIDES_USER_ID), "
         "or authorize via OAuth."
     )
@@ -336,7 +333,7 @@ async def get_username():
         username = await fetch_username(api_key)
         if username != "Unknown":
             return username
-        raise Exception("Unable to retrieve username using the provided API key.")
+        raise RuntimeError("Unable to retrieve username using the provided API key.")
 
     # Prefer OAuth bearer token if present (including refresh-only sessions)
     access_token = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
@@ -349,6 +346,6 @@ async def get_username():
             set_username(me["username"])
             set_user_id(me["user_id"])
             return me["username"]
-        raise Exception("Unable to retrieve username using the stored OAuth token.")
+        raise RuntimeError("Unable to retrieve username using the stored OAuth token.")
 
-    raise Exception("Username not found. Set REDGUIDES_API_KEY or authorize via OAuth.")
+    raise RuntimeError("Username not found. Set REDGUIDES_API_KEY or authorize via OAuth.")

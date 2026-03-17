@@ -25,7 +25,7 @@ from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select
 from textual.events import Print
 from textual.containers import ScrollableContainer, Center, CenterMiddle, Grid, ItemGrid, Vertical
 from textual.reactive import reactive
-from textual.worker import Worker, WorkerState
+from textual.worker import Worker, WorkerState, WorkerFailed
 from textual.screen import ModalScreen, Screen
 from textual.geometry import Offset
 from textual.selection import Selection
@@ -40,6 +40,7 @@ from redfetch import utils
 from redfetch import meta
 from redfetch import sync
 from redfetch import desktop_shortcut
+from redfetch.runtime_errors import display_fatal_error
 
 # for dev mode, from root dir:
 # "hatch shell dev" 
@@ -1102,6 +1103,18 @@ class Redfetch(App):
         ("N", "search_prev"),
     ]
 
+    def _handle_exception(self, error: Exception) -> None:
+        """Show pyapp users a MessageBox when Textual crashes fatally."""
+        # Textual may raise WorkerFailed wrappers; show the underlying error when available.
+        root_error = getattr(error, "error", error) if isinstance(error, WorkerFailed) else error
+
+        # Avoid repeated dialogs if follow-on exceptions happen during shutdown.
+        if not self._exit and not getattr(self, "_fatal_dialog_shown", False):
+            self._fatal_dialog_shown = True
+            display_fatal_error(root_error)
+
+        super()._handle_exception(error)
+
     def get_system_commands(self, screen: Screen):
         """Add Redfetch-specific commands to the command palette."""
         yield from super().get_system_commands(screen)
@@ -2032,8 +2045,7 @@ class Redfetch(App):
             settings = config.settings.from_env(self.current_env)
             special_resources = settings.SPECIAL_RESOURCES
             category_map = config.CATEGORY_MAP
-        except Exception as exc:
-            self.notify(f"Failed to start RedGuides Interface: {exc}", severity="error")
+        except Exception:
             raise
         else:
             self._redguides_interface_worker(
@@ -2082,6 +2094,10 @@ class Redfetch(App):
     @work(exclusive=True, group="ding_check_group")
     async def _check_ding_level_worker(self) -> None:
         """Worker to check level 2 status and update UI or redirect."""
+        # Dev-only crash injection to verify pyapp crash dialog behavior.
+        if os.environ.get("REDFETCH_CRASH_TEST") == "ding":
+            raise RuntimeError("Intentional crash test from _check_ding_level_worker.")
+
         main_screen = self._get_main_screen()
         headers = await api.get_api_headers()
         

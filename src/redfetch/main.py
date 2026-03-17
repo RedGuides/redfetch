@@ -22,6 +22,7 @@ from redfetch import utils
 from redfetch import push
 from redfetch import sync as sync_pipeline
 from redfetch import store
+from redfetch.runtime_errors import exit_with_fatal_error
 
 
 app = typer.Typer(
@@ -640,11 +641,18 @@ def root(
 # ============================================================================
 
 def main():
-    # Launch TUI when no arguments are provided
-    if len(sys.argv) == 1:
-        run_tui()
-        return
-    app()
+    try:
+        # Launch TUI when no arguments are provided
+        if len(sys.argv) == 1:
+            run_tui()
+            return
+        app()
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        exit_with_fatal_error(exc)
 
 
 if __name__ == "__main__":

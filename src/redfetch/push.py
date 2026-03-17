@@ -2,12 +2,12 @@ import os
 import asyncio
 import httpx
 import keepachangelog
+import typer
 from md2bbcode.main import process_readme
 
 from redfetch import api
 from redfetch.net import BASE_URL
 from redfetch import auth
-import sys
 
 XF_API_URL = f'{BASE_URL}/api'
 URI_MESSAGE = f'{XF_API_URL}/resource-updates'
@@ -220,32 +220,27 @@ def handle_cli(args):
 
     if not any([args.description, args.version, args.message, args.file]):
         print("At least one option (--description, --version, --message, or --file) must be specified.")
-        sys.exit(1)
+        raise typer.Exit(code=1)
 
     if args.message and not args.version:
         print("The --message option requires --version to be specified.")
-        sys.exit(1)
+        raise typer.Exit(code=1)
 
-    try:
-        # Ensure the user is authorized
-        auth.initialize_keyring()
-        auth.authorize()
+    # Ensure the user is authorized
+    auth.initialize_keyring()
+    auth.authorize()
 
-        # Blocking call is fine here; push is a short-lived CLI operation.
-        resource = asyncio.run(api.get_resource_details(args.resource_id))
-        resource_id = resource['resource_id']
+    # Blocking call is fine here; push is a short-lived CLI operation.
+    resource = asyncio.run(api.get_resource_details(args.resource_id))
+    resource_id = resource['resource_id']
 
-        if args.description:
-            update_description(resource_id, args.description, domain=args.domain)
+    if args.description:
+        update_description(resource_id, args.description, domain=args.domain)
 
-        if args.version and args.message:
-            message = generate_version_message(args)
-            version_info = {'version_string': args.version, 'message': message}
-            update_resource(resource_id, version_info, args.file)
-        elif args.file:
-            # Allow publishing a version with a file but no changelog message.
-            add_xf_attachment(resource_id, args.file, args.version)
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        sys.exit(1)
+    if args.version and args.message:
+        message = generate_version_message(args)
+        version_info = {'version_string': args.version, 'message': message}
+        update_resource(resource_id, version_info, args.file)
+    elif args.file:
+        # Allow publishing a version with a file but no changelog message.
+        add_xf_attachment(resource_id, args.file, args.version)
