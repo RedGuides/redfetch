@@ -36,17 +36,27 @@ def temp_db():
         pass
 
 
-def _make_resource(resource_id: int, title: str, filename: str) -> dict:
+def _make_resource(
+    resource_id: int,
+    title: str,
+    filename: str,
+    *,
+    version_id: int | None = None,
+    file_id: int | None = None,
+) -> dict:
+    version_id = resource_id if version_id is None else version_id
+    file_id = resource_id * 10 if file_id is None else file_id
     return {
         'resource_id': resource_id,
         'title': title,
         'Category': {'parent_category_id': 11},
         'current_files': [{
-            'id': resource_id * 10,
+            'id': file_id,
             'filename': filename,
             'download_url': f'https://example.com/{filename}',
             'hash': 'abc123',
         }],
+        'current_version': {'version_id': version_id},
     }
 
 

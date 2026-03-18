@@ -11,7 +11,14 @@ def mock_conn():
     return MagicMock()
 
 
-def make_license(resource_id: int, parent_category_id: int, title: str = "Licensed Resource") -> dict:
+def make_license(
+    resource_id: int,
+    parent_category_id: int,
+    title: str = "Licensed Resource",
+    *,
+    version_id: int = 101,
+    file_id: int = 1001,
+) -> dict:
     return {
         'active': True,
         'start_date': '2024-01-01',
@@ -22,11 +29,12 @@ def make_license(resource_id: int, parent_category_id: int, title: str = "Licens
             'title': title,
             'Category': {'parent_category_id': parent_category_id},
             'current_files': [{
-                'id': 101,
+                'id': file_id,
                 'filename': 'package.zip',
                 'download_url': 'https://example.com/file.zip',
                 'hash': 'd41d8cd98f00b204e9800998ecf8427e',
             }],
+            'current_version': {'version_id': version_id},
         },
     }
 
