@@ -93,21 +93,29 @@ class _RootSpec:
     payload: dict | None = None
 
 
-def _payload_title(payload: dict | None) -> str | None:
+def payload_title(payload: dict | None) -> str | None:
     if not payload:
         return None
     title = payload.get("title")
     return str(title) if title is not None else None
 
 
-def _payload_category_id(payload: dict | None) -> int | None:
+def payload_category_id(payload: dict | None) -> int | None:
     if not payload:
         return None
     category = payload.get("Category") or payload.get("category") or {}
-    parent_category_id = category.get("parent_category_id") or payload.get("category_id")
-    if parent_category_id is None:
+    raw = category.get("parent_category_id") or payload.get("parent_category_id")
+    if raw is None:
         return None
-    return int(parent_category_id)
+    return int(raw)
+
+
+def payload_version_id(payload: dict | None) -> int | None:
+    """Only the manifest endpoint provides this; the live XenForo API does not."""
+    if not payload:
+        return None
+    raw = payload.get("version_id")
+    return int(raw) if raw is not None else None
 
 
 def _category_allowed_in_env(category_id: int | None, settings_env: str) -> bool:
@@ -130,7 +138,7 @@ def _root_sources_for_full_sync(
     specs: dict[str, _RootSpec] = {}
 
     for payload in watched_resources:
-        category_id = _payload_category_id(payload)
+        category_id = payload_category_id(payload)
         if not _category_allowed_in_env(category_id, settings_env):
             continue
         resource_id = str(payload["resource_id"])
@@ -142,7 +150,7 @@ def _root_sources_for_full_sync(
         if not license_info.get("active", False):
             continue
         payload = license_info.get("resource") or {}
-        category_id = _payload_category_id(payload)
+        category_id = payload_category_id(payload)
         if not _category_allowed_in_env(category_id, settings_env):
             continue
         resource_id = str(payload["resource_id"])
@@ -181,7 +189,7 @@ def _add_root_target(
     settings_env: str,
 ) -> DesiredInstallTarget:
     """Resolve path, category, flatten, and protected files for a root resource and add it to the plan."""
-    category_id = _payload_category_id(payload)
+    category_id = payload_category_id(payload)
     resolved_path = None
     settings_for_env = config.settings.from_env(settings_env)
     if str(resource_id) in settings_for_env.SPECIAL_RESOURCES or category_id is not None:
@@ -194,7 +202,7 @@ def _add_root_target(
         root_resource_id=resource_id,
         target_kind="root",
         sources=set(sources),
-        title=_payload_title(payload),
+        title=payload_title(payload),
         category_id=category_id,
         resolved_path=resolved_path,
         subfolder=None,

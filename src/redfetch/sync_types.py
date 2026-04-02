@@ -149,8 +149,6 @@ class RemoteSnapshot(SyncModel):
     """All remote resource states collected for this run."""
 
     resources: dict[str, RemoteResourceState] = Field(default_factory=dict)
-    manifest_fetched_at: float | None = None
-    manifest_cache_seconds: int | None = None
 
 
 class LocalInstallState(TargetIdentity):
@@ -260,7 +258,6 @@ class ExecutionPlan(SyncModel):
     """The full set of decisions handed to the executor."""
 
     actions: dict[str, PlannedAction] = Field(default_factory=dict)
-    children_by_parent: dict[str, list[str]] = Field(default_factory=dict)
 
     def action_counts(self) -> dict[str, int]:
         counts = {"download": 0, "skip": 0, "block": 0, "untrack": 0}
