@@ -1,64 +1,72 @@
+from __future__ import annotations
+
 from collections.abc import Iterable
 import json
 import os
 import sqlite3
+
 import aiosqlite
 
 from redfetch import config
-from redfetch.models import DownloadTask, Resource
 from redfetch import meta
-from redfetch import utils
+from redfetch.sync_types import (
+    DesiredInstallTarget,
+    DesiredSet,
+    ExecutionPlan,
+    ExecutionResult,
+    LocalInstallState,
+    LocalSnapshot,
+    PlannedAction,
+    RemoteResourceState,
+    RemoteSnapshot,
+)
 
-# Unified schema version marker
-SCHEMA_VERSION = 1
+
+SCHEMA_VERSION = 2
 
 
 def _get_cache_dir() -> str:
-    """Get the .cache directory path, creating it if needed."""
-    base = getattr(config, 'config_dir', None) or os.getenv('REDFETCH_CONFIG_DIR')
+    base = getattr(config, "config_dir", None) or os.getenv("REDFETCH_CONFIG_DIR")
     if not base:
-        # As a last resort, place cache in current working directory
         base = os.getcwd()
-    cache_dir = os.path.join(base, '.cache')
+    cache_dir = os.path.join(base, ".cache")
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
 
+def get_db_path(db_name: str) -> str:
+    return os.path.join(_get_cache_dir(), db_name)
+
+
 def get_db_connection(db_name: str):
-    """Open SQLite DB in .cache directory."""
     db_path = get_db_path(db_name)
-    # Allow using the connection across threads (we still write from main thread),
-    # increase timeout to wait for locks, and enable autocommit mode to keep locks short
     conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False, isolation_level=None)
     try:
-        # WAL allows readers and writers concurrently; busy_timeout reduces 'database is locked' errors
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA synchronous=NORMAL")
     except Exception:
-        # Pragmas are best-effort; continue even if not supported
         pass
     return conn
 
 
-def get_db_path(db_name: str) -> str:
-    """Compute absolute path to the SQLite DB file in .cache directory."""
-    return os.path.join(_get_cache_dir(), db_name)
-
-
-def initialize_db(db_name: str, settings_env: str):
-    """Ensure unified schema; reset once to unified schema if version is outdated."""
-    with get_db_connection(db_name) as conn:
+def initialize_db(db_name: str):
+    db_path = get_db_path(db_name)
+    with sqlite3.connect(db_path, timeout=30.0) as conn:
         cursor = conn.cursor()
-        _initialize_schema(cursor)
-        return _reconcile_install_signature(cursor, settings_env)
+        initialize_schema(cursor)
+        conn.commit()
 
 
-def reconcile_install_signature(db_name: str, settings_env: str):
-    with get_db_connection(db_name) as conn:
-        cursor = conn.cursor()
-        _initialize_schema(cursor)
-        return _reconcile_install_signature(cursor, settings_env)
+def _ensure_metadata(cursor) -> None:
+    try:
+        cursor.execute("SELECT schema_version FROM metadata WHERE id = 1")
+        row = cursor.fetchone()
+        if row and row[0] is not None and int(row[0]) >= SCHEMA_VERSION:
+            return
+    except Exception:
+        pass
+    _reset_sync_schema(cursor)
 
 
 def _ensure_downloads_table(cursor) -> None:
@@ -66,229 +74,363 @@ def _ensure_downloads_table(cursor) -> None:
         """
         CREATE TABLE IF NOT EXISTS downloads (
             id INTEGER PRIMARY KEY,
+            target_key TEXT UNIQUE,
             resource_id INTEGER NOT NULL,
             parent_id INTEGER NOT NULL DEFAULT 0,
+            parent_target_key TEXT,
+            root_resource_id INTEGER NOT NULL DEFAULT 0,
+            target_kind TEXT NOT NULL DEFAULT 'root',
             category_id INTEGER,
             title TEXT,
             version_remote INTEGER,
-            version_local INTEGER DEFAULT 0,
-            filename TEXT,
-            url TEXT,
-            hash TEXT,
-            is_special BOOLEAN DEFAULT 0,
-            is_watching BOOLEAN DEFAULT 0,
-            is_licensed BOOLEAN DEFAULT 0,
-            UNIQUE(resource_id, parent_id)
+            version_local INTEGER,
+            resolved_path TEXT,
+            subfolder TEXT,
+            flatten INTEGER NOT NULL DEFAULT 0,
+            protected_files TEXT NOT NULL DEFAULT '[]',
+            remote_status TEXT,
+            is_special INTEGER NOT NULL DEFAULT 0,
+            is_watching INTEGER NOT NULL DEFAULT 0,
+            is_licensed INTEGER NOT NULL DEFAULT 0,
+            is_explicit INTEGER NOT NULL DEFAULT 0,
+            is_dependency INTEGER NOT NULL DEFAULT 0
         )
         """
     )
-
-
-def _ensure_metadata(cursor) -> None:
-    """Ensure metadata table exists and contains schema_version; migrate safely from older layouts."""
-    # Create base metadata table (older versions had only these two columns)
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS metadata (
-            id INTEGER PRIMARY KEY,
-            last_fetch_time INTEGER
-        )
-        """
-    )
-    # Ensure default row exists (compatible with old schema)
-    cursor.execute(
-        "INSERT INTO metadata (id, last_fetch_time) SELECT 1, 0 WHERE NOT EXISTS (SELECT 1 FROM metadata WHERE id = 1)"
-    )
-    # Ensure schema_version column exists, then set default
-    cursor.execute("PRAGMA table_info(metadata)")
-    cols = [row[1] for row in cursor.fetchall()]
-    if 'schema_version' not in cols:
-        cursor.execute("ALTER TABLE metadata ADD COLUMN schema_version INTEGER")
-        cursor.execute("UPDATE metadata SET schema_version=0 WHERE id=1")
-    if 'install_signature' not in cols:
-        cursor.execute("ALTER TABLE metadata ADD COLUMN install_signature TEXT")
-    # Check current version and reset schema if outdated
-    cursor.execute("SELECT schema_version FROM metadata WHERE id=1")
-    row = cursor.fetchone()
-    current = int(row[0]) if row and row[0] is not None else 0
-    if current < SCHEMA_VERSION:
-        _reset_to_unified_schema(cursor)
-
-
-def _initialize_schema(cursor) -> None:
-    _ensure_metadata(cursor)
-    _ensure_downloads_table(cursor)
-    _normalize_parent_ids(cursor)
-    _ensure_indexes(cursor)
-    _ensure_navmesh_tables(cursor)
-
-
-def _get_vvmq_id_for_env(settings_env: str) -> str | None:
-    for resource_id, env in config.VANILLA_MAP.items():
-        if env.upper() == settings_env.upper():
-            return str(resource_id)
-    return None
-
-
-def _compute_install_signature(settings_env: str) -> dict:
-    settings_for_env = config.settings.from_env(settings_env)
-    download_folder = os.path.normpath(settings_for_env.DOWNLOAD_FOLDER)
-    eqpath = os.path.normpath(settings_for_env.EQPATH) if settings_for_env.EQPATH else ""
-
-    vvmq_id = _get_vvmq_id_for_env(settings_env)
-    vvmq_path = None
-    if vvmq_id:
-        vvmq_resource = settings_for_env.SPECIAL_RESOURCES.get(vvmq_id)
-        vvmq_path = utils.resolve_special_destination(vvmq_resource, download_folder)
-
-    base_path = vvmq_path if vvmq_path else download_folder
-
-    special_destinations: dict[str, str] = {}
-    for resource_id, resource_info in settings_for_env.SPECIAL_RESOURCES.items():
-        destination = utils.resolve_special_destination(resource_info, download_folder)
-        if destination:
-            special_destinations[str(resource_id)] = destination
-
-    return {
-        "base_path": base_path,
-        "download_folder": download_folder,
-        "eqpath": eqpath,
-        "special_destinations": special_destinations,
-    }
-
-
-def _load_install_signature(cursor) -> dict | None:
-    cursor.execute("SELECT install_signature FROM metadata WHERE id = 1")
-    row = cursor.fetchone()
-    if not row or row[0] is None:
-        return None
-    return json.loads(row[0])
-
-
-def _save_install_signature(cursor, signature: dict) -> None:
-    cursor.execute(
-        "UPDATE metadata SET install_signature = ? WHERE id = 1",
-        (json.dumps(signature, sort_keys=True),),
-    )
-
-
-def _diff_special_destinations(before: dict | None, after: dict) -> list[str]:
-    before_map = before.get("special_destinations", {}) if before else {}
-    after_map = after.get("special_destinations", {})
-    changed = []
-    for resource_id in set(before_map) | set(after_map):
-        if before_map.get(resource_id) != after_map.get(resource_id):
-            changed.append(str(resource_id))
-    return sorted(changed)
-
-
-def _reset_download_dates_for_special_resource(cursor, resource_id: str) -> None:
-    rid_int = int(resource_id)
-    cursor.execute(
-        "UPDATE downloads SET version_local=0 WHERE parent_id = 0 AND resource_id = ?",
-        (rid_int,),
-    )
-    cursor.execute(
-        "UPDATE downloads SET version_local=0 WHERE parent_id = ?",
-        (rid_int,),
-    )
-
-
-def _reconcile_install_signature(cursor, settings_env: str) -> dict | None:
-    before = _load_install_signature(cursor)
-    after = _compute_install_signature(settings_env)
-
-    if before is None:
-        _save_install_signature(cursor, after)
-        return None
-
-    if before == after:
-        return None
-
-    if before.get("base_path") != after.get("base_path"):
-        reset_download_dates(cursor)
-        _save_install_signature(cursor, after)
-        return {"global_reset": True, "changed_ids": []}
-
-    changed_ids = _diff_special_destinations(before, after)
-    for resource_id in changed_ids:
-        _reset_download_dates_for_special_resource(cursor, resource_id)
-
-    _save_install_signature(cursor, after)
-    return {"global_reset": False, "changed_ids": changed_ids}
 
 
 def _ensure_indexes(cursor) -> None:
-    """Create indexes."""
-    try:
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_downloads_roots ON downloads(parent_id, resource_id)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_downloads_flags ON downloads(parent_id, is_watching, is_special, is_licensed)"
-        )
-    except Exception:
-        # Best-effort; continue even if index creation fails
-        pass
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_downloads_resource_id ON downloads(resource_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_downloads_root_resource_id ON downloads(root_resource_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_downloads_parent_target_key ON downloads(parent_target_key)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_downloads_parent_id ON downloads(parent_id)"
+    )
 
 
 def _ensure_navmesh_tables(cursor) -> None:
-    """Create navmesh tracking tables if they don't exist."""
-    # NavMesh file tracking (local file state cache)
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS navmesh_files (
             filename TEXT PRIMARY KEY,
             md5_hash TEXT NOT NULL,
             file_size INTEGER NOT NULL,
             mtime_ns INTEGER NOT NULL
         )
-    """)
-
-    # NavMesh manifest cache metadata (per environment)
-    cursor.execute("""
+        """
+    )
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS navmesh_cache (
             env TEXT PRIMARY KEY,
             etag TEXT,
             last_modified TEXT,
             manifest_json TEXT
         )
-    """)
+        """
+    )
 
-def _reset_to_unified_schema(cursor) -> None:
-    # Drop any existing tables (legacy or previous unified) and recreate unified
+
+def _reset_sync_schema(cursor) -> None:
     cursor.execute("DROP TABLE IF EXISTS downloads")
     cursor.execute("DROP TABLE IF EXISTS resources")
     cursor.execute("DROP TABLE IF EXISTS dependencies")
+    cursor.execute("DROP TABLE IF EXISTS metadata")
     cursor.execute(
-        "UPDATE metadata SET last_fetch_time=0, schema_version=? WHERE id=1",
+        """
+        CREATE TABLE metadata (
+            id INTEGER PRIMARY KEY,
+            schema_version INTEGER
+        )
+        """
+    )
+    cursor.execute(
+        "INSERT INTO metadata (id, schema_version) VALUES (1, ?)",
         (SCHEMA_VERSION,),
     )
 
 
-def map_rows_to_download_tasks(rows: Iterable[tuple]) -> list[DownloadTask]:
-    """Map DB rows to DownloadTask objects."""
-    tasks = []
-    for row in rows:
-        resource_id, category_id, title, version_remote, version_local, parent_resource_id, url, filename, file_hash = row
-        tasks.append(DownloadTask(
-            resource_id=str(resource_id),
-            title=title,
-            category_id=category_id,
-            remote_version=version_remote,
-            local_version=version_local,
-            parent_resource_id=str(parent_resource_id) if parent_resource_id is not None else None,
-            download_url=url,
-            filename=filename,
-            file_hash=file_hash,
-        ))
-    return tasks
+def initialize_schema(cursor) -> None:
+    _ensure_metadata(cursor)
+    _ensure_downloads_table(cursor)
+    _ensure_indexes(cursor)
+    _ensure_navmesh_tables(cursor)
+
+
+def reset_all_versions(cursor) -> None:
+    cursor.execute("UPDATE downloads SET version_local = 0")
+
+
+def reset_versions_for_resource(cursor, resource_id: str) -> None:
+    key = f"/{resource_id}/"
+    cursor.execute(
+        """
+        UPDATE downloads
+        SET version_local = 0
+        WHERE target_key = ?
+           OR target_key LIKE ?
+        """,
+        (
+            key,
+            f"{key}%",
+        ),
+    )
+
+
+def _decode_protected_files(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _row_to_local_state(row: sqlite3.Row | tuple) -> LocalInstallState:
+    (
+        target_key,
+        resource_id,
+        parent_id,
+        parent_target_key,
+        root_resource_id,
+        target_kind,
+        category_id,
+        title,
+        version_remote,
+        version_local,
+        resolved_path,
+        subfolder,
+        flatten,
+        protected_files,
+        _remote_status,
+        is_special,
+        is_watching,
+        is_licensed,
+        is_explicit,
+        is_dependency,
+    ) = row
+
+    return LocalInstallState(
+        target_key=str(target_key),
+        resource_id=str(resource_id),
+        parent_id=str(parent_id) if parent_id not in (None, 0) else None,
+        parent_target_key=parent_target_key,
+        root_resource_id=str(root_resource_id),
+        target_kind=str(target_kind),
+        category_id=category_id,
+        title=title,
+        version_local=version_local,
+        version_remote=version_remote,
+        resolved_path=resolved_path,
+        subfolder=subfolder,
+        flatten=bool(flatten),
+        protected_files=_decode_protected_files(protected_files),
+        is_special=bool(is_special),
+        is_watching=bool(is_watching),
+        is_licensed=bool(is_licensed),
+        is_explicit=bool(is_explicit),
+        is_dependency=bool(is_dependency),
+    )
+
+
+async def load_local_snapshot(db_path: str) -> LocalSnapshot:
+    """Load all tracked install targets from the DB so the planner knows what's installed."""
+    async with aiosqlite.connect(db_path, timeout=30.0) as conn:
+        async with conn.execute(
+            """
+            SELECT
+                target_key, resource_id, parent_id, parent_target_key, root_resource_id,
+                target_kind, category_id, title, version_remote, version_local,
+                resolved_path, subfolder, flatten,
+                protected_files, remote_status,
+                is_special, is_watching, is_licensed, is_explicit, is_dependency
+            FROM downloads
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    return LocalSnapshot(
+        install_targets={
+            str(row[0]): _row_to_local_state(row)
+            for row in rows
+        }
+    )
+
+
+def _desired_flags(target: DesiredInstallTarget) -> dict[str, int]:
+    """Convert a target's source set into integer flags for the DB."""
+    return {
+        "is_special": int("special" in target.sources),
+        "is_watching": int("watching" in target.sources),
+        "is_licensed": int("licensed" in target.sources),
+        "is_explicit": int(target.explicit_root or "explicit" in target.sources),
+        "is_dependency": int(target.target_kind == "dependency"),
+    }
+
+
+async def _upsert_download_row(
+    conn: aiosqlite.Connection,
+    *,
+    target: DesiredInstallTarget,
+    action: PlannedAction | None,
+    remote_state: RemoteResourceState | None,
+    version_local: int | None,
+) -> None:
+    """Save or overwrite a single download row with the best-known values from each source."""
+    flags = _desired_flags(target)
+    persisted_category_id = (
+        action.category_id
+        if action and action.category_id is not None
+        else remote_state.category_id if remote_state and remote_state.category_id is not None
+        else target.category_id
+    )
+    persisted_title = (
+        action.title
+        if action and action.title is not None
+        else remote_state.title if remote_state and remote_state.title is not None
+        else target.title
+    )
+    persisted_resolved_path = (
+        action.resolved_path
+        if action and action.resolved_path is not None
+        else target.resolved_path
+    )
+    persisted_subfolder = (
+        action.subfolder
+        if action and action.subfolder is not None
+        else target.subfolder
+    )
+    persisted_flatten = action.flatten if action is not None else target.flatten
+    persisted_protected_files = action.protected_files if action is not None else target.protected_files
+    await conn.execute(
+        """
+        INSERT INTO downloads (
+            target_key, resource_id, parent_id, parent_target_key, root_resource_id,
+            target_kind, category_id, title, version_remote, version_local,
+            resolved_path, subfolder, flatten,
+            protected_files, remote_status,
+            is_special, is_watching, is_licensed, is_explicit, is_dependency
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(target_key) DO UPDATE SET
+            resource_id = excluded.resource_id,
+            parent_id = excluded.parent_id,
+            parent_target_key = excluded.parent_target_key,
+            root_resource_id = excluded.root_resource_id,
+            target_kind = excluded.target_kind,
+            category_id = excluded.category_id,
+            title = excluded.title,
+            version_remote = excluded.version_remote,
+            version_local = excluded.version_local,
+            resolved_path = excluded.resolved_path,
+            subfolder = excluded.subfolder,
+            flatten = excluded.flatten,
+            protected_files = excluded.protected_files,
+            remote_status = excluded.remote_status,
+            is_special = excluded.is_special,
+            is_watching = excluded.is_watching,
+            is_licensed = excluded.is_licensed,
+            is_explicit = excluded.is_explicit,
+            is_dependency = excluded.is_dependency
+        """,
+        (
+            target.target_key,
+            int(target.resource_id),
+            int(target.parent_id) if target.parent_id is not None else 0,
+            target.parent_target_key,
+            int(target.root_resource_id),
+            target.target_kind,
+            persisted_category_id,
+            persisted_title,
+            remote_state.version_id if remote_state else None,
+            version_local,
+            persisted_resolved_path,
+            persisted_subfolder,
+            int(persisted_flatten),
+            json.dumps(persisted_protected_files),
+            remote_state.status if remote_state else None,
+            flags["is_special"],
+            flags["is_watching"],
+            flags["is_licensed"],
+            flags["is_explicit"],
+            flags["is_dependency"],
+        ),
+    )
+
+
+async def record_download_success(
+    db_path: str,
+    *,
+    target: DesiredInstallTarget,
+    action: PlannedAction,
+    remote_state: RemoteResourceState,
+) -> None:
+    """Persist one target immediately after download so interrupted syncs keep progress."""
+    async with aiosqlite.connect(db_path, timeout=30.0) as conn:
+        await _upsert_download_row(
+            conn,
+            target=target,
+            action=action,
+            remote_state=remote_state,
+            version_local=remote_state.version_id,
+        )
+        await conn.commit()
+
+
+async def record_installed_state(
+    db_path: str,
+    *,
+    desired_set: DesiredSet,
+    remote_snapshot: RemoteSnapshot,
+    local_snapshot: LocalSnapshot,
+    execution_plan: ExecutionPlan,
+    execution_result: ExecutionResult,
+) -> None:
+    """End-of-run batch write for all outcomes: skips, blocks, and untracks."""
+    async with aiosqlite.connect(db_path, timeout=30.0) as conn:
+        for target_key, action in execution_plan.actions.items():
+            result_item = execution_result.items[target_key]
+            existing = local_snapshot.install_targets.get(target_key)
+
+            if action.action == "untrack":
+                await conn.execute("DELETE FROM downloads WHERE target_key = ?", (target_key,))
+                continue
+
+            if result_item.outcome == "downloaded":
+                continue
+
+            desired_target = desired_set.install_targets.get(target_key)
+            if desired_target is None:
+                continue
+
+            remote_state = remote_snapshot.resources.get(action.resource_id)
+            existing_local_version = existing.version_local if existing else None
+            version_local = existing_local_version
+
+            if result_item.outcome == "skipped" and remote_state and remote_state.version_id is not None:
+                version_local = existing_local_version if existing_local_version is not None else remote_state.version_id
+
+            await _upsert_download_row(
+                conn,
+                target=desired_target,
+                action=action,
+                remote_state=remote_state,
+                version_local=version_local,
+            )
+
+        await conn.commit()
 
 
 def reset_download_dates(cursor) -> None:
-    """Reset all download dates to force re-download and re-fetch from API."""
-    cursor.execute("UPDATE downloads SET version_local=0")
-    cursor.execute("UPDATE metadata SET last_fetch_time=0 WHERE id=1")
-    # Clear navmesh cache tables
+    reset_all_versions(cursor)
     cursor.execute("DELETE FROM navmesh_files")
     cursor.execute("DELETE FROM navmesh_cache")
     try:
@@ -297,18 +439,13 @@ def reset_download_dates(cursor) -> None:
         pass
 
 
-def reset_download_date_for_resource(cursor, resource_id: str) -> None:
-    rid_int = int(resource_id)
-    cursor.execute("UPDATE downloads SET version_local=0 WHERE resource_id=? OR parent_id=?", (rid_int, rid_int))
-
-
 def reset_download_dates_for_resources(db_name: str, resource_ids: Iterable[str]) -> bool:
-    """Reset download dates for the provided resource IDs."""
+    """Force re-download of selected resources without touching anything else."""
     try:
         with get_db_connection(db_name) as conn:
             cursor = conn.cursor()
             for resource_id in resource_ids:
-                reset_download_date_for_resource(cursor, resource_id)
+                reset_versions_for_resource(cursor, resource_id)
             conn.commit()
         return True
     except Exception as exc:
@@ -317,22 +454,11 @@ def reset_download_dates_for_resources(db_name: str, resource_ids: Iterable[str]
 
 
 async def reset_download_dates_async(db_path: str) -> None:
-    """Async helper to reset all download dates and last_fetch_time for a DB path."""
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
-        try:
-            await conn.execute("PRAGMA journal_mode=WAL")
-            await conn.execute("PRAGMA busy_timeout=5000")
-            await conn.execute("PRAGMA synchronous=NORMAL")
-        except Exception:
-            # Pragmas are best-effort
-            pass
-        await conn.execute("UPDATE downloads SET version_local=0")
-        await conn.execute("UPDATE metadata SET last_fetch_time=0 WHERE id=1")
-        # Clear navmesh cache tables
+        await conn.execute("UPDATE downloads SET version_local = 0")
         await conn.execute("DELETE FROM navmesh_files")
         await conn.execute("DELETE FROM navmesh_cache")
         await conn.commit()
-    # Clear PyPI cache outside the DB transaction
     try:
         meta.clear_pypi_cache()
     except Exception:
@@ -340,258 +466,40 @@ async def reset_download_dates_async(db_path: str) -> None:
 
 
 def list_resources(cursor) -> list[tuple[int, str]]:
-    """Return (resource_id, title) for root resources."""
-    cursor.execute("SELECT resource_id, title FROM downloads WHERE parent_id = 0")
+    cursor.execute(
+        """
+        SELECT resource_id, title
+        FROM downloads
+        WHERE parent_target_key IS NULL
+        ORDER BY resource_id
+        """
+    )
     return cursor.fetchall()
 
 
 def list_dependencies(cursor) -> list[tuple[int, str]]:
-    """Return (resource_id, title) for dependency rows."""
-    cursor.execute("SELECT resource_id, title FROM downloads WHERE parent_id != 0")
+    cursor.execute(
+        """
+        SELECT resource_id, title
+        FROM downloads
+        WHERE parent_target_key IS NOT NULL
+        ORDER BY root_resource_id, target_key
+        """
+    )
     return cursor.fetchall()
 
 
-def _normalize_parent_ids(cursor) -> None:
-    """Coalesce NULL parent_id to 0 and deduplicate rows before normalization."""
-    # If table doesn't exist yet, nothing to do
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='downloads'")
-    if not cursor.fetchone():
-        return
-    # Remove potential duplicate roots caused by NULL uniqueness behavior
-    cursor.execute(
-        """
-        DELETE FROM downloads
-        WHERE rowid NOT IN (
-            SELECT MIN(rowid)
-            FROM downloads
-            GROUP BY resource_id, COALESCE(parent_id, 0)
-        )
-        """
-    )
-    # Normalize NULL to 0 for roots
-    cursor.execute("UPDATE downloads SET parent_id=0 WHERE parent_id IS NULL")
-
-
-# ===== Async Database Operations =====
-
-async def apply_updates(db_path: str, updates: list[tuple[str, int, bool, str | None]]) -> None:
-    """Apply version updates in one transaction using aiosqlite."""
-    if not updates:
-        return
-
+async def fetch_root_version_local(db_path: str, resource_id: str) -> int | None:
+    """Return the local version stamp for a resource, or None if not installed."""
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
-        await conn.execute("BEGIN")
-        try:
-            for resource_id, remote_version, is_dependency, parent_resource_id in updates:
-                if is_dependency and parent_resource_id:
-                    await conn.execute(
-                        "UPDATE downloads SET version_local=? WHERE resource_id=? AND parent_id=?",
-                        (int(remote_version), int(resource_id), int(parent_resource_id)),
-                    )
-                else:
-                    await conn.execute(
-                        "UPDATE downloads SET version_local=? WHERE resource_id=? AND parent_id = 0",
-                        (int(remote_version), int(resource_id)),
-                    )
-            await conn.commit()
-        except Exception:
-            await conn.rollback()
-            raise
-
-
-async def get_last_fetch_time(conn: aiosqlite.Connection) -> int:
-    async with conn.execute("SELECT last_fetch_time FROM metadata WHERE id = 1") as cur:
-        row = await cur.fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
-
-
-async def has_root_download_row_for_resource(conn: aiosqlite.Connection, resource_id: int) -> bool:
-    try:
         async with conn.execute(
-            "SELECT 1 FROM downloads WHERE resource_id = ? AND parent_id = 0 LIMIT 1",
+            """
+            SELECT version_local
+            FROM downloads
+            WHERE resource_id = ? AND parent_target_key IS NULL
+            LIMIT 1
+            """,
             (int(resource_id),),
-        ) as cur:
-            return (await cur.fetchone()) is not None
-    except Exception:
-        return False
-
-
-async def insert_prepared_resource(
-    conn: aiosqlite.Connection,
-    resource: Resource,
-    is_special: bool,
-    is_dependency: bool,
-    parent_id: str | None,
-    license_details: dict | None,
-) -> tuple[int | None, int]:
-    resource_id = resource.resource_id
-    category_id = resource.category_id
-    title = resource.title
-    version_remote = resource.version
-    filename = resource.file.filename
-    url = resource.file.url
-    file_hash = resource.file.hash
-    is_watching = bool(getattr(resource, 'is_watching', False))
-    is_licensed = bool(getattr(resource, 'is_licensed', False) or (license_details and license_details.get('active', False)))
-    parent = int(parent_id) if (is_dependency and parent_id is not None) else 0
-
-    await conn.execute(
-        """
-        INSERT INTO downloads (
-            resource_id, parent_id, category_id, title,
-            version_remote, filename, url, hash,
-            is_special, is_watching, is_licensed
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(resource_id, parent_id) DO UPDATE SET
-            category_id=excluded.category_id,
-            title=excluded.title,
-            version_remote=excluded.version_remote,
-            filename=excluded.filename,
-            url=excluded.url,
-            hash=excluded.hash,
-            is_special=excluded.is_special,
-            is_watching=excluded.is_watching,
-            is_licensed=excluded.is_licensed
-        """,
-        (
-            resource_id, parent, category_id, title,
-            version_remote, filename, url, file_hash,
-            int(bool(is_special) and not is_dependency), int(bool(is_watching)), int(bool(is_licensed))
-        ),
-    )
-
-    if is_dependency:
-        return (parent, int(resource_id))
-    return (None, int(resource_id))
-
-
-async def clean_up_unnecessary_resources(
-    conn: aiosqlite.Connection,
-    current_ids: set[tuple[int | None, int]],
-):
-    resource_ids = {int(rid) for pid, rid in current_ids if pid is None}
-    parent_ids = {int(pid) for pid, rid in current_ids if pid is not None}
-    all_resource_ids = resource_ids.union(parent_ids)
-    dependency_pairs = {(int(pid), int(rid)) for pid, rid in current_ids if pid is not None}
-
-    if all_resource_ids:
-        placeholders = ','.join(['?'] * len(all_resource_ids))
-        await conn.execute(
-            f"UPDATE downloads SET is_watching=0 WHERE parent_id = 0 AND resource_id NOT IN ({placeholders})",
-            tuple(all_resource_ids),
-        )
-        await conn.execute(
-            f"DELETE FROM downloads WHERE parent_id = 0 AND is_licensed=1 AND resource_id NOT IN ({placeholders})",
-            tuple(all_resource_ids),
-        )
-        await conn.execute(
-            f"DELETE FROM downloads WHERE parent_id = 0 AND is_special=1 AND resource_id NOT IN ({placeholders})",
-            tuple(all_resource_ids),
-        )
-
-    if dependency_pairs:
-        placeholders = ', '.join(['(?, ?)'] * len(dependency_pairs))
-        flat = [item for pair in dependency_pairs for item in pair]
-        await conn.execute(
-            f"DELETE FROM downloads WHERE parent_id != 0 AND (parent_id, resource_id) NOT IN ({placeholders})",
-            flat,
-        )
-
-    await conn.execute("UPDATE metadata SET last_fetch_time = strftime('%s','now') WHERE id = 1")
-
-
-async def fetch_watched_db_resources(conn: aiosqlite.Connection) -> list[DownloadTask]:
-    async with conn.execute(
-        """
-        SELECT resource_id, category_id, title, version_remote, version_local,
-               NULL as parent_resource_id, url, filename, hash
-        FROM downloads
-        WHERE parent_id = 0 AND (is_watching=1 OR is_special=1 OR is_licensed=1)
-        """
-    ) as cur:
-        roots = await cur.fetchall()
-
-    async with conn.execute(
-        """
-        SELECT d.resource_id, p.category_id as parent_category_id, d.title, d.version_remote, d.version_local,
-               d.parent_id as parent_resource_id, d.url, d.filename, d.hash
-        FROM downloads d
-        JOIN downloads p ON p.resource_id=d.parent_id AND p.parent_id = 0
-        WHERE d.parent_id != 0
-        """
-    ) as cur:
-        deps = await cur.fetchall()
-
-    if roots or deps:
-        return map_rows_to_download_tasks(roots + deps)
-
-    async with conn.execute(
-        """
-        SELECT resource_id, category_id, title, version_remote, version_local,
-               NULL as parent_resource_id, url, filename, hash
-        FROM downloads
-        WHERE parent_id = 0
-        """
-    ) as cur:
-        roots_all = await cur.fetchall()
-
-    async with conn.execute(
-        """
-        SELECT d.resource_id, p.category_id as parent_category_id, d.title, d.version_remote, d.version_local,
-               d.parent_id as parent_resource_id, d.url, d.filename, d.hash
-        FROM downloads d
-        JOIN downloads p ON p.resource_id=d.parent_id AND p.parent_id = 0
-        WHERE d.parent_id != 0
-        """
-    ) as cur:
-        deps_all = await cur.fetchall()
-    return map_rows_to_download_tasks(roots_all + deps_all)
-
-
-async def fetch_single_db_resource(conn: aiosqlite.Connection, resource_id: str) -> list[DownloadTask]:
-    rid_int = int(resource_id)
-
-    async with conn.execute(
-        """
-        SELECT resource_id, category_id, title, version_remote, version_local,
-               NULL as parent_resource_id, url, filename, hash
-        FROM downloads
-        WHERE parent_id = 0 AND resource_id = ?
-        """,
-        (rid_int,),
-    ) as cur:
-        root = await cur.fetchone()
-
-    async with conn.execute(
-        """
-        SELECT d.resource_id, p.category_id as parent_category_id, d.title, d.version_remote, d.version_local,
-               d.parent_id as parent_resource_id, d.url, d.filename, d.hash
-        FROM downloads d
-        JOIN downloads p ON p.resource_id=d.parent_id AND p.parent_id = 0
-        WHERE d.parent_id = ?
-        """,
-        (rid_int,),
-    ) as cur:
-        deps = await cur.fetchall()
-
-    items = []
-    if root:
-        items.append(root)
-    items.extend(deps)
-    return map_rows_to_download_tasks(items)
-
-
-async def has_dependency_rows(conn: aiosqlite.Connection, resource_id: int, parent_ids: set[int]) -> bool:
-    """Check if all expected dependency rows exist for a resource."""
-    if not parent_ids:
-        return False
-    placeholders = ",".join(["?"] * len(parent_ids))
-    query = (
-        f"SELECT COUNT(1) FROM downloads "
-        f"WHERE resource_id=? AND parent_id IN ({placeholders})"
-    )
-    params = (int(resource_id), *[int(pid) for pid in parent_ids])
-    async with conn.execute(query, params) as cur:
-        row = await cur.fetchone()
-        count = int(row[0]) if row and row[0] is not None else 0
-    return count >= len(parent_ids)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None

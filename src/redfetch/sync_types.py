@@ -72,21 +72,6 @@ class TargetIdentity(SyncModel):
     target_kind: TargetKind
 
 
-class InstallContextDiff(SyncModel):
-    """Track changes in install config between syncs."""
-
-    previous_signature: dict | None = None
-    current_signature: dict = Field(default_factory=dict)
-    global_invalidation: bool = False
-    invalidated_target_keys: set[str] = Field(default_factory=set)
-    reasons: list[str] = Field(default_factory=list)
-
-    def is_target_invalidated(self, target_key: str) -> bool:
-        return (
-            self.global_invalidation
-            or target_key in self.invalidated_target_keys
-        )
-
 
 class DesiredInstallTarget(TargetIdentity):
     """One concrete place a resource should be installed this run."""
