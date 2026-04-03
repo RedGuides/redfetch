@@ -20,7 +20,7 @@ from redfetch import net
 from redfetch import processes
 from redfetch import utils
 from redfetch import push
-from redfetch import sync as sync_pipeline
+from redfetch import sync
 from redfetch import store
 from redfetch.runtime_errors import exit_with_fatal_error
 
@@ -31,7 +31,6 @@ app = typer.Typer(
 )
 
 console = Console()
-err_console = Console(stderr=True)
 
 
 class Env(str, Enum):
@@ -51,16 +50,20 @@ def parse_resource_id_or_fail(value: str) -> str:
     return parsed
 
 
-def initialize_db_only():
-    """Initialize configuration, auth, and local cache database (no network)."""
+def _initialize_auth():
+    """Initialize configuration, update check, and auth (no DB, no network)."""
     config.initialize_config()
     if os.environ.get('CI') != 'true':
         _ = meta.check_for_update()
-    # Ensure the user is authorized for operations that touch the cache DB
     auth.initialize_keyring()
     auth.authorize()
+
+
+def initialize_db_only():
+    """Initialize configuration, auth, and local cache database (no network)."""
+    _initialize_auth()
     db_name = f"{config.settings.ENV}_resources.db"
-    store.initialize_db(db_name, config.settings.ENV)
+    store.initialize_db(db_name)
     db_path = store.get_db_path(db_name)
     return db_name, db_path
 
@@ -142,12 +145,13 @@ def prompt_navmesh_opt_in() -> bool | None:
 
 def prompt_auto_run_macroquest() -> None:
     """Prompt to start MacroQuest after a successful update, if not configured."""
-    # Skip if we're in CI or not on Windows
     if os.environ.get("CI") == "true" or sys.platform != "win32":
         return
 
     auto_run = config.settings.from_env(config.settings.ENV).get("AUTO_RUN_VVMQ", None)
-    should_run = False
+
+    if auto_run is False:
+        return
 
     if auto_run is None:
         user_choice = Prompt.ask(
@@ -155,30 +159,20 @@ def prompt_auto_run_macroquest() -> None:
             choices=["yes", "no", "always", "never"],
             default="yes",
         )
-        if user_choice == "yes":
-            should_run = True
-        elif user_choice == "always":
+        if user_choice == "always":
             config.update_setting(["AUTO_RUN_VVMQ"], True)
             console.print("Updated settings to always run MacroQuest after updates.")
-            should_run = True
         elif user_choice == "never":
             config.update_setting(["AUTO_RUN_VVMQ"], False)
             console.print("Updated settings to never run MacroQuest after updates.")
-            return  # Do not run MQ
-        else:  # user_choice == "no"
+            return
+        elif user_choice == "no":
             console.print("Not starting MacroQuest.")
-            return  # Do not run MQ
-    elif auto_run:
-        should_run = True
-    else:
-        # AUTO_RUN_VVMQ is False; do not run MacroQuest
-        return
+            return
 
-    # Proceed to run MacroQuest
     mq_path = utils.get_vvmq_path()
     if mq_path:
-        exe_name = "MacroQuest.exe"
-        processes.run_executable(mq_path, exe_name)
+        processes.run_executable(mq_path, "MacroQuest.exe")
     else:
         console.print("MacroQuest path not found. Please check your configuration.")
 
@@ -203,7 +197,7 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
     navmesh_override = prompt_navmesh_opt_in()
 
     # Perform the download via async pipeline
-    success = await sync_pipeline.run_sync(
+    success = await sync.run_sync(
         db_path, headers, navmesh_override=navmesh_override
     )
     if success:
@@ -213,7 +207,7 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
 
 
 async def update_command_async(db_name: str, db_path: str, force: bool) -> None:
-    headers = await api.get_api_headers()
+    headers = await auth.get_api_headers()
     # Only check KISS access for bulk operations (not single resource downloads)
     if not await api.is_kiss_downloadable(headers):
         console.print(
@@ -230,14 +224,14 @@ async def update_command_async(db_name: str, db_path: str, force: bool) -> None:
 
 
 async def download_command_async(db_name: str, db_path: str, id_or_url: str, force: bool) -> None:
-    headers = await api.get_api_headers()
+    headers = await auth.get_api_headers()
     rid = parse_resource_id_or_fail(id_or_url)
     if force:
         with store.get_db_connection(db_name) as conn:
             cursor = conn.cursor()
-            store.reset_download_date_for_resource(cursor, rid)
+            store.reset_versions_for_resource(cursor, rid)
     console.print(f"Downloading resource {rid}.")
-    await sync_pipeline.run_sync(db_path, headers, [rid])
+    await sync.run_sync(db_path, headers, [rid])
 
 
 @app.command(
@@ -272,13 +266,7 @@ def download(
 )
 def run_tui():
     """Initialize configuration and launch the Terminal User Interface."""
-    # Initialize config early; terminal_ui accesses config at import time
-    config.initialize_config()
-    if os.environ.get('CI') != 'true':
-        _ = meta.check_for_update()
-    # Ensure the user is authorized before launching UI
-    auth.initialize_keyring()
-    auth.authorize()
+    _initialize_auth()
     from redfetch.terminal_ui import run_textual_ui
     run_textual_ui()
 
@@ -297,11 +285,10 @@ def web_command():
 
 
 async def web_command_async(db_name: str) -> None:
-    headers = await api.get_api_headers()
-    special_resources = config.settings.SPECIAL_RESOURCES
+    headers = await auth.get_api_headers()
     from .listener import run_server_async
     await run_server_async(
-        config.settings, db_name, headers, special_resources, config.CATEGORY_MAP
+        config.settings, db_name, headers, config.CATEGORY_MAP
     )
 
 
@@ -352,7 +339,7 @@ def config_command(
     config.update_setting(setting_path_list, value, server.value if server else None)
     settings_env = server.value if server else config.settings.ENV
     db_name = f"{settings_env}_resources.db"
-    store.reconcile_install_signature(db_name, settings_env)
+    store.initialize_db(db_name)
     console.print(f"Updated setting {path} to {value}{' for server ' + server.value if server else ''}.")
 
 
@@ -446,17 +433,15 @@ def publish_command(
     file: Optional[Path] = typer.Option(None, "--file", "-f", metavar="FILE.zip", help="Path to your zipped release file", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
     domain: Optional[str] = typer.Option(None, "--domain", help="If description or message is a .md file with relative URLs, resolve them to this domain (e.g., https://raw.githubusercontent.com/your/repo/main/)")
 ):
-    # Preserve existing push.handle_cli behavior by passing a simple namespace
-    class _Args:
-        pass
-    args = _Args()
-    args.resource_id = resource_id
-    args.description = str(description) if isinstance(description, Path) else description
-    args.version = version
-    # message can be a file or a plain string; keep as provided
-    args.message = str(message) if isinstance(message, Path) else message
-    args.file = str(file) if isinstance(file, Path) else file
-    args.domain = domain
+    from types import SimpleNamespace
+    args = SimpleNamespace(
+        resource_id=resource_id,
+        description=str(description) if isinstance(description, Path) else description,
+        version=version,
+        message=str(message) if isinstance(message, Path) else message,
+        file=str(file) if isinstance(file, Path) else file,
+        domain=domain,
+    )
     push.handle_cli(args)
 
 

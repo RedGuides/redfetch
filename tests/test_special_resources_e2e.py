@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from types import SimpleNamespace
 
 from redfetch import main, config, store
+from redfetch.api import ResourceRecord
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def temp_db():
     )
     
     # Initialize database
-    store.initialize_db(db_name, "LIVE")
+    store.initialize_db(db_name)
     
     yield db_path, db_name, temp_dir
     
@@ -195,9 +196,12 @@ def test_download_resource_151_with_dependencies(
     mock_settings.SPECIAL_RESOURCES = mock_settings_151_only['SPECIAL_RESOURCES']
     mock_settings.from_env.return_value = MagicMock(**mock_settings_151_only)
     
-    # Mock API fetch to return our special resources
-    async def mock_fetch_resources_batch(client, resource_ids):
-        return [mock_api_responses[str(rid)] for rid in resource_ids if str(rid) in mock_api_responses]
+    async def mock_fetch_resource_records_batch(client, resource_ids):
+        return [
+            ResourceRecord(resource_id=str(rid), status='downloadable', resource=mock_api_responses[str(rid)])
+            for rid in resource_ids
+            if str(rid) in mock_api_responses
+        ]
     
     # Mock download_file to avoid actual downloads and track calls
     def mock_download_file(download_url, file_path, headers, expected_md5=None):
@@ -225,9 +229,9 @@ def test_download_resource_151_with_dependencies(
          patch('redfetch.config_firstrun.first_run_setup', return_value=temp_dir), \
          patch('redfetch.auth.initialize_keyring'), \
          patch('redfetch.auth.authorize'), \
-         patch('redfetch.api.get_api_headers', return_value={'Authorization': 'Bearer test'}), \
+         patch('redfetch.auth.get_api_headers', return_value={'Authorization': 'Bearer test'}), \
          patch('redfetch.api.is_kiss_downloadable', return_value=True), \
-         patch('redfetch.api.fetch_resources_batch', side_effect=mock_fetch_resources_batch), \
+         patch('redfetch.api.fetch_resource_records_batch', side_effect=mock_fetch_resource_records_batch), \
          patch('redfetch.download.download_file_async', side_effect=_mock_download_file_async) as mock_download, \
          patch('redfetch.download.extract_and_discard_zip'), \
          patch('redfetch.store.initialize_db'), \
@@ -315,9 +319,12 @@ def test_download_watched_with_overlapping_dependency(
     mock_settings.SPECIAL_RESOURCES = mock_settings_151_and_153['SPECIAL_RESOURCES']
     mock_settings.from_env.return_value = MagicMock(**mock_settings_151_and_153)
     
-    # Mock API fetch to return our special resources
-    async def mock_fetch_resources_batch(client, resource_ids):
-        return [mock_api_responses[str(rid)] for rid in resource_ids if str(rid) in mock_api_responses]
+    async def mock_fetch_resource_records_batch(client, resource_ids):
+        return [
+            ResourceRecord(resource_id=str(rid), status='downloadable', resource=mock_api_responses[str(rid)])
+            for rid in resource_ids
+            if str(rid) in mock_api_responses
+        ]
     
     async def mock_fetch_watched_resources(client):
         # Return empty list - we're only testing special resources
@@ -357,9 +364,9 @@ def test_download_watched_with_overlapping_dependency(
          patch('redfetch.config_firstrun.first_run_setup', return_value=temp_dir), \
          patch('redfetch.auth.initialize_keyring'), \
          patch('redfetch.auth.authorize'), \
-         patch('redfetch.api.get_api_headers', return_value={'Authorization': 'Bearer test'}), \
+         patch('redfetch.auth.get_api_headers', return_value={'Authorization': 'Bearer test'}), \
          patch('redfetch.api.is_kiss_downloadable', return_value=True), \
-         patch('redfetch.api.fetch_resources_batch', side_effect=mock_fetch_resources_batch), \
+         patch('redfetch.api.fetch_resource_records_batch', side_effect=mock_fetch_resource_records_batch), \
          patch('redfetch.api.fetch_watched_resources', side_effect=mock_fetch_watched_resources), \
          patch('redfetch.api.fetch_licenses', side_effect=mock_fetch_licenses), \
          patch('redfetch.net.fetch_manifest_cached', side_effect=mock_fetch_manifest), \

@@ -1,14 +1,15 @@
 import asyncio
-import traceback
+import logging
 import webbrowser
 from typing import Any, Dict, Optional
 
-import aiosqlite
 from aiohttp import web
 
 from redfetch import store
 from redfetch import sync
 from redfetch.special import compute_special_status
+
+log = logging.getLogger(__name__)
 
 
 REDGUIDES_ORIGIN = "https://www.redguides.com"
@@ -30,22 +31,15 @@ async def cors_middleware(request: web.Request, handler):
 
 
 async def _get_root_version_local_async(db_name: str, resource_id: str) -> Optional[int]:
-    """Async helper to fetch root version_local (parent_id=0)."""
+    """Async helper to fetch root version_local for a tracked root install target."""
     db_path = store.get_db_path(db_name)
     try:
-        async with aiosqlite.connect(db_path, timeout=30.0) as conn:
-            async with conn.execute(
-                "SELECT version_local FROM downloads WHERE parent_id = 0 AND resource_id = ?",
-                (int(resource_id),),
-            ) as cur:
-                row = await cur.fetchone()
-                return row[0] if row else None
-    except aiosqlite.OperationalError as e:
+        return await store.fetch_root_version_local(db_path, resource_id)
+    except Exception as e:
         if "no such table" in str(e):
             # Table doesn't exist yet; treat as not installed
             return None
-        print("Database error during health check:", str(e))
-        traceback.print_exc()
+        log.error("Database error during health check: %s", e, exc_info=True)
         raise
 
 
@@ -68,7 +62,7 @@ async def handle_health(request: web.Request) -> web.Response:
 
         if version_local is None:
             return web.json_response({"action": "install"})
-        elif version_local < remote_version:
+        elif version_local != remote_version:
             return web.json_response({"action": "update"})
         else:
             return web.json_response({"action": "re-install"})
@@ -98,8 +92,7 @@ async def handle_download(request: web.Request) -> web.Response:
             return web.json_response({"success": True, "message": "Download completed successfully."})
         return web.json_response({"success": False, "message": "Download failed due to internal error."}, status=500)
     except Exception as e:
-        print("Error during download:", str(e))
-        traceback.print_exc()
+        log.error("Error during download: %s", e, exc_info=True)
         return web.json_response({"success": False, "message": f"Download failed: {e}"}, status=500)
 
 
@@ -119,8 +112,7 @@ async def handle_download_watched(request: web.Request) -> web.Response:
             {"success": False, "message": "Download of one or more resources failed."}, status=500
         )
     except Exception as e:
-        print("Error during download of watched resources:", str(e))
-        traceback.print_exc()
+        log.error("Error during download of watched resources: %s", e, exc_info=True)
         return web.json_response({"success": False, "message": f"Download failed: {e}"}, status=500)
 
 
@@ -146,12 +138,11 @@ async def handle_reset_download_date(request: web.Request) -> web.Response:
         try:
             with store.get_db_connection(db_name) as conn:
                 cursor = conn.cursor()
-                store.reset_download_date_for_resource(cursor, str(resource_id))
+                store.reset_versions_for_resource(cursor, str(resource_id))
                 conn.commit()
             return True
         except Exception as e:
-            print("Error during resetting download date:", str(e))
-            traceback.print_exc()
+            log.error("Error during resetting download date: %s", e, exc_info=True)
             return False
 
     ok = await asyncio.to_thread(_reset)
@@ -175,17 +166,14 @@ async def create_app(
     settings,
     db_name: str,
     headers: dict,
-    special_resources,
     category_map,
 ) -> web.Application:
     """Create the aiohttp application for the RedGuides interface."""
     app = web.Application(middlewares=[cors_middleware])
 
-    # Store shared context
     app["settings"] = settings
     app["db_name"] = db_name
     app["headers"] = headers
-    app["special_resources"] = special_resources
     app["category_map"] = category_map
 
     app.router.add_get("/health", handle_health)
@@ -202,26 +190,25 @@ async def run_server_async(
     settings,
     db_name: str,
     headers: dict,
-    special_resources,
     category_map,
 ) -> None:
     """Run the interface server until cancelled."""
-    app = await create_app(settings, db_name, headers, special_resources, category_map)
+    app = await create_app(settings, db_name, headers, category_map)
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 7734)
+    site = web.TCPSite(runner, "127.0.0.1", 7734)
     await site.start()
 
     webbrowser.open_new("https://www.redguides.com/cookie/set_marker.php")
-    print("Server starting. Browse resources on https://www.redguides.com/community/resources")
+    log.info("Server starting. Browse resources on https://www.redguides.com/community/resources")
 
     try:
         # Wait indefinitely until the task is cancelled by the caller (CLI or TUI).
         await asyncio.Event().wait()
     except asyncio.CancelledError:
-        print("Server task cancelled, shutting down...")
+        log.info("Server task cancelled, shutting down...")
     finally:
         await runner.cleanup()
-        print("Server stopped.")
+        log.info("Server stopped.")
 

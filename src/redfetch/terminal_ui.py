@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 import subprocess
+import traceback
 import webbrowser
 from pathlib import Path
 from itertools import cycle
@@ -33,6 +34,7 @@ from textual.selection import Selection
 # local
 from redfetch import store
 from redfetch import api
+from redfetch import auth
 from redfetch import config
 from redfetch import net
 from redfetch import processes
@@ -40,6 +42,7 @@ from redfetch import utils
 from redfetch import meta
 from redfetch import sync
 from redfetch import desktop_shortcut
+from redfetch.sync_types import SyncEvent
 from redfetch.runtime_errors import display_fatal_error
 
 # for dev mode, from root dir:
@@ -482,7 +485,7 @@ class SettingsTab(ScrollableContainer):
                 tooltip="A collection of scripts for this server type that RedGuides staff recommends.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
-            yield Label("Close MQ pre-udpate:", classes="left_middle")
+            yield Label("Close MQ pre-update:", classes="left_middle")
             yield Switch(
                 id="auto_terminate_processes",
                 value=config.settings.from_env(current_env).get(
@@ -1444,18 +1447,7 @@ class Redfetch(App):
     def _queue_signature_reconcile(self) -> None:
         if self.is_updating:
             return
-        self._reconcile_signature_worker()
-
-    @work(exclusive=True, group="signature_reconcile")
-    async def _reconcile_signature_worker(self) -> None:
-        db_name = f"{self.current_env}_resources.db"
-        result = await asyncio.to_thread(store.reconcile_install_signature, db_name, self.current_env)
-        if result:
-            if result.get("global_reset"):
-                message = f"Cache cleared for {self.current_env}; next update will re-download into the new path."
-            else:
-                message = f"Cache cleared for {self.current_env}; next update will re-download updated destinations."
-            self.notify(message)
+        self.notify(f"Settings updated for {self.current_env}; changes will apply on next sync.")
 
     #
     # Toggle handlers
@@ -1859,7 +1851,7 @@ class Redfetch(App):
         if cancelled_workers:
             self.notify("Update canceled.", severity="warning")
 
-    def on_sync_event(self, event: tuple) -> None:
+    def on_sync_event(self, event: SyncEvent) -> None:
         """Handle events from the sync process to update the UI."""
         event_type, resource_id, details = event
         self._process_sync_event(event_type, resource_id, details)
@@ -1895,9 +1887,9 @@ class Redfetch(App):
     async def run_synchronization(self, resource_ids=None, navmesh_override=None):
         try:
             db_name = f"{self.current_env}_resources.db"
-            await asyncio.to_thread(store.initialize_db, db_name, self.current_env)
+            await asyncio.to_thread(store.initialize_db, db_name)
             db_path = store.get_db_path(db_name)
-            headers = await api.get_api_headers()
+            headers = await auth.get_api_headers()
             if resource_ids:
                 reset_success = await asyncio.to_thread(
                     store.reset_download_dates_for_resources, db_name, resource_ids
@@ -1911,8 +1903,8 @@ class Redfetch(App):
                 navmesh_override=navmesh_override,
             )
             return result
-        except Exception as e:
-            print(f"Error in run_synchronization: {e}")
+        except Exception:
+            traceback.print_exc()
             return False
 
     def update_complete(self, result: bool, button: Button) -> None:
@@ -2038,36 +2030,30 @@ class Redfetch(App):
 
     @work(exclusive=True, group="interface_group")
     async def _prepare_redguides_interface_worker(self) -> bool:
-        try:
-            db_name = f"{self.current_env}_resources.db"
-            await asyncio.to_thread(store.initialize_db, db_name, self.current_env)
-            headers = await api.get_api_headers()
-            settings = config.settings.from_env(self.current_env)
-            special_resources = settings.SPECIAL_RESOURCES
-            category_map = config.CATEGORY_MAP
-        except Exception:
-            raise
-        else:
-            self._redguides_interface_worker(
-                settings,
-                db_name,
-                headers,
-                special_resources,
-                category_map,
-            )
-            return True
+        db_name = f"{self.current_env}_resources.db"
+        await asyncio.to_thread(store.initialize_db, db_name)
+        headers = await auth.get_api_headers()
+        settings = config.settings.from_env(self.current_env)
+        category_map = config.CATEGORY_MAP
+        self._redguides_interface_worker(
+            settings,
+            db_name,
+            headers,
+            category_map,
+        )
+        return True
 
     @work(exclusive=True, group="interface_group")
-    async def _redguides_interface_worker(self, settings, db_name, headers, special_resources, category_map) -> bool:
+    async def _redguides_interface_worker(self, settings, db_name, headers, category_map) -> bool:
         from redfetch.listener import run_server_async
-        await run_server_async(settings, db_name, headers, special_resources, category_map)
+        await run_server_async(settings, db_name, headers, category_map)
         return True
     
     @work
     async def load_user_level(self):
         main_screen = self._get_main_screen()
-        self.username = await api.get_username()
-        headers = await api.get_api_headers()
+        self.username = await auth.get_username()
+        headers = await auth.get_api_headers()
         if await api.is_kiss_downloadable(headers):
             greeting = f"[italic]Hail, [bold]{self.username}![/bold][/italic]"
             greetingacct = (
@@ -2099,14 +2085,14 @@ class Redfetch(App):
             raise RuntimeError("Intentional crash test from _check_ding_level_worker.")
 
         main_screen = self._get_main_screen()
-        headers = await api.get_api_headers()
+        headers = await auth.get_api_headers()
         
         # Force a fresh check, bypassing cache
         is_level_2 = await api.is_kiss_downloadable(headers, force_refresh=True)
         
         if is_level_2:
             # User is now level 2! Update the UI
-            username = getattr(self, 'username', await api.get_username())
+            username = getattr(self, 'username', await auth.get_username())
             greeting = f"[italic]Hail, [bold]{username}![/bold][/italic]"
             greetingacct = (
                 f"[italic][bold]{username}, thank you for being level 2[/bold][/italic] 💛"
@@ -2171,19 +2157,19 @@ class NavMeshPromptScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         yield Grid(
             Label("🧭 Download navigation meshes? (recommended)", id="question"),
-            Button("Yes", variant="primary", id="yesmq"),
-            Button("No", variant="default", id="nomq"),
-            Center(Button("Always", variant="primary", id="alwaysmq")),
-            Center(Button("Never", variant="default", id="nevermq")),
+            Button("Yes", variant="primary", id="yesnav"),
+            Button("No", variant="default", id="nonav"),
+            Center(Button("Always", variant="primary", id="alwaysnav")),
+            Center(Button("Never", variant="default", id="nevernav")),
             id="dialog",
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "yesmq":
+        if event.button.id == "yesnav":
             self.dismiss(self.RESPONSE_YES)
-        elif event.button.id == "alwaysmq":
+        elif event.button.id == "alwaysnav":
             self.dismiss(self.RESPONSE_ALWAYS)
-        elif event.button.id == "nevermq":
+        elif event.button.id == "nevernav":
             self.dismiss(self.RESPONSE_NEVER)
         else:
             self.dismiss(self.RESPONSE_NO)

@@ -8,16 +8,19 @@ redfetch supports two auth modes:
 # standard
 import base64
 import hashlib
+import asyncio
 import os
 import time
 import webbrowser
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 
 # third-party
 import httpx
 import keyring  # for storing tokens (secrets only)
+from diskcache import Cache
 from keyring.errors import NoKeyringError
 
 # Local
@@ -49,6 +52,77 @@ def _get_setting(key: str, default=None):
         return default if val in ("", None) else val
 
     return default
+
+
+# ---------------------------------------------------------------------------
+# Disk cache for non-secret identity data (user_id, username, token_expiry)
+# ---------------------------------------------------------------------------
+
+_disk_cache = None
+
+
+def _get_disk_cache_instance():
+    """Create a diskcache.Cache in the config directory."""
+    cache_dir = getattr(config, 'config_dir', None) or os.getenv('REDFETCH_CONFIG_DIR')
+    if not cache_dir:
+        cache_dir = os.getcwd()
+    return Cache(os.path.join(cache_dir, '.cache'))
+
+
+def _ensure_cache():
+    global _disk_cache
+    if _disk_cache is None:
+        _disk_cache = _get_disk_cache_instance()
+    return _disk_cache
+
+
+def get_disk_cache():
+    """Return the shared disk cache (for non-identity caching by other modules)."""
+    return _ensure_cache()
+
+
+def set_user_id(user_id: str) -> None:
+    """Store user_id in disk cache (non-sensitive public identifier)."""
+    _ensure_cache().set('user_id', str(user_id))
+
+
+def get_user_id() -> Optional[str]:
+    """Retrieve user_id from disk cache."""
+    return _ensure_cache().get('user_id')
+
+
+def set_username(username: str) -> None:
+    """Store username in disk cache (non-sensitive public display name)."""
+    _ensure_cache().set('username', username)
+
+
+def get_username_from_cache() -> Optional[str]:
+    """Retrieve username from disk cache."""
+    return _ensure_cache().get('username')
+
+
+def set_token_expiry(expires_at: str) -> None:
+    """Store OAuth token expiry timestamp in disk cache."""
+    _ensure_cache().set('expires_at', expires_at)
+
+
+def get_token_expiry() -> Optional[str]:
+    """Retrieve OAuth token expiry timestamp from disk cache."""
+    return _ensure_cache().get('expires_at')
+
+
+def clear_disk_cache():
+    """Clear all cached non-secret data."""
+    global _disk_cache
+    cache = _ensure_cache()
+    try:
+        cache.clear()
+    finally:
+        try:
+            cache.close()
+        except Exception:
+            pass
+        _disk_cache = None
 
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
@@ -170,17 +244,15 @@ def _cache_user_info(access_token: str | None) -> None:
     """Fetch /api/me and cache username/user_id (best-effort)."""
     if not access_token:
         return
-    from redfetch import api
-
     headers = {"Authorization": f"Bearer {access_token}"}
     resp = httpx.get(f"{BASE_URL}/api/me", headers=headers, timeout=10.0)
     resp.raise_for_status()
     data = resp.json()
     me = data.get("me") or {}
     if me.get("username"):
-        api.set_username(str(me["username"]))
+        set_username(str(me["username"]))
     if me.get("user_id"):
-        api.set_user_id(str(me["user_id"]))
+        set_user_id(str(me["user_id"]))
 
 
 def authorize():
@@ -252,15 +324,11 @@ def run_server(*, expected_state: str, redirect_uri: str, timeout_seconds: int =
 
 def store_tokens_in_keyring(data):
     """Store OAuth tokens securely in keyring; store non-secrets in disk cache."""
-    from redfetch import api
-    
-    # Secrets go in keyring
     keyring.set_password(KEYRING_SERVICE_NAME, "access_token", data["access_token"])
     keyring.set_password(KEYRING_SERVICE_NAME, "refresh_token", data["refresh_token"])
     
-    # Non-sensitive data goes in disk cache
     expires_at = datetime.now().timestamp() + int(data.get("expires_in", 0) or 0)
-    api.set_token_expiry(str(expires_at))
+    set_token_expiry(str(expires_at))
 
 
 def refresh_token(client_id: str, client_secret: str | None, *, redirect_uri: str) -> bool:
@@ -297,9 +365,7 @@ def refresh_token(client_id: str, client_secret: str | None, *, redirect_uri: st
 
 def token_is_valid():
     """Check if the access token is still valid."""
-    from redfetch import api
-    
-    expires_at_str = api.get_token_expiry()
+    expires_at_str = get_token_expiry()
     if expires_at_str:
         expires_at = datetime.fromtimestamp(float(expires_at_str))
         now = datetime.now()
@@ -311,23 +377,18 @@ def token_is_valid():
 
 def get_cached_tokens():
     """Retrieve cached OAuth tokens from keyring and non-secrets from disk cache."""
-    from redfetch import api
-    
     data = {}
     data["access_token"] = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
     data["refresh_token"] = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
-    data["username"] = api.get_username_from_cache()
-    data["user_id"] = api.get_user_id()
+    data["username"] = get_username_from_cache()
+    data["user_id"] = get_user_id()
     return data
 
 
 def logout():
     """Clear stored credentials from keyring and all disk caches."""
-    from redfetch import api
     from redfetch import meta
-    from redfetch import net
 
-    # Clear secrets from keyring (including legacy entries that may exist from older versions)
     keyring_credentials = ["access_token", "refresh_token", "api_key"]
     legacy_credentials = ["user_id", "username", "expires_at"]
     
@@ -338,12 +399,10 @@ def logout():
             keyring.delete_password(KEYRING_SERVICE_NAME, credential)
             credentials_deleted = True
         except keyring.errors.PasswordDeleteError:
-            # Credential not found, nothing to delete
             pass
 
-    # Clear the persistent cache directory (API, manifest, PyPI version, etc.)
     try:
-        api.clear_api_cache()
+        clear_disk_cache()
         meta.clear_pypi_cache()
         net.clear_manifest_cache()
         credentials_deleted = True
@@ -354,6 +413,132 @@ def logout():
         print("You have been logged out successfully.")
     else:
         print("No active session found. You were not logged in.")
+
+
+# ---------------------------------------------------------------------------
+# API identity resolution
+# ---------------------------------------------------------------------------
+
+async def fetch_me(client: httpx.AsyncClient) -> Optional[dict]:
+    """Fetch current user info from /api/me."""
+    url = f'{BASE_URL}/api/me'
+    try:
+        data = await net.get_json(client, url)
+        return {
+            'user_id': str(data['me']['user_id']),
+            'username': data['me']['username']
+        }
+    except Exception as e:
+        print(f"Failed to retrieve user info: {e}")
+        return None
+
+
+async def fetch_user_id_from_api(api_key):
+    """Fetch user_id using the API key; caches it."""
+    async with httpx.AsyncClient(headers={'XF-Api-Key': api_key}, http2=True) as client:
+        me = await fetch_me(client)
+    if me:
+        set_user_id(me['user_id'])
+        return me['user_id']
+    return None
+
+
+async def fetch_username(api_key, cache=True):
+    """Fetch username via API key; caches username and user_id."""
+    async with httpx.AsyncClient(headers={'XF-Api-Key': api_key}, http2=True) as client:
+        me = await fetch_me(client)
+    if me:
+        if cache:
+            set_username(me['username'])
+            set_user_id(me['user_id'])
+        return me['username']
+    return "Unknown"
+
+
+async def get_api_headers():
+    """Return auth headers for XenForo API requests.
+
+    Priority order:
+    1) API key via env: `REDGUIDES_API_KEY`
+    2) Native OAuth2: cached `access_token` from keyring
+    """
+    api_key = os.environ.get('REDGUIDES_API_KEY')
+    if api_key:
+        headers = {'XF-Api-Key': api_key}
+        user_id = os.environ.get('REDGUIDES_USER_ID')
+        if not user_id:
+            user_id = await fetch_user_id_from_api(api_key)
+            if not user_id:
+                raise RuntimeError("Unable to retrieve user ID using the provided API key.")
+        headers['XF-Api-User'] = str(user_id)
+        return headers
+
+    access_token = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
+    refresh_tok = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
+
+    if access_token or refresh_tok:
+        if access_token and token_is_valid():
+            return {"Authorization": f"Bearer {access_token}"}
+
+        if refresh_tok:
+            client_id = _get_setting("OAUTH_CLIENT_ID")
+            client_secret = _get_setting("OAUTH_CLIENT_SECRET", "")
+            redirect_uri = _get_setting("OAUTH_REDIRECT_URI", DEFAULT_REDIRECT_URI)
+
+            if not client_id:
+                raise RuntimeError("OAuth client is not configured.")
+
+            refreshed = await asyncio.to_thread(
+                refresh_token,
+                str(client_id),
+                str(client_secret or ""),
+                redirect_uri=str(redirect_uri),
+            )
+            if refreshed:
+                access_token = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
+                if access_token:
+                    return {"Authorization": f"Bearer {access_token}"}
+
+            raise RuntimeError("OAuth token refresh failed. Please run `redfetch logout` and authorize again.")
+
+        raise RuntimeError("OAuth access token is expired and no refresh token is available. Please authorize again.")
+
+    raise RuntimeError(
+        "Not authenticated. Set REDGUIDES_API_KEY (and optionally REDGUIDES_USER_ID), "
+        "or authorize via OAuth."
+    )
+
+
+async def get_username():
+    """Fetch the username from the environment variable, disk cache, or API."""
+    username = os.environ.get('REDFETCH_USERNAME')
+    if username:
+        return username
+
+    username = get_username_from_cache()
+    if username:
+        return username
+
+    api_key = os.environ.get('REDGUIDES_API_KEY')
+    if api_key:
+        username = await fetch_username(api_key)
+        if username != "Unknown":
+            return username
+        raise RuntimeError("Unable to retrieve username using the provided API key.")
+
+    access_token = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
+    refresh_tok = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
+    if access_token or refresh_tok:
+        headers = await get_api_headers()
+        async with httpx.AsyncClient(headers=headers, http2=True) as client:
+            me = await fetch_me(client)
+        if me and me.get("username"):
+            set_username(me["username"])
+            set_user_id(me["user_id"])
+            return me["username"]
+        raise RuntimeError("Unable to retrieve username using the stored OAuth token.")
+
+    raise RuntimeError("Username not found. Set REDGUIDES_API_KEY or authorize via OAuth.")
 
 
 def initialize_keyring():

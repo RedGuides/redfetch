@@ -328,14 +328,14 @@ def _release_disk_caches() -> None:
         errors.append(f"PyPI cache: {exc}")
 
     try:
-        from redfetch import api
+        from redfetch import auth
     except Exception as exc:
-        errors.append(f"API cache import: {exc}")
+        errors.append(f"Auth cache import: {exc}")
     else:
         try:
-            api.clear_api_cache()
+            auth.clear_disk_cache()
         except Exception as exc:
-            errors.append(f"API cache: {exc}")
+            errors.append(f"Disk cache: {exc}")
 
     try:
         from redfetch import net
@@ -356,9 +356,6 @@ def uninstall():
     # Import the logout function from auth module
     from .auth import logout
 
-    console = Console()
-    
-    # Initialize config before using it
     config.initialize_config()
 
     console.print("\n[bold]Uninstallation Process:[/bold]")

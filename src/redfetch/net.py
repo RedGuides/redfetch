@@ -17,8 +17,8 @@ BASE_URL = os.environ.get("REDFETCH_BASE_URL", "https://www.redguides.com/commun
 # Manifest endpoint provided by the "Redbot - API Extensions" addon
 MANIFEST_URL = f"{BASE_URL}/resources-manifest"
 
-# Manifest cache: 5 minutes TTL
-_MANIFEST_TTL_SECONDS = 300
+# Manifest cache: 60 seconds TTL
+_MANIFEST_TTL_SECONDS = 60
 _manifest_cache: TTLCache = TTLCache(maxsize=1, ttl=_MANIFEST_TTL_SECONDS)  # In-memory
 _manifest_disk_cache: Optional[Cache] = None  # Lazy-loaded disk cache
 
@@ -64,7 +64,7 @@ async def get_json(client: httpx.AsyncClient, url: str, params: Optional[Dict[st
 
 
 async def fetch_manifest_cached(client: httpx.AsyncClient) -> dict:
-    """Fetch manifest with 5-minute cache."""
+    """Fetch manifest with a 60-second cache."""
     manifest = _manifest_cache.get("manifest")
     if manifest:
         return manifest
@@ -81,7 +81,7 @@ async def fetch_manifest_cached(client: httpx.AsyncClient) -> dict:
     return manifest
 
 
-async def is_mq_down_async(client: httpx.AsyncClient) -> bool:
+async def _is_mq_down_async(client: httpx.AsyncClient) -> bool:
     """Return True if MQ is down for current env."""
     url = "https://www.redguides.com/update/ready.json"
     try:
@@ -105,5 +105,5 @@ async def is_mq_down_async(client: httpx.AsyncClient) -> bool:
 async def is_mq_down() -> bool:
     """Return True if MQ is down for current env."""
     async with httpx.AsyncClient(timeout=10.0) as client:
-        return await is_mq_down_async(client)
+        return await _is_mq_down_async(client)
 

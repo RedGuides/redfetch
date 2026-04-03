@@ -52,7 +52,7 @@ def _extract_artifact(payload: dict) -> RemoteArtifact | None:
 
 
 def _payload_details(payload: dict | None) -> _PayloadDetails:
-    """orchestrator for extracting the payload details"""
+    """Bundle all fields extracted from a raw API payload."""
     if not payload:
         return _PayloadDetails(None, None, None, None)
     return _PayloadDetails(
@@ -171,15 +171,15 @@ async def fetch_remote_snapshot(
     if ids_needing_live_check:
         live_records = await api.fetch_resource_records_batch(client, ids_needing_live_check)
         for record in live_records:
-            resource_id = str(record["resource_id"])
+            resource_id = record.resource_id
             manifest_details = manifest_cache.get(resource_id)
-            payload = record.get("resource")
-            status = record.get("status")
+            payload = record.resource
+            status = record.status
 
             if status != "downloadable":
                 remote_resources[resource_id] = _blocked_state(
                     resource_id,
-                    status=status or "fetch_error",
+                    status=status,
                     manifest_details=manifest_details,
                     payload=payload,
                 )

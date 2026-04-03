@@ -13,8 +13,12 @@ from redfetch.sync_types import (
     ExecutionResult,
     ExecutionResultItem,
     PlannedAction,
+    PlanReason,
     RemoteResourceState,
     RemoteSnapshot,
+    ResultOutcome,
+    SyncEvent,
+    SyncEventCallback,
 )
 
 DOWNLOAD_CONCURRENCY = 6
@@ -28,10 +32,10 @@ DownloadSuccessHook = Callable[
 
 def _make_item(
     action: PlannedAction,
-    outcome: str,
+    outcome: ResultOutcome,
     *,
-    reason: str | None = None,
-    version: str | None = None,
+    reason: PlanReason | None = None,
+    version: int | None = None,
     error: str | None = None,
 ) -> ExecutionResultItem:
     """Fill out a result record for the resource. Auto-copies identity fields so callers only pass what varies."""
@@ -73,16 +77,16 @@ async def execute_plan(
     desired_set: DesiredSet,
     remote_snapshot: RemoteSnapshot,
     execution_plan: ExecutionPlan,
-    on_event: Callable | None = None,
+    on_event: SyncEventCallback | None = None,
     on_download_success: DownloadSuccessHook | None = None,
 ) -> ExecutionResult:
     """Execute planned actions (skips, downloads, etc.) and build the result report."""
     result = ExecutionResult(items={})
     satisfied: set[str] = set()
 
-    def emit(kind: str, resource_id: int, detail: str) -> None:
+    def emit(event: SyncEvent) -> None:
         if on_event:
-            on_event((kind, resource_id, detail))
+            on_event(event)
 
     for action in execution_plan.actions.values():
         outcome = _INSTANT_OUTCOMES.get(action.action)
@@ -92,7 +96,7 @@ async def execute_plan(
         result.items[action.target_key] = _make_item(action, outcome, version=version)
         if action.action == "skip":
             satisfied.add(action.target_key)
-        emit("done", action.resource_id, outcome)
+        emit(("done", action.resource_id, outcome))
 
     download_actions = {
         k: a for k, a in execution_plan.actions.items() if a.action == "download"
@@ -112,18 +116,18 @@ async def execute_plan(
 
             if parent and parent not in satisfied:
                 result.items[key] = _make_item(action, "blocked", reason="parent_failed")
-                emit("done", action.resource_id, "blocked")
+                emit(("done", action.resource_id, "blocked"))
                 return
 
             if action.artifact is None or action.resolved_path is None:
                 result.items[key] = _make_item(
                     action, "error", error="missing artifact or resolved path",
                 )
-                emit("done", action.resource_id, "error")
+                emit(("done", action.resource_id, "error"))
                 return
 
             async with sem:
-                emit("start", action.resource_id, action.title)
+                emit(("start", action.resource_id, action.title))
                 ok, error_detail = await _do_download(client, action)
 
             if ok:
@@ -137,10 +141,10 @@ async def execute_plan(
                         action,
                         remote_snapshot.resources[action.resource_id],
                     )
-                emit("done", action.resource_id, "downloaded")
+                emit(("done", action.resource_id, "downloaded"))
             else:
                 result.items[key] = _make_item(action, "error", error=error_detail)
-                emit("done", action.resource_id, "error")
+                emit(("done", action.resource_id, "error"))
         finally:
             gate[key].set()
 

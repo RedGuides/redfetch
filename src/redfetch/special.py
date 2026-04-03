@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Set, TypedDict
+from typing import Dict, Iterable, Set, TypedDict
 
 from redfetch import config
 
@@ -34,9 +34,7 @@ def _build_indexes(special_resources: Dict[str, dict]) -> SpecialIndexes:
         opted_in_specials.add(parent_id)
         for dep_id, dep_details in parent_details.get('dependencies', {}).items():
             if dep_details and dep_details.get('opt_in', False):
-                if dep_id not in dependency_parents:
-                    dependency_parents[dep_id] = set()
-                dependency_parents[dep_id].add(parent_id)
+                dependency_parents.setdefault(dep_id, set()).add(parent_id)
 
     return SpecialIndexes(opted_in_specials=opted_in_specials, dependency_parents=dependency_parents)
 
@@ -44,31 +42,11 @@ def _build_indexes(special_resources: Dict[str, dict]) -> SpecialIndexes:
 def is_resource_opted_in(resource_id: str) -> bool:
     """Return True if the given resource is an opted-in special resource."""
     special_resources = _get_special_resources()
-    details = special_resources.get(str(resource_id))
+    details = special_resources.get(resource_id)
     return bool(details and details.get('opt_in', False))
 
 
-def get_flatten_status(resource_id: str, is_dependency: bool = False, parent_resource_id: Optional[str] = None) -> bool:
-    """Return True if the resource should be flattened during extraction."""
-    special_resources = _get_special_resources()
-    
-    if is_dependency and parent_resource_id:
-        parent_resource = special_resources.get(str(parent_resource_id))
-        if parent_resource and 'dependencies' in parent_resource:
-            dependencies = parent_resource['dependencies']
-            if str(resource_id) in dependencies:
-                dependency_info = dependencies[str(resource_id)]
-                if 'flatten' in dependency_info:
-                    return bool(dependency_info['flatten'])
-    
-    special_resource = special_resources.get(str(resource_id))
-    if special_resource and 'flatten' in special_resource:
-        return bool(special_resource['flatten'])
-    
-    return False
-
-
-def compute_special_status(resource_ids: Optional[Iterable[str]] = None) -> Dict[str, SpecialResourceInfo]:
+def compute_special_status(resource_ids: Iterable[str] | None = None) -> Dict[str, SpecialResourceInfo]:
     """Compute special/dependency status for IDs (or all opted-in if None)."""
     special_resources = _get_special_resources()
     indexes = _build_indexes(special_resources)
@@ -77,14 +55,14 @@ def compute_special_status(resource_ids: Optional[Iterable[str]] = None) -> Dict
     if resource_ids is None:
         candidate_ids: Set[str] = set(indexes.opted_in_specials) | set(indexes.dependency_parents.keys())
     else:
-        candidate_ids = set(str(rid) for rid in resource_ids)
+        candidate_ids = set(resource_ids)
         # For each provided parent id, if opted-in, include its opted-in dependencies
         for rid in list(candidate_ids):
-            parent_details = special_resources.get(str(rid))
+            parent_details = special_resources.get(rid)
             if parent_details and parent_details.get('opt_in', False):
                 for dep_id, dep_details in parent_details.get('dependencies', {}).items():
                     if dep_details and dep_details.get('opt_in', False):
-                        candidate_ids.add(str(dep_id))
+                        candidate_ids.add(dep_id)
 
     status: Dict[str, SpecialResourceInfo] = {}
     for rid in candidate_ids:

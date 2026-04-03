@@ -1,241 +1,344 @@
-"""Planner-level tests for sync queue eligibility."""
+"""Planner-level tests for execution eligibility and blocking."""
 
 import asyncio
-import sqlite3
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from redfetch import store, sync
+from redfetch import sync
+from redfetch.sync_planner import build_execution_plan
+from redfetch.sync_types import (
+    DesiredInstallTarget,
+    DesiredSet,
+    ExecutionResult,
+    ExecutionResultItem,
+    LocalInstallState,
+    LocalSnapshot,
+    RemoteArtifact,
+    RemoteResourceState,
+    RemoteSnapshot,
+)
 
 
-def make_resource_payload(
-    resource_id: int,
-    *,
-    version_id: int = 101,
-    file_id: int = 10001,
-    category_id: int = 8,
-    title: str | None = None,
-) -> dict:
-    return {
-        "resource_id": resource_id,
-        "title": title or f"Resource {resource_id}",
-        "Category": {"parent_category_id": category_id},
-        "current_files": [
-            {
-                "id": file_id,
-                "filename": f"{resource_id}.zip",
-                "download_url": f"https://example.com/{resource_id}.zip",
-                "hash": "d41d8cd98f00b204e9800998ecf8427e",
-            }
-        ],
-        "current_version": {"version_id": version_id},
-    }
+def root_target(resource_id: str, *, title: str = "Resource", category_id: int = 8) -> DesiredInstallTarget:
+    return DesiredInstallTarget(
+        target_key=f"/{resource_id}/",
+        resource_id=resource_id,
+        parent_id=None,
+        parent_target_key=None,
+        root_resource_id=resource_id,
+        target_kind="root",
+        sources={"special"},
+        title=title,
+        category_id=category_id,
+        resolved_path=f"C:/downloads/{resource_id}",
+        subfolder=None,
+        flatten=False,
+        protected_files=[],
+        explicit_root=False,
+    )
 
 
-def make_fetched_data(*, special_status: dict, special_payloads: list[dict]) -> dict:
-    return {
-        "watched_resources": [],
-        "licensed_resources": [],
-        "special_resource_status": special_status,
-        "special_resources_data": special_payloads,
-    }
+def dependency_target(resource_id: str, parent_id: str) -> DesiredInstallTarget:
+    return DesiredInstallTarget(
+        target_key=f"/{parent_id}/{resource_id}/",
+        resource_id=resource_id,
+        parent_id=parent_id,
+        parent_target_key=f"/{parent_id}/",
+        root_resource_id=parent_id,
+        target_kind="dependency",
+        sources={"dependency"},
+        title=f"Dependency {resource_id}",
+        category_id=8,
+        resolved_path=f"C:/downloads/{parent_id}/{resource_id}",
+        subfolder=None,
+        flatten=False,
+        protected_files=[],
+        explicit_root=False,
+    )
 
 
-@pytest.fixture
-def db_path(tmp_path) -> str:
-    path = tmp_path / "queue_rules.db"
-    conn = sqlite3.connect(path)
-    cursor = conn.cursor()
-    store._ensure_metadata(cursor)
-    store._ensure_downloads_table(cursor)
-    conn.commit()
-    conn.close()
-    return str(path)
+def desired_set_with_targets(*targets: DesiredInstallTarget) -> DesiredSet:
+    return DesiredSet(
+        mode="full",
+        resource_ids={target.resource_id for target in targets},
+        install_targets={target.target_key: target for target in targets},
+    )
 
 
-def seed_download_row(
-    db_path: str,
-    *,
-    resource_id: int,
-    parent_id: int = 0,
-    version_remote: int = 50,
-    version_local: int = 0,
-    is_special: int = 0,
-    is_watching: int = 0,
-    is_licensed: int = 0,
-    category_id: int = 8,
-    title: str | None = None,
-) -> None:
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO downloads (
-                resource_id, parent_id, category_id, title,
-                version_remote, version_local, filename, url, hash,
-                is_special, is_watching, is_licensed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                resource_id,
-                parent_id,
-                category_id,
-                title or f"Seeded {resource_id}",
-                version_remote,
-                version_local,
-                f"{resource_id}.zip",
-                f"https://stale.example/{resource_id}.zip",
-                "d41d8cd98f00b204e9800998ecf8427e",
-                is_special,
-                is_watching,
-                is_licensed,
-            ),
-        )
-        conn.commit()
+def downloadable_remote(resource_id: str, *, version_id: int = 101, title: str = "Resource") -> RemoteResourceState:
+    return RemoteResourceState(
+        resource_id=resource_id,
+        title=title,
+        category_id=8,
+        version_id=version_id,
+        status="downloadable",
+        artifact=RemoteArtifact(
+            file_id=version_id * 10,
+            filename=f"{resource_id}.zip",
+            download_url=f"https://example.com/{resource_id}.zip",
+            file_hash="d41d8cd98f00b204e9800998ecf8427e",
+        ),
+        source_note="manifest_plus_access_check",
+    )
 
 
-def run_sync_and_capture_queue(
-    db_path: str,
-    *,
-    fetched_data: dict,
-    resource_ids: list[str] | None = None,
-) -> tuple[bool, list[tuple[str, str | None]], int]:
-    queued: list[tuple[str, str | None]] = []
+def blocked_remote(resource_id: str, status: str) -> RemoteResourceState:
+    return RemoteResourceState(
+        resource_id=resource_id,
+        title=f"Blocked {resource_id}",
+        category_id=8,
+        version_id=101,
+        status=status,
+        artifact=None,
+        source_note="api_fallback",
+    )
 
-    async def fake_download_and_update(_db_path, _headers, to_download, _on_event):
-        queued.extend((task.resource_id, task.parent_resource_id) for task in to_download)
-        return [(task.resource_id, "downloaded") for task in to_download]
 
+def local_state(resource_id: str, *, version_local: int | None, parent_id: str | None = None) -> LocalInstallState:
+    target_key = f"/{resource_id}/" if parent_id is None else f"/{parent_id}/{resource_id}/"
+    return LocalInstallState(
+        target_key=target_key,
+        resource_id=resource_id,
+        parent_id=parent_id,
+        parent_target_key=None if parent_id is None else f"/{parent_id}/",
+        root_resource_id=resource_id if parent_id is None else parent_id,
+        target_kind="root" if parent_id is None else "dependency",
+        title=f"Local {resource_id}",
+        category_id=8,
+        version_local=version_local,
+        version_remote=version_local,
+        resolved_path=f"C:/downloads/{resource_id}",
+        subfolder=None,
+        flatten=False,
+        protected_files=[],
+        is_special=parent_id is None,
+        is_watching=False,
+        is_licensed=False,
+        is_explicit=False,
+        is_dependency=parent_id is not None,
+    )
+
+
+def test_plan_allows_downloadable_special_resource():
+    target = root_target("151", title="Downloadable Special")
+    execution_plan = build_execution_plan(
+        desired_set=desired_set_with_targets(target),
+        remote_snapshot=RemoteSnapshot(resources={"151": downloadable_remote("151", version_id=2001, title="Downloadable Special")}),
+        local_snapshot=LocalSnapshot(),
+
+        settings_env="LIVE",
+    )
+
+    action = execution_plan.actions["/151/"]
+    assert action.action == "download"
+    assert action.reason == "not_installed"
+
+
+def test_plan_blocks_special_resource_when_user_lacks_access():
+    target = root_target("151", title="Blocked Special")
+    execution_plan = build_execution_plan(
+        desired_set=desired_set_with_targets(target),
+        remote_snapshot=RemoteSnapshot(resources={"151": blocked_remote("151", "access_denied")}),
+        local_snapshot=LocalSnapshot(),
+
+        settings_env="LIVE",
+    )
+
+    action = execution_plan.actions["/151/"]
+    assert action.action == "block"
+    assert action.reason == "access_denied"
+
+
+def test_sync_aborts_before_execution_when_discovery_fails(tmp_path):
+    db_path = str(tmp_path / "queue_rules.db")
     with patch(
-        "redfetch.sync._fetch_from_api_async",
-        new=AsyncMock(return_value=fetched_data),
+        "redfetch.sync.config.settings",
+        SimpleNamespace(ENV="LIVE"),
     ), patch(
-        "redfetch.sync._download_and_update",
-        new=AsyncMock(side_effect=fake_download_and_update),
-    ) as download_mock:
-        result = asyncio.run(sync.sync(db_path, headers={}, resource_ids=resource_ids))
-
-    return result, queued, download_mock.await_count
-
-
-def test_queue_allows_downloadable_special_resource(db_path):
-    special_status = {
-        "151": {"is_special": True, "is_dependency": False, "parent_ids": set()},
-    }
-    fetched_data = make_fetched_data(
-        special_status=special_status,
-        special_payloads=[
-            make_resource_payload(
-                151,
-                version_id=2001,
-                file_id=92001,
-                title="Downloadable Special",
-            )
-        ],
-    )
-
-    result, queued, await_count = run_sync_and_capture_queue(db_path, fetched_data=fetched_data)
-
-    assert result is True
-    assert queued == [("151", None)]
-    assert await_count == 1
-
-
-def test_queue_blocks_special_resource_when_user_lacks_access(db_path):
-    special_status = {
-        "151": {"is_special": True, "is_dependency": False, "parent_ids": set()},
-    }
-    fetched_data = make_fetched_data(
-        special_status=special_status,
-        special_payloads=[],
-    )
-
-    result, queued, await_count = run_sync_and_capture_queue(db_path, fetched_data=fetched_data)
-
-    assert result is True
-    assert queued == []
-    assert await_count == 0
-
-
-def test_sync_aborts_before_queue_when_metadata_fetch_fails(db_path):
-    seed_download_row(
-        db_path,
-        resource_id=151,
-        version_remote=99,
-        version_local=0,
-        is_special=1,
-    )
-
-    with patch(
-        "redfetch.sync._fetch_from_api_async",
+        "redfetch.sync.store.load_local_snapshot",
+        new=AsyncMock(return_value=LocalSnapshot()),
+    ), patch(
+        "redfetch.sync.sync_discovery.discover_desired_set",
         new=AsyncMock(side_effect=RuntimeError("metadata exploded")),
     ), patch(
-        "redfetch.sync._download_and_update",
+        "redfetch.sync.sync_executor.execute_plan",
         new=AsyncMock(),
-    ) as download_mock:
+    ) as execute_mock:
         with pytest.raises(RuntimeError, match="metadata exploded"):
             asyncio.run(sync.sync(db_path, headers={}, resource_ids=None))
 
-    assert download_mock.await_count == 0
+    assert execute_mock.await_count == 0
 
 
-@pytest.mark.xfail(
-    reason="Current sync logic can re-queue a stale special row even when no fresh downloadable metadata exists."
-)
-def test_queue_blocks_stale_special_row_without_fresh_metadata(db_path):
-    seed_download_row(
-        db_path,
-        resource_id=151,
-        version_remote=77,
-        version_local=0,
-        is_special=1,
+def test_plan_blocks_stale_special_row_without_fresh_metadata():
+    target = root_target("151", title="Stale Special")
+    local_snapshot = LocalSnapshot(
+        install_targets={
+            "/151/": local_state("151", version_local=77),
+        }
+    )
+    execution_plan = build_execution_plan(
+        desired_set=desired_set_with_targets(target),
+        remote_snapshot=RemoteSnapshot(resources={"151": blocked_remote("151", "missing_files")}),
+        local_snapshot=local_snapshot,
+
+        settings_env="LIVE",
     )
 
-    special_status = {
-        "151": {"is_special": True, "is_dependency": False, "parent_ids": set()},
-    }
-    fetched_data = make_fetched_data(
-        special_status=special_status,
-        special_payloads=[],
+    action = execution_plan.actions["/151/"]
+    assert action.action == "block"
+    assert action.reason == "missing_files"
+
+
+def test_plan_blocks_dependency_when_parent_is_blocked():
+    root = root_target("151", title="Blocked Parent")
+    child = dependency_target("1865", "151")
+    execution_plan = build_execution_plan(
+        desired_set=desired_set_with_targets(root, child),
+        remote_snapshot=RemoteSnapshot(
+            resources={
+                "151": blocked_remote("151", "access_denied"),
+                "1865": downloadable_remote("1865", version_id=1234, title="Dependency Only"),
+            }
+        ),
+        local_snapshot=LocalSnapshot(
+            install_targets={
+                "/151/": local_state("151", version_local=50),
+            }
+        ),
+
+        settings_env="LIVE",
     )
 
-    result, queued, await_count = run_sync_and_capture_queue(db_path, fetched_data=fetched_data)
+    parent_action = execution_plan.actions["/151/"]
+    child_action = execution_plan.actions["/151/1865/"]
+    assert parent_action.action == "block"
+    assert parent_action.reason == "access_denied"
+    assert child_action.action == "block"
+    assert child_action.reason == "parent_blocked"
 
-    assert result is True
-    assert queued == []
-    assert await_count == 0
 
+def test_targeted_sync_returns_false_when_dependency_in_requested_closure_is_blocked(tmp_path):
+    db_path = str(tmp_path / "queue_rules.db")
+    root = root_target("151", title="Requested Root")
+    root.sources.add("explicit")
+    root.explicit_root = True
+    child = dependency_target("1865", "151")
 
-@pytest.mark.xfail(
-    reason="Current sync logic can queue a dependency when only a stale parent root row remains."
-)
-def test_queue_blocks_dependency_when_parent_is_blocked(db_path):
-    seed_download_row(
-        db_path,
-        resource_id=151,
-        version_remote=50,
-        version_local=50,
-        is_special=1,
+    desired_set = desired_set_with_targets(root, child)
+    desired_set.mode = "targeted"
+    desired_set.requested_root_ids = {"151"}
+
+    remote_snapshot = RemoteSnapshot(
+        resources={
+            "151": downloadable_remote("151", version_id=2001, title="Requested Root"),
+            "1865": blocked_remote("1865", "access_denied"),
+        }
+    )
+    execution_result = ExecutionResult(
+        items={
+            "/151/": ExecutionResultItem(
+                target_key="/151/",
+                resource_id="151",
+                outcome="downloaded",
+                reason="not_installed",
+                written_version=2001,
+            ),
+            "/151/1865/": ExecutionResultItem(
+                target_key="/151/1865/",
+                resource_id="1865",
+                outcome="blocked",
+                reason="access_denied",
+                written_version=None,
+            ),
+        }
     )
 
-    special_status = {
-        "151": {"is_special": True, "is_dependency": False, "parent_ids": set()},
-        "1865": {"is_special": False, "is_dependency": True, "parent_ids": {"151"}},
-    }
-    fetched_data = make_fetched_data(
-        special_status=special_status,
-        special_payloads=[
-            make_resource_payload(
-                1865,
-                version_id=1234,
-                file_id=81234,
-                title="Dependency Only",
-            )
-        ],
+    with patch(
+        "redfetch.sync.config.settings",
+        SimpleNamespace(ENV="LIVE"),
+    ), patch(
+        "redfetch.sync.store.load_local_snapshot",
+        new=AsyncMock(return_value=LocalSnapshot()),
+    ), patch(
+        "redfetch.sync.sync_discovery.discover_desired_set",
+        new=AsyncMock(return_value=desired_set),
+    ), patch(
+        "redfetch.sync.sync_remote.fetch_remote_snapshot",
+        new=AsyncMock(return_value=remote_snapshot),
+    ), patch(
+        "redfetch.sync.sync_executor.execute_plan",
+        new=AsyncMock(return_value=execution_result),
+    ), patch(
+        "redfetch.sync.store.record_installed_state",
+        new=AsyncMock(),
+    ):
+        ok = asyncio.run(sync.sync(db_path, headers={}, resource_ids=["151"]))
+
+    assert ok is False
+
+
+def test_targeted_sync_returns_true_when_requested_closure_only_untracks_stale_dependency(tmp_path):
+    db_path = str(tmp_path / "queue_rules.db")
+    root = root_target("151", title="Requested Root")
+    root.sources.add("explicit")
+    root.explicit_root = True
+
+    desired_set = desired_set_with_targets(root)
+    desired_set.mode = "targeted"
+    desired_set.requested_root_ids = {"151"}
+
+    local_snapshot = LocalSnapshot(
+        install_targets={
+            "/151/": local_state("151", version_local=50),
+            "/151/1865/": local_state("1865", version_local=50, parent_id="151"),
+        }
+    )
+    remote_snapshot = RemoteSnapshot(
+        resources={
+            "151": downloadable_remote("151", version_id=2001, title="Requested Root"),
+        }
+    )
+    execution_result = ExecutionResult(
+        items={
+            "/151/": ExecutionResultItem(
+                target_key="/151/",
+                resource_id="151",
+                outcome="downloaded",
+                reason="outdated",
+                written_version=2001,
+            ),
+            "/151/1865/": ExecutionResultItem(
+                target_key="/151/1865/",
+                resource_id="1865",
+                outcome="untracked",
+                reason="not_desired",
+                written_version=None,
+            ),
+        }
     )
 
-    result, queued, await_count = run_sync_and_capture_queue(db_path, fetched_data=fetched_data)
+    with patch(
+        "redfetch.sync.config.settings",
+        SimpleNamespace(ENV="LIVE"),
+    ), patch(
+        "redfetch.sync.store.load_local_snapshot",
+        new=AsyncMock(return_value=local_snapshot),
+    ), patch(
+        "redfetch.sync.sync_discovery.discover_desired_set",
+        new=AsyncMock(return_value=desired_set),
+    ), patch(
+        "redfetch.sync.sync_remote.fetch_remote_snapshot",
+        new=AsyncMock(return_value=remote_snapshot),
+    ), patch(
+        "redfetch.sync.sync_executor.execute_plan",
+        new=AsyncMock(return_value=execution_result),
+    ), patch(
+        "redfetch.sync.store.record_installed_state",
+        new=AsyncMock(),
+    ):
+        ok = asyncio.run(sync.sync(db_path, headers={}, resource_ids=["151"]))
 
-    assert result is True
-    assert queued == []
-    assert await_count == 0
+    assert ok is True

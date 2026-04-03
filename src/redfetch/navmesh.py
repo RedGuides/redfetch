@@ -6,12 +6,11 @@ import hashlib
 import json
 import asyncio
 from dataclasses import dataclass
-from typing import Callable
-
 import httpx
 import aiosqlite
 
 from redfetch import config
+from redfetch.sync_types import SyncEventCallback
 from redfetch.utils import get_vvmq_path
 from redfetch.download import download_file_async
 
@@ -247,7 +246,7 @@ async def download_navmesh_file(
 async def sync_navmeshes(
     db_path: str,
     headers: dict,
-    on_event: Callable | None = None,
+    on_event: SyncEventCallback | None = None,
     override: bool | None = None,
 ) -> bool:
     """ Main entry point for navmesh sync. """

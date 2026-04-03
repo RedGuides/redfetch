@@ -18,44 +18,46 @@ from tenacity import (
 
 # local
 from redfetch import config
-from redfetch import special
-from redfetch.models import DownloadTask
-from redfetch.utils import (
-    get_folder_path,
-    is_safe_path,
-)
+from redfetch.utils import is_safe_path
 
 # ZIP safety constants
 MAX_UNCOMPRESSED_SIZE = 2 * 1024 * 1024 * 1024  # 2GB limit
 MAX_FILES_PER_ZIP = 60000  # Safety cap to avoid zipbombs
 
 
-async def download_resource_async(task: DownloadTask, client: httpx.AsyncClient) -> bool:
-    folder_path = get_folder_path(
-        task.resource_id,
-        task.category_id,
-        task.is_dependency,
-        task.parent_resource_id
-    )
-    should_flatten = special.get_flatten_status(
-        task.resource_id,
-        task.is_dependency,
-        task.parent_resource_id,
-    )
-
+async def download_install_target_async(
+    *,
+    client: httpx.AsyncClient,
+    resource_id: str,
+    download_url: str,
+    filename: str,
+    file_hash: str | None,
+    folder_path: str,
+    should_flatten: bool = False,
+    protected_files: list[str] | None = None,
+) -> bool:
     try:
-        print(f"Starting download: {task.filename} (ID: {task.resource_id})", flush=True)
-        file_path = os.path.join(folder_path, task.filename)
-        ok = await download_file_async(client, task.download_url, file_path, task.file_hash)
+        print(f"Starting download: {filename} (ID: {resource_id})", flush=True)
+        file_path = os.path.join(folder_path, filename)
+        ok = await download_file_async(client, download_url, file_path, file_hash)
         if not ok:
-            print(f"Download failed for resource {task.resource_id}.")
+            print(f"Download failed for resource {resource_id}.")
             return False
         if is_zipfile(file_path):
-            # Offload CPU and blocking I/O to thread
-            await asyncio.to_thread(extract_and_discard_zip, file_path, folder_path, task.resource_id, should_flatten)
+            extracted = await asyncio.to_thread(
+                extract_and_discard_zip,
+                file_path,
+                folder_path,
+                resource_id,
+                should_flatten,
+                protected_files,
+            )
+            if not extracted:
+                print(f"Extraction failed for resource {resource_id}.")
+                return False
         return True
     except httpx.HTTPError as e:
-        print(f"Failed to fetch or download resource {task.resource_id}: {str(e)}")
+        print(f"Failed to fetch or download resource {resource_id}: {str(e)}")
         return False
 
 
@@ -92,7 +94,7 @@ async def download_file_async(
             tmp_path = await _stream_to_tempfile(resp, file_path, hasher)
 
         if expected_md5 and hasher:
-            if not _hash_matches(hasher, expected_md5, file_path, tmp_path):
+            if not _hash_matches(hasher, expected_md5, file_path):
                 return False
 
         if tmp_path is None:
@@ -102,9 +104,8 @@ async def download_file_async(
         print(f"Downloaded file {file_path}")
         return True
     finally:
-        # Ensure no stray temp file remains on exception paths
         try:
-            if tmp_path and os.path.exists(tmp_path) and not os.path.exists(file_path):
+            if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
         except Exception:
             pass
@@ -150,17 +151,13 @@ async def _stream_to_tempfile(resp, file_path: str, hasher) -> str:
         raise
 
 
-def _hash_matches(hasher, expected_md5: str, file_path: str, tmp_path: str | None) -> bool:
-    """Verify MD5 hash and clean up temp file on mismatch."""
+def _hash_matches(hasher, expected_md5: str, file_path: str) -> bool:
+    """Return True when the computed MD5 matches *expected_md5*."""
     actual = hasher.hexdigest().lower()
-    # Sanitize expected_md5 in case of any whitespace issues
     expected = expected_md5.strip().lower()
-    
+
     if actual == expected:
         return True
-
-    if tmp_path and os.path.exists(tmp_path):
-        os.remove(tmp_path)
 
     print(f"MD5 mismatch for {os.path.basename(file_path)}")
     print(f"  Expected: {expected}")
@@ -172,58 +169,50 @@ def _hash_matches(hasher, expected_md5: str, file_path: str, tmp_path: str | Non
 # zip functions
 #
 
-def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=False):
-    # Check the compressed size
-    zip_size = os.path.getsize(zip_path)
-    if zip_size > MAX_UNCOMPRESSED_SIZE:
-        print(f"ZIP file {zip_path} exceeds the 2GB size limit. Extraction aborted.")
+def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=False, protected_files=None) -> bool:
+    try:
+        zip_size = os.path.getsize(zip_path)
+        if zip_size > MAX_UNCOMPRESSED_SIZE:
+            print(f"ZIP file {zip_path} exceeds the 2GB size limit. Extraction aborted.")
+            return False
+
+        with ZipFile(zip_path, 'r') as zip_ref:
+            try:
+                bad_member = zip_ref.testzip()
+                if bad_member is not None:
+                    print(f"ZIP integrity check failed at member: {bad_member}. Extraction aborted.")
+                    return False
+            except Exception as e:
+                print(f"ZIP integrity check failed: {e}. Extraction aborted.")
+                return False
+
+            infos = zip_ref.infolist()
+            if len(infos) > MAX_FILES_PER_ZIP:
+                print(f"ZIP has too many files ({len(infos)} > {MAX_FILES_PER_ZIP}). Extraction aborted.")
+                return False
+
+            total_uncompressed_size = sum(zinfo.file_size for zinfo in infos)
+            if total_uncompressed_size > MAX_UNCOMPRESSED_SIZE:
+                print(f"Total uncompressed size {total_uncompressed_size} exceeds the 2GB limit. Extraction aborted.")
+                return False
+
+            try:
+                free_bytes = shutil.disk_usage(extract_to).free
+                if free_bytes < total_uncompressed_size + 500 * 1024 * 1024:
+                    print("Insufficient disk space for extraction. Extraction aborted.")
+                    return False
+            except Exception:
+                pass
+
+            if protected_files is None:
+                protected_files = config.settings.from_env(config.settings.ENV).PROTECTED_FILES_BY_RESOURCE.get(resource_id, [])
+            if should_flatten:
+                extract_flattened(zip_ref, extract_to, protected_files)
+            else:
+                extract_with_structure(zip_ref, extract_to, protected_files)
+            return True
+    finally:
         delete_zip_file(zip_path)
-        return
-
-    # Open the ZIP file and calculate the total uncompressed size
-    with ZipFile(zip_path, 'r') as zip_ref:
-        # Quick CRC integrity check before extraction
-        try:
-            bad_member = zip_ref.testzip()
-            if bad_member is not None:
-                print(f"ZIP integrity check failed at member: {bad_member}. Extraction aborted.")
-                delete_zip_file(zip_path)
-                return
-        except Exception as e:
-            print(f"ZIP integrity check failed: {e}. Extraction aborted.")
-            delete_zip_file(zip_path)
-            return
-        infos = zip_ref.infolist()
-        # Safety: cap number of files
-        if len(infos) > MAX_FILES_PER_ZIP:
-            print(f"ZIP has too many files ({len(infos)} > {MAX_FILES_PER_ZIP}). Extraction aborted.")
-            delete_zip_file(zip_path)
-            return
-        total_uncompressed_size = sum([zinfo.file_size for zinfo in infos])
-        if total_uncompressed_size > MAX_UNCOMPRESSED_SIZE:
-            print(f"Total uncompressed size {total_uncompressed_size} exceeds the 2GB limit. Extraction aborted.")
-            delete_zip_file(zip_path)
-            return
-
-        # Disk space guard before extraction (add 500MB cushion)
-        try:
-            free_bytes = shutil.disk_usage(extract_to).free
-            if free_bytes < total_uncompressed_size + 500 * 1024 * 1024:
-                print("Insufficient disk space for extraction. Extraction aborted.")
-                delete_zip_file(zip_path)
-                return
-        except Exception:
-            # If we can't determine space, proceed best-effort
-            pass
-
-        # Load protected files for the resource
-        protected_files = config.settings.from_env(config.settings.ENV).PROTECTED_FILES_BY_RESOURCE.get(resource_id, [])
-        if should_flatten:
-            extract_flattened(zip_ref, extract_to, protected_files)
-        else:
-            extract_with_structure(zip_ref, extract_to, protected_files)
-
-    delete_zip_file(zip_path)
 
 
 def extract_flattened(zip_ref, extract_to, protected_files):
@@ -298,10 +287,6 @@ def extract_zip_member(zip_ref, member, target_path):
         except Exception as e:
             print(f"Unexpected error while extracting {os.path.basename(target_path)}: {str(e)}")
             raise
-
-    # If we've exhausted all retries or encountered an unexpected error,
-    # stop the extraction by raising an exception
-    raise Exception(f"Extraction stopped due to failure extracting {os.path.basename(target_path)}.")
 
 
 def delete_zip_file(zip_path):

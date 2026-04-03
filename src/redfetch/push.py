@@ -17,8 +17,8 @@ MAX_MESSAGE_CHARS = 10_000
 
 
 def _get_api_headers_blocking() -> dict:
-    """Synchronous helper to obtain API headers from the async API client."""
-    return asyncio.run(api.get_api_headers())
+    """Synchronous helper to obtain API headers from the async auth client."""
+    return asyncio.run(auth.get_api_headers())
 
 
 def update_resource_description(resource_id, new_description):
@@ -83,9 +83,6 @@ def add_xf_attachment(resource_id, upfilename, version=None):
         raise
     except FileNotFoundError:
         print(f"Error: File '{upfilename}' not found.")
-        raise
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
         raise
 
 
@@ -231,7 +228,8 @@ def handle_cli(args):
     auth.authorize()
 
     # Blocking call is fine here; push is a short-lived CLI operation.
-    resource = asyncio.run(api.get_resource_details(args.resource_id))
+    headers = _get_api_headers_blocking()
+    resource = asyncio.run(api.get_resource_details(args.resource_id, headers))
     resource_id = resource['resource_id']
 
     if args.description:

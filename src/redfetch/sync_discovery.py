@@ -88,7 +88,7 @@ def _get_flatten(resource_id: str, parent_id: str | None, settings_env: str) -> 
 
 @dataclass
 class _RootSpec:
-    """""Tracks why a resource was selected for sync and its raw API payload."""
+    """Tracks why a resource was selected for sync and its raw API payload."""
     sources: set[str] = field(default_factory=set)
     payload: dict | None = None
 

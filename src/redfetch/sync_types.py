@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable
+from typing import Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +33,14 @@ PlanReason = Literal[
     "dependency_cycle",
 ]
 ResultOutcome = Literal["downloaded", "skipped", "blocked", "untracked", "error"]
+
+SyncEvent = Union[
+    tuple[Literal["total"], int, None],
+    tuple[Literal["add_total"], int, None],
+    tuple[Literal["start"], str, str | None],
+    tuple[Literal["done"], str, ResultOutcome],
+]
+SyncEventCallback = Callable[[SyncEvent], None]
 
 
 def make_root_target_key(resource_id: str) -> str:
