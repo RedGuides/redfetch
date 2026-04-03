@@ -20,6 +20,8 @@ else:  # skip if not on windows
 
 def _normalized_executables(folder_path: str) -> List[str]:
     folder = os.path.normpath(os.path.abspath(folder_path))
+    if not os.path.isdir(folder):
+        return []
     return [
         os.path.normcase(os.path.join(folder, entry))
         for entry in os.listdir(folder)
