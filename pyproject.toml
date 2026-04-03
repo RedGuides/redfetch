@@ -28,6 +28,7 @@ dependencies = [
     "keyring~=25.6",
     "md2bbcode",
     "packaging~=26.0",
+    "pydantic~=2.12",
     "platformdirs~=4.5",
     "psutil~=7.2",
     "pyperclip~=1.11",
