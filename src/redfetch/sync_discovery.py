@@ -192,7 +192,11 @@ def _add_root_target(
     category_id = payload_category_id(payload)
     resolved_path = None
     settings_for_env = config.settings.from_env(settings_env)
-    if str(resource_id) in settings_for_env.SPECIAL_RESOURCES or category_id is not None:
+    special_resource = settings_for_env.SPECIAL_RESOURCES.get(str(resource_id))
+    has_own_destination = bool(
+        special_resource and (special_resource.get("custom_path") or special_resource.get("default_path"))
+    )
+    if has_own_destination or category_id is not None:
         resolved_path = resolve_root_path(resource_id, category_id, settings_env)
     target = DesiredInstallTarget(
         target_key=make_root_target_key(resource_id),

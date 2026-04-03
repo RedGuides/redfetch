@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from redfetch import store
 from redfetch import sync_planner as planner
+from redfetch.sync_discovery import _add_root_target
 from redfetch.sync_types import (
     DesiredInstallTarget,
     DesiredSet,
@@ -255,5 +259,69 @@ def test_reset_download_date_for_resource_does_not_reset_unrelated_dependency_oc
         ("/151/153/", 7),
         ("/153/", 0),
     ]
+
+
+def test_staff_pick_without_default_path_gets_category_subfolder():
+    """Staff picks (opt_in=True, no default_path) should be placed in the
+    category subfolder under VanillaMQ (e.g. VanillaMQ_LIVE/lua), not dumped
+    at the VanillaMQ root.
+
+    Regression: discovery was eagerly calling resolve_root_path with
+    category_id=None for these resources, baking in a path that lacked the
+    category subfolder.  The planner then short-circuited because
+    resolved_path was already set."""
+    download_folder = "C:/test/Downloads"
+    special_resources = {
+        "1974": {"default_path": "VanillaMQ_LIVE", "custom_path": "", "opt_in": True},
+        "2539": {"opt_in": True, "staff_pick": True},
+    }
+    mock_settings = MagicMock()
+    mock_settings.ENV = "LIVE"
+    mock_settings.from_env.return_value = SimpleNamespace(
+        DOWNLOAD_FOLDER=download_folder,
+        SPECIAL_RESOURCES=special_resources,
+        PROTECTED_FILES_BY_RESOURCE={},
+    )
+
+    with patch("redfetch.config.settings", mock_settings), \
+         patch("redfetch.config.VANILLA_MAP", {1974: "LIVE"}), \
+         patch("redfetch.config.CATEGORY_MAP", {8: "macros", 11: "plugins", 25: "lua"}):
+
+        # Discovery: staff pick added from config only (no API payload)
+        desired_set = DesiredSet(mode="full")
+        target = _add_root_target(
+            desired_set,
+            resource_id="2539",
+            sources={"special"},
+            payload=None,
+            settings_env="LIVE",
+        )
+
+        assert target.resolved_path is None, (
+            f"Discovery should defer path resolution for staff picks without "
+            f"default_path, got {target.resolved_path}"
+        )
+
+        # Planner resolves using remote state's category_id
+        remote_snapshot = RemoteSnapshot(
+            resources={
+                "2539": _downloadable_state("2539", category_id=25),
+            }
+        )
+
+        plan = planner.build_execution_plan(
+            desired_set=desired_set,
+            remote_snapshot=remote_snapshot,
+            local_snapshot=LocalSnapshot(),
+            settings_env="LIVE",
+        )
+
+    action = plan.actions["/2539/"]
+    assert action.action == "download"
+    expected = os.path.normpath(os.path.join(download_folder, "VanillaMQ_LIVE", "lua"))
+    assert action.resolved_path == expected, (
+        f"Expected {expected}, got {action.resolved_path}. "
+        "Staff pick should land in VanillaMQ_LIVE/lua, not at the VanillaMQ root."
+    )
 
 
