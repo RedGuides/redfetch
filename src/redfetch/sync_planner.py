@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from redfetch import config
 from redfetch.sync_discovery import (
     is_special_resource,
     resolve_dependency_path,
@@ -21,7 +22,7 @@ from redfetch.sync_types import (
 )
 
 
-BLOCKING_STATUSES = {"access_denied", "missing_files", "not_found", "fetch_error"}
+BLOCKING_STATUSES = {"access_denied", "no_files", "multiple_files", "not_found", "fetch_error"}
 
 
 def _desired_targets_in_order(desired_set: DesiredSet) -> list[DesiredInstallTarget]:
@@ -64,8 +65,9 @@ def _resolve_target_path(
         category_id = target.category_id
         if category_id is None and remote_state is not None:
             category_id = remote_state.category_id
-        if category_id is None and not is_special_resource(target.resource_id, settings_env):
-            return None, target.subfolder
+        if not is_special_resource(target.resource_id, settings_env):
+            if category_id is None or category_id not in config.CATEGORY_MAP:
+                return None, target.subfolder
         return resolve_root_path(target.resource_id, category_id, settings_env), None
 
     if parent_action is None or not parent_action.resolved_path or target.parent_id is None:
@@ -118,6 +120,8 @@ def _decide_action(
         return "block", "fetch_error"
     if remote_state.status in BLOCKING_STATUSES:
         return "block", remote_state.status  # type: ignore[return-value]
+    if resolved_path is None and target.target_kind == "root":
+        return "block", "unknown_category"
     if _install_context_changed(
         local_state, resolved_path=resolved_path, subfolder=subfolder, target=target,
     ):

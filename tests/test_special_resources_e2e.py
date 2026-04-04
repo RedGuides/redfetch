@@ -334,12 +334,26 @@ def test_download_watched_with_overlapping_dependency(
         return []
     
     async def mock_fetch_manifest(client):
-        # Return a manifest with our special resources
         return {
             'resources': {
-                '151': {'last_update': 9999999999},
-                '153': {'last_update': 9999999999},
-                '1865': {'last_update': 9999999999}
+                '151': {
+                    'version_id': 100, 'last_update': 9999999999, 'title': 'MySEQ Open',
+                    'parent_category_id': 11,
+                    'current_files': [{'id': 1001, 'filename': 'myseqserver.ini',
+                                       'download_url': 'https://example.com/myseqserver.ini', 'hash': 'abc123'}],
+                },
+                '153': {
+                    'version_id': 200, 'last_update': 9999999999, 'title': "Brewall's Maps",
+                    'parent_category_id': 11,
+                    'current_files': [{'id': 1002, 'filename': 'brewall-maps_20241203.zip',
+                                       'download_url': 'https://example.com/brewall-maps.zip', 'hash': 'def456'}],
+                },
+                '1865': {
+                    'version_id': 300, 'last_update': 9999999999, 'title': 'MySEQ',
+                    'parent_category_id': 11,
+                    'current_files': [{'id': 1003, 'filename': 'myseq.zip',
+                                       'download_url': 'https://example.com/myseq.zip', 'hash': 'ghi789'}],
+                },
             }
         }
     

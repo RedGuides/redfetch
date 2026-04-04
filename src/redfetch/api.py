@@ -54,8 +54,10 @@ async def fetch_resource_record(client: httpx.AsyncClient, resource_id: str) -> 
         current_files = resource.get('current_files') or []
         if not resource.get('can_download', False):
             status: RemoteStatus = 'access_denied'
-        elif len(current_files) != 1:
-            status = 'missing_files'
+        elif len(current_files) == 0:
+            status = 'no_files'
+        elif len(current_files) > 1:
+            status = 'multiple_files'
         else:
             status = 'downloadable'
         return ResourceRecord(resource_id=resource_id, status=status, resource=resource)

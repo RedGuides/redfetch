@@ -15,8 +15,11 @@ from redfetch.sync_discovery import _add_root_target
 from redfetch.sync_types import (
     DesiredInstallTarget,
     DesiredSet,
+    LocalInstallState,
     LocalSnapshot,
+    PLAN_REASON_META,
     PlannedAction,
+    PlanReason,
     RemoteArtifact,
     RemoteResourceState,
     RemoteSnapshot,
@@ -323,5 +326,140 @@ def test_staff_pick_without_default_path_gets_category_subfolder():
         f"Expected {expected}, got {action.resolved_path}. "
         "Staff pick should land in VanillaMQ_LIVE/lua, not at the VanillaMQ root."
     )
+
+
+def test_targeted_sync_blocks_resource_with_unknown_category():
+    """Resources outside CATEGORY_MAP (non-MQ categories like guides/configs)
+    should be blocked, not silently downloaded to the base folder.
+
+    Regression: the refactored targeted-sync path in _root_sources_for_targeted
+    stopped checking categories, so any explicitly-requested resource would
+    download regardless of category."""
+    download_folder = "C:/test/Downloads"
+    mock_settings = MagicMock()
+    mock_settings.ENV = "LIVE"
+    mock_settings.from_env.return_value = SimpleNamespace(
+        DOWNLOAD_FOLDER=download_folder,
+        SPECIAL_RESOURCES={},
+        PROTECTED_FILES_BY_RESOURCE={},
+    )
+
+    # category_id=99 is not in CATEGORY_MAP
+    target = DesiredInstallTarget(
+        target_key="/3112/",
+        resource_id="3112",
+        parent_id=None,
+        parent_target_key=None,
+        root_resource_id="3112",
+        target_kind="root",
+        sources={"explicit"},
+        title=None,
+        category_id=None,
+        resolved_path=None,
+        subfolder=None,
+        flatten=False,
+        protected_files=[],
+        explicit_root=True,
+    )
+    desired_set = DesiredSet(
+        mode="targeted",
+        requested_root_ids={"3112"},
+        resource_ids={"3112"},
+        install_targets={"/3112/": target},
+    )
+
+    with patch("redfetch.config.settings", mock_settings), \
+         patch("redfetch.sync_planner.config.settings", mock_settings), \
+         patch("redfetch.config.CATEGORY_MAP", {8: "macros", 11: "plugins", 25: "lua"}), \
+         patch("redfetch.sync_planner.config.CATEGORY_MAP", {8: "macros", 11: "plugins", 25: "lua"}):
+        plan = planner.build_execution_plan(
+            desired_set=desired_set,
+            remote_snapshot=RemoteSnapshot(
+                resources={
+                    "3112": _downloadable_state("3112", category_id=99),
+                }
+            ),
+            local_snapshot=LocalSnapshot(),
+            settings_env="LIVE",
+        )
+
+    action = plan.actions["/3112/"]
+    assert action.action == "block", (
+        f"Expected block for non-MQ category, got {action.action}"
+    )
+    assert action.reason == "unknown_category"
+
+
+def test_special_resource_with_unknown_category_still_downloads():
+    """Resources in SPECIAL_RESOURCES should bypass the category check,
+    even if their category isn't in CATEGORY_MAP."""
+    download_folder = "C:/test/Downloads"
+    special_resources = {
+        "3112": {"default_path": "MySpecialApp", "custom_path": "", "opt_in": True},
+    }
+    mock_settings = MagicMock()
+    mock_settings.ENV = "LIVE"
+    mock_settings.from_env.return_value = SimpleNamespace(
+        DOWNLOAD_FOLDER=download_folder,
+        SPECIAL_RESOURCES=special_resources,
+        PROTECTED_FILES_BY_RESOURCE={},
+    )
+
+    target = DesiredInstallTarget(
+        target_key="/3112/",
+        resource_id="3112",
+        parent_id=None,
+        parent_target_key=None,
+        root_resource_id="3112",
+        target_kind="root",
+        sources={"explicit", "special"},
+        title=None,
+        category_id=None,
+        resolved_path=None,
+        subfolder=None,
+        flatten=False,
+        protected_files=[],
+        explicit_root=True,
+    )
+    desired_set = DesiredSet(
+        mode="targeted",
+        requested_root_ids={"3112"},
+        resource_ids={"3112"},
+        install_targets={"/3112/": target},
+    )
+
+    with patch("redfetch.config.settings", mock_settings), \
+         patch("redfetch.sync_planner.config.settings", mock_settings), \
+         patch("redfetch.config.CATEGORY_MAP", {8: "macros", 11: "plugins", 25: "lua"}), \
+         patch("redfetch.sync_planner.config.CATEGORY_MAP", {8: "macros", 11: "plugins", 25: "lua"}):
+        plan = planner.build_execution_plan(
+            desired_set=desired_set,
+            remote_snapshot=RemoteSnapshot(
+                resources={
+                    "3112": _downloadable_state("3112", category_id=99),
+                }
+            ),
+            local_snapshot=LocalSnapshot(),
+            settings_env="LIVE",
+        )
+
+    action = plan.actions["/3112/"]
+    assert action.action == "download", (
+        f"Special resource should bypass category check, got {action.action} ({action.reason})"
+    )
+    expected = os.path.normpath(os.path.join(download_folder, "MySpecialApp"))
+    assert action.resolved_path == expected
+
+
+def test_plan_reason_meta_covers_all_reasons():
+    """Every PlanReason value must have a corresponding PLAN_REASON_META entry."""
+    from typing import get_args
+
+    all_reasons = set(get_args(PlanReason))
+    covered = set(PLAN_REASON_META)
+    missing = all_reasons - covered
+    extra = covered - all_reasons
+    assert not missing, f"PlanReason values missing from PLAN_REASON_META: {missing}"
+    assert not extra, f"PLAN_REASON_META has keys not in PlanReason: {extra}"
 
 

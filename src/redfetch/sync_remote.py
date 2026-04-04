@@ -63,19 +63,6 @@ def _payload_details(payload: dict | None) -> _PayloadDetails:
     )
 
 
-def _payload_state(resource_id: str, payload: dict | None, *, status: str, source_note: str) -> RemoteResourceState:
-    title, category_id, version_id, artifact = _payload_details(payload)
-    return RemoteResourceState(
-        resource_id=resource_id,
-        title=title,
-        category_id=category_id,
-        version_id=version_id,
-        status=status,
-        artifact=artifact if status == "downloadable" else None,
-        source_note=source_note,
-    )
-
-
 def _needs_live_check(
     *,
     desired_targets: list[DesiredInstallTarget],
@@ -109,25 +96,18 @@ def _blocked_state(
     *,
     status: str,
     manifest_details: _PayloadDetails | None,
-    payload: dict | None,
+    live_title: str | None = None,
+    live_category_id: int | None = None,
 ) -> RemoteResourceState:
     """Build a RemoteResourceState for a resource that is blocked."""
-    if payload:
-        return _payload_state(
-            resource_id,
-            payload,
-            status=status,
-            source_note="api_fallback",
-        )
-
     return RemoteResourceState(
         resource_id=resource_id,
-        title=manifest_details.title if manifest_details else None,
-        category_id=manifest_details.category_id if manifest_details else None,
+        title=(manifest_details.title if manifest_details else None) or live_title,
+        category_id=(manifest_details.category_id if manifest_details and manifest_details.category_id is not None else live_category_id),
         version_id=manifest_details.version_id if manifest_details else None,
         status=status,
         artifact=None,
-        source_note="manifest_only" if manifest_details else "api_fallback",
+        source_note="manifest" if manifest_details else "live_access_only",
     )
 
 
@@ -173,35 +153,27 @@ async def fetch_remote_snapshot(
         for record in live_records:
             resource_id = record.resource_id
             manifest_details = manifest_cache.get(resource_id)
-            payload = record.resource
-            status = record.status
+            live_title = payload_title(record.resource)
+            live_category_id = payload_category_id(record.resource)
 
-            if status != "downloadable":
+            if record.status != "downloadable":
                 remote_resources[resource_id] = _blocked_state(
                     resource_id,
-                    status=status,
+                    status=record.status,
                     manifest_details=manifest_details,
-                    payload=payload,
+                    live_title=live_title,
+                    live_category_id=live_category_id,
                 )
                 continue
 
-            if manifest_details is not None and manifest_details.version_id is not None and manifest_details.artifact is not None:
-                live_details = _payload_details(payload)
-                remote_resources[resource_id] = RemoteResourceState(
-                    resource_id=resource_id,
-                    title=manifest_details.title or live_details.title,
-                    category_id=manifest_details.category_id if manifest_details.category_id is not None else live_details.category_id,
-                    version_id=manifest_details.version_id,
-                    status="downloadable",
-                    artifact=manifest_details.artifact,
-                    source_note="manifest_plus_access_check",
-                )
-            else:
-                remote_resources[resource_id] = _payload_state(
-                    resource_id,
-                    payload,
-                    status="downloadable",
-                    source_note="api_fallback",
-                )
+            remote_resources[resource_id] = RemoteResourceState(
+                resource_id=resource_id,
+                title=(manifest_details.title if manifest_details else None) or live_title,
+                category_id=(manifest_details.category_id if manifest_details and manifest_details.category_id is not None else live_category_id),
+                version_id=manifest_details.version_id if manifest_details else None,
+                status="downloadable",
+                artifact=manifest_details.artifact if manifest_details else None,
+                source_note="manifest_plus_access_check" if manifest_details else "live_access_only",
+            )
 
     return RemoteSnapshot(resources=remote_resources)

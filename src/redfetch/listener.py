@@ -62,7 +62,7 @@ async def handle_health(request: web.Request) -> web.Response:
 
         if version_local is None:
             return web.json_response({"action": "install"})
-        elif version_local != remote_version:
+        elif version_local < remote_version:
             return web.json_response({"action": "update"})
         else:
             return web.json_response({"action": "re-install"})

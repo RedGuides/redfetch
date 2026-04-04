@@ -10,20 +10,72 @@ from redfetch import sync_discovery
 from redfetch import sync_executor
 from redfetch import sync_planner
 from redfetch import sync_remote
-from redfetch.sync_types import ExecutionPlan, ExecutionResult, SyncEventCallback
+from redfetch.sync_types import (
+    ExecutionPlan,
+    ExecutionResult,
+    PLAN_REASON_META,
+    ReasonInfo,
+    SyncEventCallback,
+    reason_message,
+)
 
 
 _sync_lock: asyncio.Lock | None = None
+_DEFAULT_REASON = ReasonInfo(message="")
 
 
-def _print_plan_summary(execution_plan: ExecutionPlan) -> None:
+def _print_plan_summary(
+    execution_plan: ExecutionPlan,
+    resource_ids: list[str] | None = None,
+) -> None:
+    is_full_sync = resource_ids is None
+    all_blocked = [
+        action for action in execution_plan.actions.values()
+        if action.action == "block"
+    ]
+    if is_full_sync:
+        quiet = [a for a in all_blocked if PLAN_REASON_META.get(a.reason, _DEFAULT_REASON).quiet]
+        blocked = [a for a in all_blocked if not PLAN_REASON_META.get(a.reason, _DEFAULT_REASON).quiet]
+    else:
+        quiet = []
+        blocked = all_blocked
+
     counts = execution_plan.action_counts()
     print(f"Resources in scope: >>> {len(execution_plan.actions)} <<<")
     print(f"Resources to download: >>> {counts.get('download', 0)} <<<")
-    if counts.get("block", 0):
-        print(f"Resources blocked: >>> {counts.get('block', 0)} <<<")
+    if blocked:
+        print(f"Resources blocked: >>> {len(blocked)} <<<")
+        for action in blocked:
+            label = action.title or action.resource_id
+            print(f"  - {label} (id={action.resource_id}): {reason_message(action.reason)}")
+
+    summary_buckets: dict[str, int] = {}
+    for action in quiet:
+        label = PLAN_REASON_META[action.reason].summary_label
+        if label:
+            summary_buckets[label] = summary_buckets.get(label, 0) + 1
+    for label, count in summary_buckets.items():
+        print(f"{label}: >>> {count} <<<")
+
     if counts.get("untrack", 0):
         print(f"Resources to untrack: >>> {counts.get('untrack', 0)} <<<")
+
+
+def _print_failure_detail(
+    execution_plan: ExecutionPlan,
+    resource_ids: list[str],
+) -> None:
+    """Print a hint when a targeted sync fails with zero scoped actions (resource not in scope at all)."""
+    requested = {str(rid) for rid in resource_ids}
+    has_scoped_actions = any(
+        action.root_resource_id in requested
+        for action in execution_plan.actions.values()
+    )
+    if not has_scoped_actions:
+        print(
+            f"No valid resources found for IDs: {resource_ids}. "
+            "Are you in the right server env? Did you opt_in in your settings.local.toml?"
+        )
 
 
 def _run_succeeded(
@@ -92,7 +144,7 @@ async def sync(
         settings_env=settings_env,
     )
 
-    _print_plan_summary(execution_plan)
+    _print_plan_summary(execution_plan, resource_ids=resource_ids)
     if on_event:
         on_event(("total", len(execution_plan.actions), None))
 
@@ -129,19 +181,18 @@ async def sync(
     )
 
     if execution_result.has_errors():
-        errored_resources = [
-            item.resource_id
+        errored_items = [
+            item
             for item in execution_result.items.values()
             if item.outcome == "error"
         ]
-        if errored_resources:
+        if errored_items:
             print("One or more resources failed to download.")
-            print(f"Failed resources: {errored_resources}")
+            for item in errored_items:
+                detail = f": {item.error_detail}" if item.error_detail else ""
+                print(f"  - {item.resource_id}{detail}")
     elif resource_ids is not None and not success:
-        print(
-            f"No valid resources found for IDs: {resource_ids}. "
-            "Are you in the right server env? Did you opt_in in your settings.local.toml?"
-        )
+        _print_failure_detail(execution_plan, resource_ids)
     elif any(item.outcome == "downloaded" for item in execution_result.items.values()):
         print("All resources downloaded successfully.")
     else:

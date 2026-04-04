@@ -181,7 +181,7 @@ def test_plan_blocks_stale_special_row_without_fresh_metadata():
     )
     execution_plan = build_execution_plan(
         desired_set=desired_set_with_targets(target),
-        remote_snapshot=RemoteSnapshot(resources={"151": blocked_remote("151", "missing_files")}),
+        remote_snapshot=RemoteSnapshot(resources={"151": blocked_remote("151", "no_files")}),
         local_snapshot=local_snapshot,
 
         settings_env="LIVE",
@@ -189,7 +189,7 @@ def test_plan_blocks_stale_special_row_without_fresh_metadata():
 
     action = execution_plan.actions["/151/"]
     assert action.action == "block"
-    assert action.reason == "missing_files"
+    assert action.reason == "no_files"
 
 
 def test_plan_blocks_dependency_when_parent_is_blocked():

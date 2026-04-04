@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,7 +14,8 @@ RemoteStatus = Literal[
     "manifest_current",
     "downloadable",
     "access_denied",
-    "missing_files",
+    "no_files",
+    "multiple_files",
     "not_found",
     "fetch_error",
 ]
@@ -25,14 +27,47 @@ PlanReason = Literal[
     "install_context_changed",
     "not_desired",
     "access_denied",
-    "missing_files",
+    "no_files",
+    "multiple_files",
     "not_found",
     "fetch_error",
     "parent_blocked",
     "parent_failed",
     "dependency_cycle",
+    "unknown_category",
 ]
 ResultOutcome = Literal["downloaded", "skipped", "blocked", "untracked", "error"]
+
+@dataclass(frozen=True, slots=True)
+class ReasonInfo:
+    """Display metadata for a single PlanReason value."""
+
+    message: str
+    quiet: bool = False
+    summary_label: str | None = None
+
+
+PLAN_REASON_META: dict[PlanReason, ReasonInfo] = {
+    "access_denied":           ReasonInfo("You don't have permission to download this resource."),
+    "no_files":                ReasonInfo("This resource has no downloadable files.", quiet=True, summary_label="Resources with no files"),
+    "multiple_files":          ReasonInfo("This resource has multiple files and cannot be auto-synced. Ask the author to release it as a .zip file."),
+    "not_found":               ReasonInfo("This resource was not found."),
+    "fetch_error":             ReasonInfo("Failed to retrieve this resource from the server."),
+    "unknown_category":        ReasonInfo("This resource's category is not mapped to an install location, but you can specify one manually in settings.local.toml"),
+    "parent_blocked":          ReasonInfo("Skipped because its parent resource is blocked.", quiet=True),
+    "parent_failed":           ReasonInfo("Skipped because its parent resource failed to download."),
+    "dependency_cycle":        ReasonInfo("Skipped due to a circular dependency."),
+    "not_desired":             ReasonInfo("No longer watched or licensed; untracking."),
+    "outdated":                ReasonInfo("A newer version is available."),
+    "not_installed":           ReasonInfo("Not yet installed locally."),
+    "already_current":         ReasonInfo("Already up to date."),
+    "install_context_changed": ReasonInfo("Install location or settings changed; re-downloading."),
+}
+
+
+def reason_message(reason: PlanReason) -> str:
+    meta = PLAN_REASON_META.get(reason)
+    return meta.message if meta else reason
 
 SyncEvent = Union[
     tuple[Literal["total"], int, None],
