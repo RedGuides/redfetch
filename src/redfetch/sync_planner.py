@@ -116,6 +116,8 @@ def _decide_action(
         parent_action is None or parent_action.action in {"block", "untrack"}
     ):
         return "block", "parent_blocked"
+    if target.discovery_block:
+        return "block", target.discovery_block
     if remote_state is None:
         return "block", "fetch_error"
     if remote_state.status in BLOCKING_STATUSES:

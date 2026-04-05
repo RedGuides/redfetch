@@ -35,6 +35,7 @@ PlanReason = Literal[
     "parent_failed",
     "dependency_cycle",
     "unknown_category",
+    "license_expired",
 ]
 ResultOutcome = Literal["downloaded", "skipped", "blocked", "untracked", "error"]
 
@@ -62,6 +63,7 @@ PLAN_REASON_META: dict[PlanReason, ReasonInfo] = {
     "not_installed":           ReasonInfo("Not yet installed locally."),
     "already_current":         ReasonInfo("Already up to date."),
     "install_context_changed": ReasonInfo("Install location or settings changed; re-downloading."),
+    "license_expired":         ReasonInfo("Your license for this resource has expired.", quiet=True, summary_label="Licenses expired"),
 }
 
 
@@ -128,6 +130,7 @@ class DesiredInstallTarget(TargetIdentity):
     flatten: bool = False
     protected_files: list[str] = Field(default_factory=list)
     explicit_root: bool = False
+    discovery_block: PlanReason | None = None
 
 
 class DesiredSet(SyncModel):
@@ -154,6 +157,7 @@ class DesiredSet(SyncModel):
         existing.flatten = existing.flatten or target.flatten
         existing.protected_files = existing.protected_files or target.protected_files
         existing.explicit_root = existing.explicit_root or target.explicit_root
+        existing.discovery_block = existing.discovery_block or target.discovery_block
         return existing
 
     def resource_targets(self, resource_id: str) -> list[DesiredInstallTarget]:

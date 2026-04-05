@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -91,6 +92,7 @@ class _RootSpec:
     """Tracks why a resource was selected for sync and its raw API payload."""
     sources: set[str] = field(default_factory=set)
     payload: dict | None = None
+    discovery_block: str | None = None
 
 
 def payload_title(payload: dict | None) -> str | None:
@@ -149,6 +151,8 @@ def _root_sources_for_full_sync(
     for license_info in licenses:
         if not license_info.get("active", False):
             continue
+        end_date = license_info.get("end_date", 0)
+        is_expired = end_date != 0 and end_date < time.time()
         payload = license_info.get("resource") or {}
         category_id = payload_category_id(payload)
         if not _category_allowed_in_env(category_id, settings_env):
@@ -156,6 +160,8 @@ def _root_sources_for_full_sync(
         resource_id = str(payload["resource_id"])
         spec = specs.setdefault(resource_id, _RootSpec())
         spec.sources.add("licensed")
+        if is_expired:
+            spec.discovery_block = "license_expired"
         spec.payload = payload
 
     settings_for_env = config.settings.from_env(settings_env)
@@ -313,6 +319,8 @@ async def discover_desired_set(
             payload=spec.payload,
             settings_env=settings_env,
         )
+        if spec.discovery_block:
+            root_target.discovery_block = spec.discovery_block
         _expand_dependencies(
             desired_set,
             parent_target=root_target,
