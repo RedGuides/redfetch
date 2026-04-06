@@ -9,6 +9,8 @@
 DOWNLOAD_FOLDER = "@format {env[REDFETCH_DATA_DIR]}/Downloads"
 EQPATH = ""
 
+[DEFAULT.CATEGORY_PATHS]
+
 # ========================================
 # XenForo OAuth2
 # ========================================

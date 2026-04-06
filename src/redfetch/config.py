@@ -75,6 +75,25 @@ def normalize_and_create_path(path):
     return normalized_path
 
 
+def normalize_category_paths(data):
+    """Normalize and validate absolute paths in CATEGORY_PATHS."""
+    if not isinstance(data, dict):
+        return data
+    valid_names = set(CATEGORY_MAP.values())
+    for key, value in list(data.items()):
+        if key not in valid_names:
+            raise ValidationError(
+                f"Unknown category '{key}' in CATEGORY_PATHS. "
+                f"Valid categories: {', '.join(sorted(valid_names))}"
+            )
+        if isinstance(value, str) and value:
+            normalized = os.path.normpath(value)
+            if os.path.isabs(normalized):
+                validate_no_eqgame(normalized)
+            data[key] = normalized
+    return data
+
+
 # Custom Dynaconf validator specifically for SPECIAL_RESOURCE paths
 def normalize_paths_in_dict(data, parent_key=None):
     if isinstance(data, dict):
@@ -153,7 +172,8 @@ def initialize_config():
             Validator("DOWNLOAD_FOLDER", cast=normalize_and_create_path),
             # Separate validator for EQPATH to avoid triggering eqgame.exe check
             Validator("EQPATH", default=None, cast=lambda x: os.path.normpath(x) if x else None),
-            Validator("SPECIAL_RESOURCES", cast=normalize_paths_in_dict)
+            Validator("SPECIAL_RESOURCES", cast=normalize_paths_in_dict),
+            Validator("CATEGORY_PATHS", default={}, cast=normalize_category_paths)
         ]
     )
 

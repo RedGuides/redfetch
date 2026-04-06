@@ -58,6 +58,16 @@ def resolve_root_path(resource_id: str, category_id: int | None, settings_env: s
     if special_destination:
         return special_destination
 
+    category_name = config.CATEGORY_MAP.get(category_id or -1, "")
+
+    if category_name:
+        category_paths = getattr(settings_for_env, "CATEGORY_PATHS", None) or {}
+        override = category_paths.get(category_name)
+        if override:
+            if os.path.isabs(override):
+                return os.path.normpath(override)
+            return os.path.normpath(os.path.join(download_folder, override))
+
     base_path = download_folder
     vvmq_id = utils.get_current_vvmq_id(settings_env)
     if vvmq_id:
@@ -66,9 +76,8 @@ def resolve_root_path(resource_id: str, category_id: int | None, settings_env: s
         if vvmq_destination:
             base_path = vvmq_destination
 
-    category_subfolder = config.CATEGORY_MAP.get(category_id or -1, "")
-    if category_subfolder:
-        return os.path.normpath(os.path.join(base_path, category_subfolder))
+    if category_name:
+        return os.path.normpath(os.path.join(base_path, category_name))
     return base_path
 
 
