@@ -130,6 +130,18 @@ If there are local files you don't want overwritten by a resource, you can add t
 navmesh = ["befallen.navmesh", "innothuleb.navmesh"]
 ```
 
+### Custom category directories
+
+If you share `lua`, `macros`, or `plugins` directories across multiple MQ environments, you can override where an entire category is installed. Add a `CATEGORY_PATHS` section to your `settings.local.toml`:
+
+```toml
+[DEFAULT.CATEGORY_PATHS]
+lua = 'D:\\shared\\lua'
+macros = 'D:\\shared\\macros'
+```
+
+Absolute paths are used as-is. Relative paths are joined to `DOWNLOAD_FOLDER`. You can set this globally in `[DEFAULT]` or per-environment (`[LIVE.CATEGORY_PATHS]`, `[TEST.CATEGORY_PATHS]`, etc.).
+
 ## Tinkerers
 
 If you self-compile MacroQuest or use a discord friend's copy, you can still keep your scripts and plugins in sync with redfetch by opting out of Very Vanilla:
