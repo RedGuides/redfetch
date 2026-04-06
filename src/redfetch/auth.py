@@ -553,7 +553,7 @@ def initialize_keyring():
         raise RuntimeError(
             "No suitable keyring backend found, probably because you're not on Windows.\n\n"
             "Please install `keyrings.alt` by running:\n"
-            "    pip install keyrings.alt\n\n"
+            "    pipx inject redfetch keyrings.alt\n\n"
             "Then restart the application."
         )
     except Exception as e:
