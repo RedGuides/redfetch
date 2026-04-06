@@ -237,11 +237,18 @@ def _annotate_special_resource_comments(toml_text: str) -> str:
     if not lines:
         return toml_text
 
-    pattern = re.compile(r"^\[(DEFAULT|LIVE|TEST|EMU)\.SPECIAL_RESOURCES\.(\d+)\]\s*$")
+    known_names = set(RESOURCE_NAMES.values())
+    section_pattern = re.compile(r"^\[(DEFAULT|LIVE|TEST|EMU)\.SPECIAL_RESOURCES\.(\d+)\]\s*$")
+
+    stripped = []
+    for line in lines:
+        if line.lstrip().startswith("#") and line.lstrip().lstrip("#").strip() in known_names:
+            continue
+        stripped.append(line)
 
     new_lines = []
-    for line in lines:
-        match = pattern.match(line)
+    for line in stripped:
+        match = section_pattern.match(line)
         if not match:
             new_lines.append(line)
             continue
@@ -252,21 +259,17 @@ def _annotate_special_resource_comments(toml_text: str) -> str:
             new_lines.append(line)
             continue
 
-        # Look back in the already-built output for the nearest non-empty line.
         idx = len(new_lines) - 1
         while idx >= 0 and new_lines[idx].strip() == "":
             idx -= 1
 
-        # If there's already a comment immediately above, don't add another.
         if idx >= 0 and new_lines[idx].lstrip().startswith("#"):
             new_lines.append(line)
             continue
 
-        # Insert the comment and then the header.
         new_lines.append(f"# {friendly_name}")
         new_lines.append(line)
 
-    # Preserve a trailing newline if the original had one.
     ending = "\n" if toml_text.endswith("\n") else ""
     return "\n".join(new_lines) + ending
 
