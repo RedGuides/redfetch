@@ -1,4 +1,5 @@
 """Resource API client: fetch_*() takes a client, get_*() is self-contained."""
+
 import asyncio
 
 import httpx

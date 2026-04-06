@@ -1,10 +1,3 @@
-"""
-Windows desktop shortcut management for redfetch.
-
-This is intentionally Windows-only. The public API is safe to import on any OS,
-but will raise NotImplementedError for non-Windows platforms when called.
-"""
-
 from __future__ import annotations
 
 import os

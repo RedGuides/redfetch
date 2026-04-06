@@ -1,3 +1,5 @@
+"""Fetches info about resources from the website."""
+
 from __future__ import annotations
 
 from typing import NamedTuple

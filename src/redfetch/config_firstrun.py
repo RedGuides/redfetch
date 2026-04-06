@@ -1,3 +1,5 @@
+"""Interactive first-run wizard(s)"""
+
 # Standard
 import os
 import platform

@@ -1,3 +1,5 @@
+"""Local API for the RedGuides.com web interface."""
+
 import asyncio
 import logging
 import webbrowser

@@ -1,3 +1,5 @@
+"""Builds the desired install-target set from resources that are watched, licensed, special, etc."""
+
 from __future__ import annotations
 
 import asyncio

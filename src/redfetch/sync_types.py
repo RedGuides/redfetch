@@ -1,3 +1,5 @@
+"""Models and data types shared across the sync pipeline."""
+
 from __future__ import annotations
 
 from collections.abc import Callable

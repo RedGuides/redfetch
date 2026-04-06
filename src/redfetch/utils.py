@@ -1,3 +1,5 @@
+"""Miscellaneous helpers, mostly path resolution and URL parsing."""
+
 # Standard
 import os
 import re

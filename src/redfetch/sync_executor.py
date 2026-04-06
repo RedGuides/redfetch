@@ -1,3 +1,5 @@
+"""Concurrent download executor for the planned sync."""
+
 from __future__ import annotations
 
 import asyncio

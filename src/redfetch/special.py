@@ -1,3 +1,5 @@
+"""For handling special resources."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

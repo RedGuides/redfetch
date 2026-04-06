@@ -1,3 +1,5 @@
+"""Version checking, self-update, and uninstall."""
+
 # Standard
 import os
 import platform

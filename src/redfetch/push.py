@@ -1,3 +1,5 @@
+"""Publish resource updates to RedGuides."""
+
 import os
 import asyncio
 import httpx

@@ -1,3 +1,5 @@
+"""Decides download/skip/block actions for the planned sync."""
+
 from __future__ import annotations
 
 from redfetch import config
