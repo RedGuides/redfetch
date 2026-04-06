@@ -3,16 +3,14 @@
 import asyncio
 
 import httpx
-from pydantic import BaseModel
-
 from redfetch import auth
 from redfetch import net
-from redfetch.sync_types import RemoteStatus
+from redfetch.sync_types import RemoteStatus, SyncModel
 
 BASE_URL = net.BASE_URL
 
 
-class ResourceRecord(BaseModel):
+class ResourceRecord(SyncModel):
     """Result of a single-resource API check: status plus optional payload or error."""
     resource_id: str
     status: RemoteStatus

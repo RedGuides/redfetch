@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -73,12 +73,12 @@ def reason_message(reason: PlanReason) -> str:
     meta = PLAN_REASON_META.get(reason)
     return meta.message if meta else reason
 
-SyncEvent = Union[
-    tuple[Literal["total"], int, None],
-    tuple[Literal["add_total"], int, None],
-    tuple[Literal["start"], str, str | None],
-    tuple[Literal["done"], str, ResultOutcome],
-]
+SyncEvent = (
+    tuple[Literal["total"], int, None]
+    | tuple[Literal["add_total"], int, None]
+    | tuple[Literal["start"], str, str | None]
+    | tuple[Literal["done"], str, ResultOutcome]
+)
 SyncEventCallback = Callable[[SyncEvent], None]
 
 
