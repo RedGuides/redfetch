@@ -1,10 +1,14 @@
 # standard
+import json
 import os
+import platform
 import re
+import shutil
 
 # third-party
 import tomlkit
 from dynaconf import Dynaconf, Validator, ValidationError
+from platformdirs import user_config_dir, user_data_dir
 
 # Parent Category to folder
 CATEGORY_MAP = {
@@ -51,6 +55,17 @@ RESOURCE_NAMES = {
     "2675": "lootnscoot",
 }
 
+BREADCRUMB_FILENAME = "last_command.json"
+DEFAULT_CONFIG_DIR = user_config_dir("redfetch", "RedGuides")
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.environ['REDFETCH_SCRIPT_DIR'] = script_dir
+
+# Populated by initialize_config()
+config_dir = None
+env_file_path = None
+settings = None
+
 
 def validate_no_eqgame(path):
     """Validate that the path and its parents don't contain eqgame.exe."""
@@ -94,8 +109,8 @@ def normalize_category_paths(data):
     return data
 
 
-# Custom Dynaconf validator specifically for SPECIAL_RESOURCE paths
 def normalize_paths_in_dict(data, parent_key=None):
+    """Dynaconf validator for SPECIAL_RESOURCE paths."""
     if isinstance(data, dict):
         for key, value in data.items():
             if isinstance(value, dict):
@@ -115,16 +130,6 @@ def normalize_paths_in_dict(data, parent_key=None):
     return data
 
 
-# Initialize variables
-script_dir = os.path.dirname(os.path.abspath(__file__))
-os.environ['REDFETCH_SCRIPT_DIR'] = script_dir
-
-# Declare these variables; they will be initialized in initialize_config()
-config_dir = None
-env_file_path = None
-settings = None
-
-
 def initialize_config():
     """Initialize configuration settings."""
     from redfetch.config_firstrun import first_run_setup
@@ -136,9 +141,7 @@ def initialize_config():
     os.environ['REDFETCH_CONFIG_DIR'] = config_dir
     
     # Data dir: Linux default uses XDG data dir (~/.local/share), else same as config
-    import platform
-    from platformdirs import user_config_dir, user_data_dir
-    is_linux_default = platform.system() == "Linux" and config_dir == user_config_dir("redfetch", "RedGuides")
+    is_linux_default = platform.system() == "Linux" and config_dir == DEFAULT_CONFIG_DIR
     data_dir = user_data_dir("redfetch", "RedGuides") if is_linux_default else config_dir
     os.makedirs(data_dir, exist_ok=True)
     os.environ['REDFETCH_DATA_DIR'] = data_dir
@@ -177,8 +180,46 @@ def initialize_config():
         ]
     )
 
+    write_breadcrumb()
+
     # Return the settings object for potential use
     return settings
+
+
+def _resolve_redfetch_executable():
+    """PYAPP will give a path when built with PYAPP_PASS_LOCATION=1"""
+    pyapp = os.environ.get("PYAPP")
+    if pyapp and "redfetch" in os.path.basename(pyapp).lower() and os.path.exists(pyapp):
+        return os.path.abspath(pyapp)
+
+    cmd = shutil.which("redfetch")
+    if cmd:
+        return os.path.abspath(cmd)
+
+    return None
+
+
+def write_breadcrumb() -> None:
+    """A breadcrumb in the user config dir to track the most recently used redfetch binary's location."""
+    try:
+        program = _resolve_redfetch_executable()
+        if program is None:
+            return
+
+        os.makedirs(DEFAULT_CONFIG_DIR, exist_ok=True)
+        breadcrumb_path = os.path.join(DEFAULT_CONFIG_DIR, BREADCRUMB_FILENAME)
+        with open(breadcrumb_path, "w", encoding="utf-8") as f:
+            json.dump({"program": program}, f)
+    except Exception:
+        pass
+
+
+def remove_breadcrumb() -> None:
+    breadcrumb_path = os.path.join(DEFAULT_CONFIG_DIR, BREADCRUMB_FILENAME)
+    try:
+        os.remove(breadcrumb_path)
+    except FileNotFoundError:
+        pass
 
 
 def switch_environment(new_env):

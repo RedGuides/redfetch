@@ -109,8 +109,7 @@ class SyncModel(BaseModel):
 
 
 class TargetIdentity(SyncModel):
-    """The same resource_id can appear as both a root and a dependency target
-    (or under multiple parents), each with its own target_key and planning."""
+    """Which target is this? Identifies a single install target"""
 
     target_key: str
     resource_id: str
