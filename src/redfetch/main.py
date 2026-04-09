@@ -3,7 +3,7 @@ import sys
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 import asyncio
 
 # third-party imports
@@ -37,6 +37,12 @@ class Env(str, Enum):
     LIVE = "LIVE"
     TEST = "TEST"
     EMU = "EMU"
+
+
+EXIT_CHECK_ERROR = 1
+EXIT_CALLER_UPDATE = 2
+EXIT_AUTH_REQUIRED = 3
+EXIT_NOT_CONFIGURED = 4
 
 
 def parse_resource_id_or_fail(value: str) -> str:
@@ -257,6 +263,83 @@ def download(
 ):
     db_name, db_path = initialize_db_only()
     asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))
+
+
+def _check_exit(real_stdout, exit_code: int, stdout_line: str = "") -> NoReturn:
+    """Write one line to real stdout and exit (never returns)."""
+    if stdout_line:
+        real_stdout.write(stdout_line + "\n")
+    real_stdout.flush()
+    raise typer.Exit(exit_code)
+
+
+def _has_auth_credentials() -> bool:
+    """Peek at env / keyring for stored credentials (no network, no init)."""
+    if os.environ.get("REDGUIDES_API_KEY"):
+        return True
+    try:
+        import keyring
+        token = keyring.get_password(auth.KEYRING_SERVICE_NAME, "access_token")
+        return token is not None
+    except Exception:
+        return False
+
+
+@app.command(
+    "check",
+    help="Machine-readable check for available updates. Stdout: update count. Exit code: 0=ok, 2=caller needs update, 3=auth required, 4=not configured.",
+    rich_help_panel="📦 Resource Management",
+)
+def check_command(
+    caller_resource_id: str | None = typer.Option(
+        None, "--caller-resource-id",
+        help="Resource ID of the calling program (e.g. 1974 for Very Vanilla MQ Live).",
+    ),
+):
+    real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+
+    try:
+        # Phase 1 — pre-flight (no init, instant)
+        from redfetch.config_firstrun import is_configured
+
+        if not is_configured():
+            _check_exit(real_stdout, EXIT_NOT_CONFIGURED)
+
+        if not _has_auth_credentials():
+            _check_exit(real_stdout, EXIT_AUTH_REQUIRED)
+
+        # Phase 2 — init + check
+        config.initialize_config()
+        auth.initialize_keyring()
+        db_name = f"{config.settings.ENV}_resources.db"
+        store.initialize_db(db_name)
+        db_path = store.get_db_path(db_name)
+
+        result = asyncio.run(_check_command_async(db_path, caller_resource_id))
+
+        sys.stdout = real_stdout
+
+        if result is None:
+            _check_exit(real_stdout, EXIT_AUTH_REQUIRED)
+
+        exit_code = EXIT_CALLER_UPDATE if result.caller_update_available is True else 0
+        _check_exit(real_stdout, exit_code, str(result.updates_available))
+
+    except typer.Exit:
+        raise
+    except Exception:
+        sys.stdout = real_stdout
+        _check_exit(real_stdout, EXIT_CHECK_ERROR)
+
+
+async def _check_command_async(db_path: str, caller_resource_id: str | None):
+    try:
+        headers = await auth.get_api_headers()
+    except RuntimeError:
+        return None
+    from redfetch.update_check import check_for_updates
+    return await check_for_updates(db_path, headers, caller_resource_id)
 
 
 @app.command(

@@ -336,3 +336,11 @@ class ExecutionResult(SyncModel):
         return self.was_cancelled or any(
             item.outcome == "error" for item in self.items.values()
         )
+
+
+class UpdateCheckResult(SyncModel):
+    """Result of a lightweight update check (no downloads)."""
+
+    updates_available: int = 0
+    caller_update_available: bool | None = None
+    caller_resource_id: str | None = None
