@@ -56,6 +56,11 @@ def parse_resource_id_or_fail(value: str) -> str:
     return parsed
 
 
+def _apply_server_override(server: "Optional[Env]" = None) -> None:
+    if server is not None and server.value != config.settings.ENV:
+        config.switch_environment(server.value)
+
+
 def _initialize_auth():
     """Initialize configuration, update check, and auth (no DB, no network)."""
     config.initialize_config()
@@ -65,9 +70,10 @@ def _initialize_auth():
     auth.authorize()
 
 
-def initialize_db_only():
+def initialize_db_only(server: "Optional[Env]" = None):
     """Initialize configuration, auth, and local cache database (no network)."""
     _initialize_auth()
+    _apply_server_override(server)
     db_name = f"{config.settings.ENV}_resources.db"
     store.initialize_db(db_name)
     db_path = store.get_db_path(db_name)
@@ -247,8 +253,9 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
 )
 def update_command(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download of all watched resources."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Switch to this server before updating ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
-    db_name, db_path = initialize_db_only()
+    db_name, db_path = initialize_db_only(server=server)
     asyncio.run(update_command_async(db_name=db_name, db_path=db_path, force=force))
 
 
@@ -260,8 +267,9 @@ def update_command(
 def download(
     id_or_url: str = typer.Argument(..., metavar="ID_OR_URL", help="RedGuides resource ID or URL"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download by resetting this resource's download date."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Switch to this server type before downloading ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
-    db_name, db_path = initialize_db_only()
+    db_name, db_path = initialize_db_only(server=server)
     asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))
 
 
@@ -295,6 +303,10 @@ def check_command(
         None, "--caller-resource-id",
         help="Resource ID of the calling program (e.g. 1974 for Very Vanilla MQ Live).",
     ),
+    server: Optional[Env] = typer.Option(
+        None, "--server", "-s", case_sensitive=False,
+        help="Switch to this server before checking ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
+    ),
 ):
     real_stdout = sys.stdout
     sys.stdout = sys.stderr
@@ -311,6 +323,7 @@ def check_command(
 
         # Phase 2 — init + check
         config.initialize_config()
+        _apply_server_override(server)
         auth.initialize_keyring()
         db_name = f"{config.settings.ENV}_resources.db"
         store.initialize_db(db_name)
