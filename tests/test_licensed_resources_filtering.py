@@ -155,6 +155,22 @@ def test_unlimited_license_has_no_discovery_block():
     assert target.discovery_block is None
 
 
+def test_current_license_overrides_expired_duplicate_for_same_resource():
+    desired_set = asyncio.run(
+        _discover_from_licenses(
+            [
+                make_license(9998, 8, title="Expired Copy", end_date=PAST),
+                make_license(9998, 8, title="Current Copy", end_date=FAR_FUTURE),
+            ],
+            "LIVE",
+        )
+    )
+    target = desired_set.install_targets["/9998/"]
+    assert target.sources == {"licensed"}
+    assert target.discovery_block is None
+    assert target.title == "Current Copy"
+
+
 # --- expired license planner tests ---
 
 
