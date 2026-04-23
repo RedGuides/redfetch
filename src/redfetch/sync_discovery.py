@@ -159,6 +159,8 @@ def _root_sources_for_full_sync(
         spec.sources.add("watching")
         spec.payload = payload
 
+    license_validity: dict[str, bool] = {}
+
     for license_info in licenses:
         if not license_info.get("active", False):
             continue
@@ -171,9 +173,18 @@ def _root_sources_for_full_sync(
         resource_id = str(payload["resource_id"])
         spec = specs.setdefault(resource_id, _RootSpec())
         spec.sources.add("licensed")
-        if is_expired:
+        had_valid_license = license_validity.get(resource_id, False)
+        has_valid_license = not is_expired
+        license_validity[resource_id] = had_valid_license or has_valid_license
+
+        # Prefer payload from a valid license when duplicate license rows exist.
+        if spec.payload is None or (has_valid_license and not had_valid_license):
+            spec.payload = payload
+
+        if license_validity[resource_id]:
+            spec.discovery_block = None
+        else:
             spec.discovery_block = "license_expired"
-        spec.payload = payload
 
     settings_for_env = config.settings.from_env(settings_env)
     for resource_id, resource_info in settings_for_env.SPECIAL_RESOURCES.items():
