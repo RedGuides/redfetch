@@ -177,6 +177,22 @@ def prompt_auto_run_macroquest() -> None:
         console.print("MacroQuest path not found. Please check your configuration.")
 
 
+def auto_run_eqbcs_if_enabled() -> None:
+    """Start EQBCS after a successful update when configured to do so."""
+    if os.environ.get("CI") == "true" or sys.platform != "win32":
+        return
+
+    auto_run_eqbcs = config.settings.from_env(config.settings.ENV).get("AUTO_RUN_EQBCS", False)
+    if not auto_run_eqbcs:
+        return
+
+    mq_path = utils.get_vvmq_path()
+    if mq_path:
+        processes.run_executable(mq_path, "EQBCS.exe")
+    else:
+        console.print("MacroQuest path not found. Please check your configuration.")
+
+
 async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
     """Run the main 'update watched' flow using async network calls."""
     if await net.is_mq_down():
@@ -201,6 +217,7 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
         db_path, headers, navmesh_override=navmesh_override
     )
     if success:
+        auto_run_eqbcs_if_enabled()
         prompt_auto_run_macroquest()
         return True
     return False

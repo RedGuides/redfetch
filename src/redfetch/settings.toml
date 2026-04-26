@@ -8,6 +8,7 @@
 [DEFAULT]
 DOWNLOAD_FOLDER = "@format {env[REDFETCH_DATA_DIR]}/Downloads"
 EQPATH = ""
+AUTO_RUN_EQBCS = false
 
 # ========================================
 # XenForo OAuth2
