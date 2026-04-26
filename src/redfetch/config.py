@@ -121,7 +121,7 @@ def normalize_paths_in_dict(data, parent_key=None):
             elif key in ['default_path', 'custom_path'] and isinstance(value, str):
                 normalized_value = os.path.normpath(value) if value else value
                 parent_key_int = int(parent_key) if isinstance(parent_key, str) and parent_key.isdigit() else parent_key
-                if parent_key_int not in EQMAPS_MAP:
+                if parent_key_int not in EQMAPS_MAP and os.path.isabs(normalized_value):
                     validate_no_eqgame(normalized_value)
                 data[key] = normalized_value
     elif isinstance(data, list):
