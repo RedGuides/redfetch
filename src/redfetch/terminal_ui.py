@@ -1932,11 +1932,8 @@ class Redfetch(App):
                     auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
                     if auto_run is True:
                         self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-                        if main_screen:
-                            self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
                     elif auto_run is False:
-                        if main_screen:
-                            self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
+                        pass
                     else:
                         def handle_vvmq_response(response: str) -> None:
                             if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
@@ -1945,13 +1942,9 @@ class Redfetch(App):
                                 self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
                             elif response == RunVVMQScreen.RESPONSE_NEVER:
                                 self.handle_toggle_auto_run_vvmq(False)
-                            if main_screen:
-                                main_screen.reset_button("update_watched", "primary")
-                                main_screen.update_widget_states()
                         self.push_screen(RunVVMQScreen(), handle_vvmq_response)
                 else:
-                    if main_screen:
-                        self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
+                    pass
         else:
             button.variant = "error"
             print("Some resources failed to update.")
