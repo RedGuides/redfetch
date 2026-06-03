@@ -338,9 +338,11 @@ class ExecutionResult(SyncModel):
         )
 
 
-class UpdateCheckResult(SyncModel):
-    """Result of a lightweight update check (no downloads)."""
+@dataclass(frozen=True, slots=True)
+class PreparedSync:
+    """The product of preparing a sync run, before any execution or DB writes."""
 
-    updates_available: int = 0
-    caller_update_available: bool | None = None
-    caller_resource_id: str | None = None
+    desired_set: DesiredSet
+    remote_snapshot: RemoteSnapshot
+    local_snapshot: LocalSnapshot
+    execution_plan: ExecutionPlan

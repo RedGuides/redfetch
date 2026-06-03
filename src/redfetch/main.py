@@ -3,7 +3,7 @@ import sys
 import os
 from enum import Enum
 from pathlib import Path
-from typing import NoReturn, Optional
+from typing import Optional
 import asyncio
 
 # third-party imports
@@ -37,12 +37,6 @@ class Env(str, Enum):
     LIVE = "LIVE"
     TEST = "TEST"
     EMU = "EMU"
-
-
-EXIT_CHECK_ERROR = 1
-EXIT_CALLER_UPDATE = 2
-EXIT_AUTH_REQUIRED = 3
-EXIT_NOT_CONFIGURED = 4
 
 
 def parse_resource_id_or_fail(value: str) -> str:
@@ -273,14 +267,6 @@ def download(
     asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))
 
 
-def _check_exit(real_stdout, exit_code: int, stdout_line: str = "") -> NoReturn:
-    """Write one line to real stdout and exit (never returns)."""
-    if stdout_line:
-        real_stdout.write(stdout_line + "\n")
-    real_stdout.flush()
-    raise typer.Exit(exit_code)
-
-
 def _has_auth_credentials() -> bool:
     """Peek at env / keyring for stored credentials (no network, no init)."""
     if os.environ.get("REDGUIDES_API_KEY"):
@@ -295,64 +281,69 @@ def _has_auth_credentials() -> bool:
 
 @app.command(
     "check",
-    help="Machine-readable check for available updates. Stdout: update count. Exit code: 0=ok, 2=caller needs update, 3=auth required, 4=not configured.",
+    help=(
+        "Non-interactive update check. Writes [bold]update_status.json[/bold] for the env "
+        "(exit 0=wrote a verdict, 1=transient failure)."
+    ),
     rich_help_panel="📦 Resource Management",
 )
 def check_command(
-    caller_resource_id: str | None = typer.Option(
-        None, "--caller-resource-id",
-        help="Resource ID of the calling program (e.g. 1974 for Very Vanilla MQ Live).",
-    ),
     server: Optional[Env] = typer.Option(
         None, "--server", "-s", case_sensitive=False,
-        help="Switch to this server before checking ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
+        help="Check this server's env for this run only, without persisting it ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
     ),
 ):
-    real_stdout = sys.stdout
-    sys.stdout = sys.stderr
+    from redfetch.config_firstrun import is_configured
+    from redfetch import update_status
+
+    requested_env = server.value if server else None
+
+    # Pre-flight: not configured at all -> no init possible, but we can still record the verdict.
+    if not is_configured():
+        update_status.write_update_status(
+            env=requested_env or Env.LIVE.value,
+            auth_state="not_configured",
+        )
+        raise typer.Exit(0)
 
     try:
-        # Phase 1 — pre-flight (no init, instant)
-        from redfetch.config_firstrun import is_configured
-
-        if not is_configured():
-            _check_exit(real_stdout, EXIT_NOT_CONFIGURED)
+        config.initialize_config()
+        # Honor --server for this run only; never persist (a "check" must not change the user's env).
+        if requested_env:
+            config.select_environment_in_memory(requested_env)
+        env = config.settings.ENV
+        auth.initialize_keyring()
 
         if not _has_auth_credentials():
-            _check_exit(real_stdout, EXIT_AUTH_REQUIRED)
+            update_status.write_update_status(env=env, auth_state="needs_login")
+            raise typer.Exit(0)
 
-        # Phase 2 — init + check
-        config.initialize_config()
-        _apply_server_override(server)
-        auth.initialize_keyring()
-        db_name = f"{config.settings.ENV}_resources.db"
+        db_name = f"{env}_resources.db"
         store.initialize_db(db_name)
         db_path = store.get_db_path(db_name)
 
-        result = asyncio.run(_check_command_async(db_path, caller_resource_id))
-
-        sys.stdout = real_stdout
-
-        if result is None:
-            _check_exit(real_stdout, EXIT_AUTH_REQUIRED)
-
-        exit_code = EXIT_CALLER_UPDATE if result.caller_update_available is True else 0
-        _check_exit(real_stdout, exit_code, str(result.updates_available))
+        auth_state, items = asyncio.run(_check_command_async(db_path))
+        update_status.write_update_status(env=env, auth_state=auth_state, items=items)
+        raise typer.Exit(0)
 
     except typer.Exit:
         raise
     except Exception:
-        sys.stdout = real_stdout
-        _check_exit(real_stdout, EXIT_CHECK_ERROR)
+        # Transient failure, no touch to update_status.json so we know checked_at didn't advance this cycle.
+        raise typer.Exit(1)
 
 
-async def _check_command_async(db_path: str, caller_resource_id: str | None):
+async def _check_command_async(db_path: str) -> tuple[str, list[dict] | None]:
+    from redfetch import update_status
+
     try:
         headers = await auth.get_api_headers()
     except RuntimeError:
-        return None
-    from redfetch.update_check import check_for_updates
-    return await check_for_updates(db_path, headers, caller_resource_id)
+        # Silent refresh failed / expired / logged out -> a gentle re-login nudge
+        return "needs_login", None
+
+    prepared = await sync.prepare_sync(db_path, headers)
+    return "ok", update_status.build_items_from_plan(prepared.execution_plan)
 
 
 @app.command(

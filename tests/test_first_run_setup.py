@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from redfetch.config_firstrun import first_run_setup
+from redfetch.config_firstrun import first_run_setup, is_configured
 
 @pytest.fixture
 def mock_user_config_dir():
@@ -81,6 +81,28 @@ def test_first_run_setup_first_time(
     assert config_dir == '/dummy/default_config_dir'
     mock_os_makedirs.assert_called_with('/dummy/default_config_dir', exist_ok=True)
     mock_create_first_run_flag.assert_called_with('/dummy/default_config_dir', '/dummy/default_config_dir')
+
+def test_is_configured_false_when_no_flag(tmp_path):
+    """No first_run_complete file at all -> not configured."""
+    assert is_configured(str(tmp_path)) is False
+
+
+def test_is_configured_false_when_flag_but_no_env(tmp_path):
+    """Flag points at a real dir, but there's no .env -> not configured."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (tmp_path / "first_run_complete").write_text(str(config_dir))
+    assert is_configured(str(tmp_path)) is False
+
+
+def test_is_configured_true_when_flag_and_env_present(tmp_path):
+    """Flag points at a dir that contains a .env -> configured."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / ".env").write_text("")
+    (tmp_path / "first_run_complete").write_text(str(config_dir))
+    assert is_configured(str(tmp_path)) is True
+
 
 def test_first_run_setup_ci_environment(
     mock_user_config_dir,

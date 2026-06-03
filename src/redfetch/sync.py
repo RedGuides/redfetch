@@ -14,6 +14,7 @@ from redfetch.sync_types import (
     ExecutionPlan,
     ExecutionResult,
     PLAN_REASON_META,
+    PreparedSync,
     ReasonInfo,
     SyncEventCallback,
     reason_message,
@@ -110,13 +111,12 @@ def _run_succeeded(
     return True
 
 
-async def sync(
+async def prepare_sync(
     db_path: str,
     headers: dict,
     resource_ids: list[str] | None = None,
-    on_event: SyncEventCallback | None = None,
-) -> bool:
-    """Discover, plan, and execute a sync run against the API."""
+) -> PreparedSync:
+    """Run discovery -> remote snapshot -> planning, returning the plan without executing it."""
     settings_env = config.settings.ENV
     local_snapshot = await store.load_local_snapshot(db_path)
 
@@ -143,6 +143,27 @@ async def sync(
         local_snapshot=local_snapshot,
         settings_env=settings_env,
     )
+
+    return PreparedSync(
+        desired_set=desired_set,
+        remote_snapshot=remote_snapshot,
+        local_snapshot=local_snapshot,
+        execution_plan=execution_plan,
+    )
+
+
+async def sync(
+    db_path: str,
+    headers: dict,
+    resource_ids: list[str] | None = None,
+    on_event: SyncEventCallback | None = None,
+) -> bool:
+    """Discover, plan, and execute a sync run against the API."""
+    prepared = await prepare_sync(db_path, headers, resource_ids=resource_ids)
+    desired_set = prepared.desired_set
+    remote_snapshot = prepared.remote_snapshot
+    local_snapshot = prepared.local_snapshot
+    execution_plan = prepared.execution_plan
 
     _print_plan_summary(execution_plan, resource_ids=resource_ids)
     if on_event:
