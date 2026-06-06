@@ -54,7 +54,11 @@ def make_license(
     }
 
 
-async def _discover_from_licenses(licenses: list[dict], env: str):
+async def _discover_from_licenses(
+    licenses: list[dict],
+    env: str,
+    watched_resources: list[dict] | None = None,
+):
     mock_settings = MagicMock()
     mock_settings.ENV = env
     mock_settings.from_env.return_value = SimpleNamespace(
@@ -66,7 +70,7 @@ async def _discover_from_licenses(licenses: list[dict], env: str):
 
     with patch(
         "redfetch.sync_discovery.api.fetch_watched_resources",
-        new=AsyncMock(return_value=[]),
+        new=AsyncMock(return_value=watched_resources or []),
     ), patch(
         "redfetch.sync_discovery.api.fetch_licenses",
         new=AsyncMock(return_value=licenses),
@@ -153,6 +157,84 @@ def test_unlimited_license_has_no_discovery_block():
     target = desired_set.install_targets["/9998/"]
     assert target.sources == {"licensed"}
     assert target.discovery_block is None
+
+
+def test_current_license_overrides_expired_duplicate_for_same_resource():
+    desired_set = asyncio.run(
+        _discover_from_licenses(
+            [
+                make_license(9998, 8, title="Expired Copy", end_date=PAST),
+                make_license(9998, 8, title="Current Copy", end_date=FAR_FUTURE),
+            ],
+            "LIVE",
+        )
+    )
+    target = desired_set.install_targets["/9998/"]
+    assert target.sources == {"licensed"}
+    assert target.discovery_block is None
+    assert target.title == "Current Copy"
+
+
+def test_current_first_expired_second_no_block():
+    desired_set = asyncio.run(
+        _discover_from_licenses(
+            [
+                make_license(9998, 8, title="Current Copy", end_date=FAR_FUTURE),
+                make_license(9998, 8, title="Expired Copy", end_date=PAST),
+            ],
+            "LIVE",
+        )
+    )
+    target = desired_set.install_targets["/9998/"]
+    assert target.discovery_block is None
+    assert target.title == "Current Copy"
+
+
+def test_all_duplicate_licenses_expired_gets_block():
+    desired_set = asyncio.run(
+        _discover_from_licenses(
+            [
+                make_license(9998, 8, title="Expired A", end_date=PAST),
+                make_license(9998, 8, title="Expired B", end_date=PAST - 1),
+            ],
+            "LIVE",
+        )
+    )
+    target = desired_set.install_targets["/9998/"]
+    assert target.discovery_block == "license_expired"
+
+
+def test_unlimited_license_overrides_expired_duplicate():
+    desired_set = asyncio.run(
+        _discover_from_licenses(
+            [
+                make_license(9998, 8, title="Expired Copy", end_date=PAST),
+                make_license(9998, 8, title="Unlimited Copy", end_date=0),
+            ],
+            "LIVE",
+        )
+    )
+    target = desired_set.install_targets["/9998/"]
+    assert target.discovery_block is None
+    assert target.title == "Unlimited Copy"
+
+
+def test_watched_resource_with_valid_duplicate_license_is_not_blocked():
+    watched_resource = make_license(9998, 8, title="Watched Copy")["resource"]
+    desired_set = asyncio.run(
+        _discover_from_licenses(
+            [
+                make_license(9998, 8, title="Expired Copy", end_date=PAST),
+                make_license(9998, 8, title="Current Copy", end_date=FAR_FUTURE),
+            ],
+            "LIVE",
+            watched_resources=[watched_resource],
+        )
+    )
+    target = desired_set.install_targets["/9998/"]
+    assert target.sources == {"watching", "licensed"}
+    assert target.discovery_block is None
+    assert target.title == "Current Copy"
 
 
 # --- expired license planner tests ---

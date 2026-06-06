@@ -3,6 +3,7 @@ name = "redfetch"
 description = "Download and publish EverQuest scripts and software using the RedGuides API"
 readme = "README.md"
 license = "GPL-3.0-or-later"
+requires-python = ">=3.12"
 dynamic = ["version", "urls"]
 authors = [
     { name = "Redbot", email = "ask@redguides.com" }
