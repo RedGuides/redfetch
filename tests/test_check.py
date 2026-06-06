@@ -98,10 +98,26 @@ def test_write_status_ok_with_items(status_dir):
     assert on_disk["schema_version"] == update_status.SCHEMA_VERSION
     assert on_disk["env"] == "LIVE"  # uppercased
     assert on_disk["auth_state"] == "ok"
-    assert on_disk["updates"]["count"] == 1
     assert on_disk["updates"]["items"] == items
-    assert on_disk["generated_at"] == on_disk["checked_at"]
-    assert on_disk["generated_at"].endswith("Z")
+    assert isinstance(on_disk["checked_at"], int)
+    assert on_disk["checked_at"] > 0
+
+
+def test_write_status_includes_managed_path(status_dir):
+    """MQ reads managed_path to ignore stray MQ copies; it must round-trip verbatim."""
+    update_status.write_update_status(
+        env="LIVE",
+        auth_state="ok",
+        items=[{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}],
+        managed_path=r"D:\EverQuest\VanillaMQ_LIVE",
+    )
+    assert _read_status(status_dir)["managed_path"] == r"D:\EverQuest\VanillaMQ_LIVE"
+
+
+def test_managed_path_defaults_to_null(status_dir):
+    """Not_configured / unresolved trees write an explicit null so MQ won't gate."""
+    update_status.write_update_status(env="EMU", auth_state="not_configured")
+    assert _read_status(status_dir)["managed_path"] is None
 
 
 def test_non_ok_states_force_empty_updates(status_dir):
@@ -112,7 +128,6 @@ def test_non_ok_states_force_empty_updates(status_dir):
     )
     on_disk = _read_status(status_dir)
     assert on_disk["auth_state"] == "needs_login"
-    assert on_disk["updates"]["count"] == 0
     assert on_disk["updates"]["items"] == []
 
 

@@ -92,6 +92,7 @@ def test_check_command_uses_ephemeral_env(monkeypatch, tmp_path):
 
     monkeypatch.setattr(config, "switch_environment", _must_not_persist)
     monkeypatch.setattr(config, "write_env_to_file", _must_not_persist)
+    monkeypatch.setattr(main.utils, "get_vvmq_path", lambda: r"D:\MQ\VanillaMQ_TEST")
 
     async def fake_check(db_path):
         return "ok", [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}]
@@ -107,7 +108,8 @@ def test_check_command_uses_ephemeral_env(monkeypatch, tmp_path):
     )
     assert on_disk["env"] == "TEST"
     assert on_disk["auth_state"] == "ok"
-    assert on_disk["updates"]["count"] == 1
+    assert len(on_disk["updates"]["items"]) == 1
+    assert on_disk["managed_path"] == r"D:\MQ\VanillaMQ_TEST"
 
 
 def test_check_command_not_configured_writes_verdict(monkeypatch, tmp_path):
@@ -128,7 +130,9 @@ def test_check_command_not_configured_writes_verdict(monkeypatch, tmp_path):
     )
     assert on_disk["auth_state"] == "not_configured"
     assert on_disk["env"] == "EMU"
-    assert on_disk["updates"]["count"] == 0
+    assert on_disk["updates"]["items"] == []
+    # Not configured: redfetch can't resolve a managed tree, so MQ won't gate.
+    assert on_disk["managed_path"] is None
 
 
 def test_check_command_needs_login_writes_verdict(monkeypatch, tmp_path):
@@ -140,6 +144,7 @@ def test_check_command_needs_login_writes_verdict(monkeypatch, tmp_path):
     monkeypatch.setattr("redfetch.config_firstrun.is_configured", lambda *a, **k: True)
     monkeypatch.setattr(main.auth, "initialize_keyring", lambda: None)
     monkeypatch.setattr(main, "_has_auth_credentials", lambda: False)
+    monkeypatch.setattr(main.utils, "get_vvmq_path", lambda: r"D:\MQ\VanillaMQ_LIVE")
 
     def _must_not_run(*a, **k):
         raise AssertionError("needs_login path must not start a sync")
@@ -155,4 +160,5 @@ def test_check_command_needs_login_writes_verdict(monkeypatch, tmp_path):
     )
     assert on_disk["auth_state"] == "needs_login"
     assert on_disk["env"] == "LIVE"
-    assert on_disk["updates"]["count"] == 0
+    assert on_disk["updates"]["items"] == []
+    assert on_disk["managed_path"] == r"D:\MQ\VanillaMQ_LIVE"

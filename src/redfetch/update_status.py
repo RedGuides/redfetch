@@ -41,21 +41,20 @@ def write_update_status(
     env: str,
     auth_state: AuthState,
     items: list[dict] | None = None,
+    managed_path: str | None = None,
 ) -> dict:
     """Write update_status.json and return the payload. Only auth_state "ok" carries items."""
     items = items or []
     if auth_state != "ok":
         items = []
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": now,
-        "checked_at": now,
+        "checked_at": int(datetime.now(timezone.utc).timestamp()),
         "env": env.upper(),
         "auth_state": auth_state,
+        "managed_path": managed_path,
         "updates": {
-            "count": len(items),
             "items": items,
         },
     }

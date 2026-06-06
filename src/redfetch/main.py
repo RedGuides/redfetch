@@ -314,8 +314,11 @@ def check_command(
         env = config.settings.ENV
         auth.initialize_keyring()
 
+        # MQ matches this against its own root to ignore stray copies.
+        managed_path = utils.get_vvmq_path()
+
         if not _has_auth_credentials():
-            update_status.write_update_status(env=env, auth_state="needs_login")
+            update_status.write_update_status(env=env, auth_state="needs_login", managed_path=managed_path)
             raise typer.Exit(0)
 
         db_name = f"{env}_resources.db"
@@ -323,7 +326,7 @@ def check_command(
         db_path = store.get_db_path(db_name)
 
         auth_state, items = asyncio.run(_check_command_async(db_path))
-        update_status.write_update_status(env=env, auth_state=auth_state, items=items)
+        update_status.write_update_status(env=env, auth_state=auth_state, items=items, managed_path=managed_path)
         raise typer.Exit(0)
 
     except typer.Exit:
