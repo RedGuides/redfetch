@@ -225,6 +225,71 @@ def test_planner_blocks_all_targets_participating_in_cycle():
     assert execution_plan.actions["/151/1865/151/"].action == "block"
     assert execution_plan.actions["/151/1865/151/"].reason == "dependency_cycle"
 
+def test_root_and_dependency_same_resource_id_but_only_dependency_is_outdated():
+    root_a = _root_target("153")
+    root_b = _root_target("151")
+    child_b = _dependency_target("153", root_b)
+    local_snapshot = LocalSnapshot(install_targets={
+        "/153/": LocalInstallState(
+            target_key="/153/",
+            resource_id="153",
+            root_resource_id="153",
+            target_kind="root",
+            version_local=10,
+            resolved_path="C:/downloads/153",
+        ),
+        "/151/153/": LocalInstallState(
+            target_key="/151/153/",
+            resource_id="153",
+            parent_id="151",
+            parent_target_key="/151/",
+            root_resource_id="151",
+            target_kind="dependency",
+            version_local=7,
+            resolved_path="C:/downloads/151/153",
+        ),
+    })
+    remote_snapshot = RemoteSnapshot(
+    resources={
+    "153": RemoteResourceState(
+        resource_id="153",
+        title="Resource 153",
+        category_id=8,
+        version_id=10,
+        status="downloadable",
+        artifact=RemoteArtifact(
+            file_id=9876,
+            filename="153.zip",
+            download_url="https://example.com/153.zip",
+            file_hash="d41d8cd98f00b204e9800998ecf8427e",
+        ),
+        source_note="manifest_plus_access_check",
+    ),
+    "151": RemoteResourceState(
+        resource_id="151",
+        title="Resource 151",
+        category_id=8,
+        version_id=10,
+        status="downloadable",
+        artifact=RemoteArtifact(
+            file_id=9876,
+            filename="151.zip",
+            download_url="https://example.com/151.zip",
+            file_hash="d41d8cd98f00b204e9800998ecf8427e",
+        ),
+        source_note="manifest_plus_access_check",
+    ),
+    })
+    execution_plan = planner.build_execution_plan(
+        desired_set=_desired_set(root_a, root_b, child_b),
+        remote_snapshot=remote_snapshot,
+        local_snapshot=local_snapshot,
+        settings_env="LIVE",
+    )
+    assert execution_plan.actions["/153/"].action == "skip"
+    assert execution_plan.actions["/153/"].reason == "already_current"
+    assert execution_plan.actions["/151/153/"].action == "download"
+    assert execution_plan.actions["/151/153/"].reason == "outdated"
 
 def test_reset_download_date_for_resource_does_not_reset_unrelated_dependency_occurrences(tmp_path):
     db_path = _db_path(tmp_path)

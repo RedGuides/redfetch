@@ -1,10 +1,14 @@
 # standard
+import json
 import os
+import platform
 import re
+import shutil
 
 # third-party
 import tomlkit
 from dynaconf import Dynaconf, Validator, ValidationError
+from platformdirs import user_config_dir, user_data_dir
 
 # Parent Category to folder
 CATEGORY_MAP = {
@@ -51,6 +55,17 @@ RESOURCE_NAMES = {
     "2675": "lootnscoot",
 }
 
+BREADCRUMB_FILENAME = "last_command.json"
+DEFAULT_CONFIG_DIR = user_config_dir("redfetch", "RedGuides")
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.environ['REDFETCH_SCRIPT_DIR'] = script_dir
+
+# Populated by initialize_config()
+config_dir = None
+env_file_path = None
+settings = None
+
 
 def validate_no_eqgame(path):
     """Validate that the path and its parents don't contain eqgame.exe."""
@@ -94,8 +109,8 @@ def normalize_category_paths(data):
     return data
 
 
-# Custom Dynaconf validator specifically for SPECIAL_RESOURCE paths
 def normalize_paths_in_dict(data, parent_key=None):
+    """Dynaconf validator for SPECIAL_RESOURCE paths."""
     if isinstance(data, dict):
         for key, value in data.items():
             if isinstance(value, dict):
@@ -115,16 +130,6 @@ def normalize_paths_in_dict(data, parent_key=None):
     return data
 
 
-# Initialize variables
-script_dir = os.path.dirname(os.path.abspath(__file__))
-os.environ['REDFETCH_SCRIPT_DIR'] = script_dir
-
-# Declare these variables; they will be initialized in initialize_config()
-config_dir = None
-env_file_path = None
-settings = None
-
-
 def initialize_config():
     """Initialize configuration settings."""
     from redfetch.config_firstrun import first_run_setup
@@ -136,9 +141,7 @@ def initialize_config():
     os.environ['REDFETCH_CONFIG_DIR'] = config_dir
     
     # Data dir: Linux default uses XDG data dir (~/.local/share), else same as config
-    import platform
-    from platformdirs import user_config_dir, user_data_dir
-    is_linux_default = platform.system() == "Linux" and config_dir == user_config_dir("redfetch", "RedGuides")
+    is_linux_default = platform.system() == "Linux" and config_dir == DEFAULT_CONFIG_DIR
     data_dir = user_data_dir("redfetch", "RedGuides") if is_linux_default else config_dir
     os.makedirs(data_dir, exist_ok=True)
     os.environ['REDFETCH_DATA_DIR'] = data_dir
@@ -149,8 +152,7 @@ def initialize_config():
     # Check if the .env file exists
     if not os.path.exists(env_file_path):
         # If not, create it and set the default environment to 'LIVE'
-        with open(env_file_path, 'w') as env_file:
-            env_file.write('REDFETCH_ENV=LIVE\n')
+        atomic_write_text(env_file_path, 'REDFETCH_ENV=LIVE\n')
         print(f".env file created with default environment set to 'LIVE' at {env_file_path}")
 
     # Initialize Dynaconf settings
@@ -177,8 +179,60 @@ def initialize_config():
         ]
     )
 
+    write_breadcrumb()
+
     # Return the settings object for potential use
     return settings
+
+
+def _resolve_redfetch_executable():
+    """PYAPP will give a path when built with PYAPP_PASS_LOCATION=1"""
+    pyapp = os.environ.get("PYAPP")
+    if pyapp and "redfetch" in os.path.basename(pyapp).lower() and os.path.exists(pyapp):
+        return os.path.abspath(pyapp)
+
+    cmd = shutil.which("redfetch")
+    if cmd:
+        return os.path.abspath(cmd)
+
+    return None
+
+
+def atomic_write_text(path: str, text: str) -> None:
+    """Write UTF-8 text to `path` via a temp file + os.replace() so readers never see a partial write."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp_path, path)
+
+
+def atomic_write_json(path: str, data) -> None:
+    """Atomically write `data` as UTF-8 JSON (ensure_ascii=False keeps non-ASCII paths/titles verbatim)."""
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def write_breadcrumb() -> None:
+    """A breadcrumb in the user config dir to track the most recently used redfetch binary's location."""
+    try:
+        program = _resolve_redfetch_executable()
+        if program is None:
+            return
+
+        breadcrumb_path = os.path.join(DEFAULT_CONFIG_DIR, BREADCRUMB_FILENAME)
+        atomic_write_json(breadcrumb_path, {"program": program})
+    except Exception:
+        pass
+
+
+def remove_breadcrumb() -> None:
+    breadcrumb_path = os.path.join(DEFAULT_CONFIG_DIR, BREADCRUMB_FILENAME)
+    try:
+        os.remove(breadcrumb_path)
+    except FileNotFoundError:
+        pass
 
 
 def switch_environment(new_env):
@@ -205,13 +259,26 @@ def switch_environment(new_env):
     return settings
 
 
+def select_environment_in_memory(new_env):
+    """Select `new_env` for this process only, without persisting to the .env file."""
+    if settings is None:
+        raise RuntimeError("Configuration has not been initialized. Call initialize_config() first.")
+
+    settings.setenv(new_env)
+    settings.ENV = new_env
+
+    try:
+        settings.validators.validate()
+    except ValidationError as e:
+        print(f"Validation error after selecting {new_env}: {e}")
+
+    return settings
+
+
 def ensure_config_file_exists(file_path):
     """Ensure the configuration file exists."""
     if not os.path.exists(file_path):
-        # If the file doesn't exist, create it with an empty TOML structure
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, 'w') as f:
-            f.write(tomlkit.dumps({}))  # Create an empty TOML file
+        atomic_write_text(file_path, tomlkit.dumps({}))
         print(f"Created new configuration file: {file_path}")
 
 
@@ -278,8 +345,7 @@ def save_config(file_path, config_data):
     """Save the updated configuration data to the TOML file."""
     toml_text = tomlkit.dumps(config_data)
     toml_text = _annotate_special_resource_comments(toml_text)
-    with open(file_path, 'w') as f:
-        f.write(toml_text)
+    atomic_write_text(file_path, toml_text)
 
 
 def update_setting(setting_path, setting_value, env=None):
@@ -353,5 +419,4 @@ def write_env_to_file(new_env):
         lines.append(f'REDFETCH_ENV={new_env}\n')
 
     # Write the updated content back to the .env file
-    with open(env_file_path, 'w') as file:
-        file.writelines(lines)
+    atomic_write_text(env_file_path, ''.join(lines))

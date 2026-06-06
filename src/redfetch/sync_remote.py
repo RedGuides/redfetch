@@ -85,6 +85,7 @@ def _needs_live_check(
             return True
         if (
             local_state.resolved_path != target.resolved_path
+            or local_state.subfolder != target.subfolder
             or local_state.flatten != target.flatten
             or local_state.protected_files != target.protected_files
         ):

@@ -147,6 +147,17 @@ def is_first_run(default_config_dir):
     return not os.path.exists(first_run_flag)
 
 
+def is_configured(default_config_dir: str | None = None) -> bool:
+    """Can initialize_config() proceed without interactive prompts?"""
+    default_config_dir = default_config_dir or user_config_dir("redfetch", "RedGuides")
+    try:
+        with open(os.path.join(default_config_dir, "first_run_complete")) as f:
+            config_dir = f.read().strip()
+    except OSError:
+        return False
+    return os.path.exists(os.path.join(config_dir, ".env"))
+
+
 def get_or_create_table(doc: TOMLDocument, table_path: str):
     """Navigate or create nested tables in the TOML document."""
     current_section = doc

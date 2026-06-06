@@ -365,6 +365,8 @@ def uninstall():
     # Call the logout function to clear stored credentials
     logout()
 
+    config.remove_breadcrumb()
+
     # Get executable path and installation method
     executable_path = get_executable_path()
     install_method = detect_installation_method()

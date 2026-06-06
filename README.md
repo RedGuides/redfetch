@@ -66,8 +66,10 @@ To run redfetch from the command line:
 > ### 📦 Resource Management
 > - `update` - Update all watched and special resources
 >   - `--force` / `-f` - Force re-download of all watched resources
+>   - `--server` / `-s` - Switch to this server before updating (`LIVE`, `TEST`, `EMU`)
 > - `download <ID_OR_URL>` - Download a specific resource by ID or URL
 >   - `--force` / `-f` - Force re-download by resetting this resource's download date
+>   - `--server` / `-s` - Switch to this server before downloading (`LIVE`, `TEST`, `EMU`)
 > - `list` - List resources and dependencies in the cache database
 > - `reset` - Reset download dates for watched resources
 > 

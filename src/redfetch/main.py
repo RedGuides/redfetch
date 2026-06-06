@@ -50,6 +50,11 @@ def parse_resource_id_or_fail(value: str) -> str:
     return parsed
 
 
+def _apply_server_override(server: "Optional[Env]" = None) -> None:
+    if server is not None and server.value != config.settings.ENV:
+        config.switch_environment(server.value)
+
+
 def _initialize_auth():
     """Initialize configuration, update check, and auth (no DB, no network)."""
     config.initialize_config()
@@ -59,9 +64,10 @@ def _initialize_auth():
     auth.authorize()
 
 
-def initialize_db_only():
+def initialize_db_only(server: "Optional[Env]" = None):
     """Initialize configuration, auth, and local cache database (no network)."""
     _initialize_auth()
+    _apply_server_override(server)
     db_name = f"{config.settings.ENV}_resources.db"
     store.initialize_db(db_name)
     db_path = store.get_db_path(db_name)
@@ -241,8 +247,9 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
 )
 def update_command(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download of all watched resources."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Switch to this server before updating ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
-    db_name, db_path = initialize_db_only()
+    db_name, db_path = initialize_db_only(server=server)
     asyncio.run(update_command_async(db_name=db_name, db_path=db_path, force=force))
 
 
@@ -254,9 +261,92 @@ def update_command(
 def download(
     id_or_url: str = typer.Argument(..., metavar="ID_OR_URL", help="RedGuides resource ID or URL"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download by resetting this resource's download date."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Switch to this server type before downloading ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
-    db_name, db_path = initialize_db_only()
+    db_name, db_path = initialize_db_only(server=server)
     asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))
+
+
+def _has_auth_credentials() -> bool:
+    """Peek at env / keyring for stored credentials (no network, no init)."""
+    if os.environ.get("REDGUIDES_API_KEY"):
+        return True
+    try:
+        import keyring
+        token = keyring.get_password(auth.KEYRING_SERVICE_NAME, "access_token")
+        return token is not None
+    except Exception:
+        return False
+
+
+@app.command(
+    "check",
+    help=(
+        "Non-interactive update check. Writes [bold]update_status.json[/bold] for the env "
+        "(exit 0=wrote a verdict, 1=transient failure)."
+    ),
+    rich_help_panel="📦 Resource Management",
+)
+def check_command(
+    server: Optional[Env] = typer.Option(
+        None, "--server", "-s", case_sensitive=False,
+        help="Check this server's env for this run only, without persisting it ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
+    ),
+):
+    from redfetch.config_firstrun import is_configured
+    from redfetch import update_status
+
+    requested_env = server.value if server else None
+
+    # Pre-flight: not configured at all -> no init possible, but we can still record the verdict.
+    if not is_configured():
+        update_status.write_update_status(
+            env=requested_env or Env.LIVE.value,
+            auth_state="not_configured",
+        )
+        raise typer.Exit(0)
+
+    try:
+        config.initialize_config()
+        # Honor --server for this run only; never persist (a "check" must not change the user's env).
+        if requested_env:
+            config.select_environment_in_memory(requested_env)
+        env = config.settings.ENV
+        auth.initialize_keyring()
+
+        # MQ matches this against its own root to ignore stray copies.
+        managed_path = utils.get_vvmq_path()
+
+        if not _has_auth_credentials():
+            update_status.write_update_status(env=env, auth_state="needs_login", managed_path=managed_path)
+            raise typer.Exit(0)
+
+        db_name = f"{env}_resources.db"
+        store.initialize_db(db_name)
+        db_path = store.get_db_path(db_name)
+
+        auth_state, items = asyncio.run(_check_command_async(db_path))
+        update_status.write_update_status(env=env, auth_state=auth_state, items=items, managed_path=managed_path)
+        raise typer.Exit(0)
+
+    except typer.Exit:
+        raise
+    except Exception:
+        # Transient failure, no touch to update_status.json so we know checked_at didn't advance this cycle.
+        raise typer.Exit(1)
+
+
+async def _check_command_async(db_path: str) -> tuple[str, list[dict] | None]:
+    from redfetch import update_status
+
+    try:
+        headers = await auth.get_api_headers()
+    except RuntimeError:
+        # Silent refresh failed / expired / logged out -> a gentle re-login nudge
+        return "needs_login", None
+
+    prepared = await sync.prepare_sync(db_path, headers)
+    return "ok", update_status.build_items_from_plan(prepared.execution_plan)
 
 
 @app.command(

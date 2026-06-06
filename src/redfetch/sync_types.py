@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -73,12 +73,12 @@ def reason_message(reason: PlanReason) -> str:
     meta = PLAN_REASON_META.get(reason)
     return meta.message if meta else reason
 
-SyncEvent = Union[
-    tuple[Literal["total"], int, None],
-    tuple[Literal["add_total"], int, None],
-    tuple[Literal["start"], str, str | None],
-    tuple[Literal["done"], str, ResultOutcome],
-]
+SyncEvent = (
+    tuple[Literal["total"], int, None]
+    | tuple[Literal["add_total"], int, None]
+    | tuple[Literal["start"], str, str | None]
+    | tuple[Literal["done"], str, ResultOutcome]
+)
 SyncEventCallback = Callable[[SyncEvent], None]
 
 
@@ -109,8 +109,7 @@ class SyncModel(BaseModel):
 
 
 class TargetIdentity(SyncModel):
-    """The same resource_id can appear as both a root and a dependency target
-    (or under multiple parents), each with its own target_key and planning."""
+    """Which target is this? Identifies a single install target"""
 
     target_key: str
     resource_id: str
@@ -337,3 +336,13 @@ class ExecutionResult(SyncModel):
         return self.was_cancelled or any(
             item.outcome == "error" for item in self.items.values()
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSync:
+    """The product of preparing a sync run, before any execution or DB writes."""
+
+    desired_set: DesiredSet
+    remote_snapshot: RemoteSnapshot
+    local_snapshot: LocalSnapshot
+    execution_plan: ExecutionPlan

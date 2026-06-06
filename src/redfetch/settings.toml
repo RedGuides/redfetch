@@ -117,6 +117,11 @@ staff_pick = true
 opt_in = true
 staff_pick = true
 
+# Ninjadvloot.inc
+[LIVE.SPECIAL_RESOURCES.973]
+opt_in = true
+staff_pick = true
+
 # ========================================
 # TEST ENVIRONMENT SETTINGS
 # ========================================
@@ -212,6 +217,11 @@ staff_pick = true
 opt_in = true
 staff_pick = true
 
+# Ninjadvloot.inc
+[TEST.SPECIAL_RESOURCES.973]
+opt_in = true
+staff_pick = true
+
 # ========================================
 # EMULATOR ENVIRONMENT SETTINGS
 # ========================================
@@ -289,5 +299,10 @@ staff_pick = true
 
 # lootnscoot (EMU only)
 [EMU.SPECIAL_RESOURCES.2675]
+opt_in = true
+staff_pick = true
+
+# Ninjadvloot.inc
+[EMU.SPECIAL_RESOURCES.973]
 opt_in = true
 staff_pick = true
