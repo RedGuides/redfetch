@@ -1,5 +1,6 @@
 # standard
 import asyncio
+import logging
 import os
 import sys
 import subprocess
@@ -36,6 +37,7 @@ from redfetch import store
 from redfetch import api
 from redfetch import auth
 from redfetch import config
+from redfetch import lua_packages
 from redfetch import net
 from redfetch import processes
 from redfetch import utils
@@ -44,6 +46,9 @@ from redfetch import sync
 from redfetch import desktop_shortcut
 from redfetch.sync_types import SyncEvent
 from redfetch.runtime_errors import display_fatal_error
+
+
+logger = logging.getLogger(__name__)
 
 # for dev mode, from root dir:
 # "hatch shell dev" 
@@ -519,6 +524,12 @@ class SettingsTab(ScrollableContainer):
                 ),
             )
             yield Button(
+                "Fix Common Lua Packages",
+                id="fix_lua_packages",
+                variant="default",
+                tooltip="Verify and install common MacroQuest LuaRocks packages like lsqlite3 and lfs.",
+            )
+            yield Button(
                 "Uninstall",
                 id="uninstall",
                 variant="error",
@@ -657,6 +668,10 @@ class SettingsTab(ScrollableContainer):
     @on(Button.Pressed, "#uninstall")
     def handle_uninstall_pressed(self, event: Button.Pressed) -> None:
         self.app.handle_uninstall()
+
+    @on(Button.Pressed, "#fix_lua_packages")
+    def handle_fix_lua_packages_pressed(self, event: Button.Pressed) -> None:
+        self.app.handle_fix_lua_packages()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id in ["dl_path_input", "eq_path_input", "vvmq_path_input"]:
@@ -1902,10 +1917,45 @@ class Redfetch(App):
                 on_event=self.on_sync_event,
                 navmesh_override=navmesh_override,
             )
+            if result and resource_ids is None:
+                await self._maybe_fix_common_lua_packages_after_update()
             return result
         except Exception:
             traceback.print_exc()
             return False
+
+    async def _maybe_fix_common_lua_packages_after_update(self) -> None:
+        mq_path = utils.get_vvmq_path()
+        if not mq_path:
+            return
+
+        result = await asyncio.to_thread(lua_packages.ensure_common_lua_packages, mq_path)
+        if result.error:
+            print(f"Lua package repair skipped: {result.error}")
+            return
+
+        attempted = [status for status in result.statuses if status.install_attempted]
+        if not attempted:
+            print("Common Lua packages checked and verified:")
+            for status in result.statuses:
+                print(f"  - {status.package_name} ({status.require_name})")
+            return
+
+        if result.ok:
+            print("Common Lua packages checked and verified:")
+            for status in result.statuses:
+                print(
+                    f"  - {status.package_name} ({status.require_name}): "
+                    f"{lua_packages.describe_status(status)}"
+                )
+            self.notify("Common Lua packages checked and verified.")
+            return
+
+        print("Some common Lua packages still failed to install.")
+        for status in attempted:
+            if status.detail and not status.install_succeeded:
+                print(status.detail)
+        self.notify("Some common Lua packages still failed to install.", severity="error")
 
     def update_complete(self, result: bool, button: Button) -> None:
         main_screen = self._get_main_screen()
@@ -2021,6 +2071,50 @@ class Redfetch(App):
         except Exception as e:
             print(f"Error in _reset_downloads_worker: {e}")
             self.notify("Failed to reset download dates.", severity="error")
+            return False
+
+    def handle_fix_lua_packages(self) -> None:
+        if self.is_updating:
+            return
+        self.notify("Checking common Lua packages...")
+        self.is_updating = True
+        self._fix_lua_packages_worker()
+
+    @work(exclusive=True, group="maintenance_group")
+    async def _fix_lua_packages_worker(self) -> bool:
+        mq_path = utils.get_vvmq_path()
+        if not mq_path:
+            print("MacroQuest path not configured for the current server.")
+            self.notify("MacroQuest path not configured for this server.", severity="error")
+            return False
+
+        try:
+            result = await asyncio.to_thread(lua_packages.ensure_common_lua_packages, mq_path)
+            if result.error:
+                print(result.error)
+                self.notify("Failed to repair common Lua packages.", severity="error")
+                return False
+
+            if result.target_tree is None:
+                message = "Lua package repair completed without a LuaRocks target tree."
+                logger.error(message)
+                raise RuntimeError(message)
+            print(f"LuaRocks tree: {result.target_tree}")
+            for status in result.statuses:
+                state = lua_packages.describe_status(status)
+                print(f"{status.package_name} ({status.require_name}): {state}")
+                if status.detail and not status.install_succeeded:
+                    print(status.detail)
+
+            if result.ok:
+                self.notify("Common Lua packages are ready.")
+                return True
+
+            self.notify("Some common Lua packages still failed to install.", severity="error")
+            return False
+        except Exception as e:
+            print(f"Error while repairing Lua packages: {e}")
+            self.notify("Failed to repair common Lua packages.", severity="error")
             return False
 
     def handle_redguides_interface(self) -> None:

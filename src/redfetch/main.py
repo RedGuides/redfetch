@@ -15,6 +15,7 @@ import typer
 from redfetch import api
 from redfetch import auth
 from redfetch import config
+from redfetch import lua_packages
 from redfetch import meta
 from redfetch import net
 from redfetch import processes
@@ -72,6 +73,11 @@ def initialize_db_only(server: "Optional[Env]" = None):
     store.initialize_db(db_name)
     db_path = store.get_db_path(db_name)
     return db_name, db_path
+
+
+def initialize_config_only() -> None:
+    """Initialize configuration only for local maintenance commands."""
+    config.initialize_config()
 
 
 # ===== CLI prompt helpers =====
@@ -207,6 +213,7 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
         db_path, headers, navmesh_override=navmesh_override
     )
     if success:
+        _maybe_fix_common_lua_packages_after_update()
         prompt_auto_run_macroquest()
         return True
     return False
@@ -238,6 +245,56 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
             store.reset_versions_for_resource(cursor, rid)
     console.print(f"Downloading resource {rid}.")
     await sync.run_sync(db_path, headers, [rid])
+
+
+def _print_lua_fix_result(result: lua_packages.LuaFixResult) -> None:
+    if result.error:
+        console.print(f"[bold red]Lua package repair failed:[/bold red] {result.error}")
+        raise typer.Exit(code=1)
+
+    assert result.target_tree is not None
+    console.print(f"MacroQuest path: {result.mq_path}")
+    console.print(f"LuaRocks tree: {result.target_tree}")
+
+    for status in result.statuses:
+        state = lua_packages.describe_status(status)
+        console.print(f"- {status.package_name} ({status.require_name}): {state}")
+        if status.detail and not status.install_succeeded:
+            console.print(status.detail)
+
+    if result.ok:
+        console.print("[bold green]Common Lua packages look good.[/bold green]")
+    else:
+        raise typer.Exit(code=1)
+
+
+def _maybe_fix_common_lua_packages_after_update() -> None:
+    mq_path = utils.get_vvmq_path()
+    if not mq_path:
+        return
+
+    result = lua_packages.ensure_common_lua_packages(mq_path)
+    if result.error:
+        console.print(f"[yellow]Lua package repair skipped:[/yellow] {result.error}")
+        return
+
+    attempted = [status for status in result.statuses if status.install_attempted]
+    if not attempted:
+        console.print("Common Lua packages checked and verified:")
+        for status in result.statuses:
+            console.print(f"  - {status.package_name} ({status.require_name})")
+        return
+
+    if result.ok:
+        console.print("[green]Common Lua packages checked and verified:[/green]")
+        for status in result.statuses:
+            console.print(f"  - {status.package_name} ({status.require_name}): {lua_packages.describe_status(status)}")
+        return
+
+    console.print("[bold yellow]Some common Lua packages still failed to install.[/bold yellow]")
+    for status in attempted:
+        if status.detail and not status.install_succeeded:
+            console.print(status.detail)
 
 
 @app.command(
@@ -278,6 +335,27 @@ def _has_auth_credentials() -> bool:
     except Exception:
         return False
 
+
+lua_app = typer.Typer(
+    help="Check and repair common MacroQuest LuaRocks packages.",
+    rich_markup_mode="rich",
+)
+app.add_typer(lua_app, name="lua", rich_help_panel="🔧 System & Utilities")
+
+
+@lua_app.command(
+    "fix",
+    help="Verify and install the common LuaRocks packages used by MacroQuest Lua scripts.",
+)
+def lua_fix_command():
+    initialize_config_only()
+    mq_path = utils.get_vvmq_path()
+    if not mq_path:
+        console.print("[bold red]MacroQuest path not configured for the current server.[/bold red]")
+        raise typer.Exit(code=1)
+
+    result = lua_packages.ensure_common_lua_packages(mq_path)
+    _print_lua_fix_result(result)
 
 @app.command(
     "check",
