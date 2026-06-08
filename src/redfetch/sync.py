@@ -255,6 +255,14 @@ async def run_sync(
                 if not navmesh_ok:
                     print("navmesh sync encountered errors")
 
+                from redfetch import luarocks
+
+                luarocks_ok = await luarocks.bootstrap_modules(
+                    on_event=on_event,
+                )
+                if not luarocks_ok:
+                    print("luarocks bootstrap encountered errors")
+
             return result
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("Download cancelled by user.")

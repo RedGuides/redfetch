@@ -78,6 +78,8 @@ SyncEvent = (
     | tuple[Literal["add_total"], int, None]
     | tuple[Literal["start"], str, str | None]
     | tuple[Literal["done"], str, ResultOutcome]
+    # VC++ redistributable URL if needed
+    | tuple[Literal["luarocks_failed"], str, None]
 )
 SyncEventCallback = Callable[[SyncEvent], None]
 

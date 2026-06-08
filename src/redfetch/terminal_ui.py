@@ -450,6 +450,15 @@ class SettingsTab(ScrollableContainer):
                     "Download pre-made navigation meshes for the Nav plugin (via mqmesh.com). "
                 ),
             )
+            yield Label("LuaRocks:", classes="left_middle")
+            yield Switch(
+                id="luarocks",
+                value=config.settings.from_env(current_env).get("LUAROCKS_ENABLED", True),
+                tooltip=(
+                    "Pre-install common Lua modules (lfs, lsqlite3) into MacroQuest's "
+                    "modules folder. Windows only."
+                ),
+            )
             yield Label("Maps:", classes="left_middle")
             yield Select(
                 [("Brewall's Maps", "brewall"), ("Good's Maps", "good"), ("All", "all")],
@@ -462,7 +471,6 @@ class SettingsTab(ScrollableContainer):
                     "normal EverQuest map, using Brewall and Good's folders."
                 ),
             )
-            yield Static(classes="spacer_for_special_resources")
             yield Label("IonBC:", classes="left_middle")
             yield Switch(
                 id="ionbc",
@@ -554,6 +562,11 @@ class SettingsTab(ScrollableContainer):
         # NavMesh switch - requires VVMQ path to be configured
         self.query_one("#navmesh", Switch).disabled = not bool(utils.get_vvmq_path())
 
+        # LuaRocks switch - Windows only and requires VVMQ path
+        self.query_one("#luarocks", Switch).disabled = (
+            sys.platform != "win32" or not bool(utils.get_vvmq_path())
+        )
+
         # Environment-specific settings for the current env
         settings_for_env = config.settings.from_env(app.current_env)
 
@@ -566,6 +579,16 @@ class SettingsTab(ScrollableContainer):
 
         navmesh_switch = self.query_one("#navmesh", Switch)
         navmesh_switch.value = settings_for_env.get("NAVMESH_OPT_IN", False)
+
+        ionbc_switch = self.query_one("#ionbc", Switch)
+        ionbc_switch.value = (
+            config.settings.from_env("DEFAULT")
+            .SPECIAL_RESOURCES.get("2463", {})
+            .get("opt_in", False)
+        )
+
+        luarocks_switch = self.query_one("#luarocks", Switch)
+        luarocks_switch.value = settings_for_env.get("LUAROCKS_ENABLED", True)
 
         # Staff picks switch - per-environment setting
         staff_switch = self.query_one("#staff_picks", Switch)
@@ -672,6 +695,8 @@ class SettingsTab(ScrollableContainer):
             self.app.handle_toggle_staff_picks(event.value)
         elif event.switch.id == "navmesh":
             self.app.handle_toggle_navmesh(event.value)
+        elif event.switch.id == "luarocks":
+            self.app.handle_toggle_luarocks(event.value)
         elif event.switch.id == "auto_run_vvmq":
             self.app.handle_toggle_auto_run_vvmq(event.value)
         elif event.switch.id == "auto_terminate_processes":
@@ -1185,7 +1210,7 @@ class Redfetch(App):
         yield SystemCommand(
             "Upgrade to Level 2",
             "Upgrade your RedGuides account to level 2",
-            lambda: self.action_link("https://www.redguides.com/community/amember-sso/?to=member"),
+            lambda: self.action_link("https://www.redguides.com/community/amember-sso/?to=signup"),
             discover=False,
         )
 
@@ -1496,6 +1521,13 @@ class Redfetch(App):
             config.update_setting(['NAVMESH_OPT_IN'], value, env=self.current_env)
             state = "enabled" if value else "disabled"
             self.notify(f"navmesh downloads for {self.current_env} are now {state}")
+
+    def handle_toggle_luarocks(self, value: bool) -> None:
+        current_setting = config.settings.from_env(self.current_env).get('LUAROCKS_ENABLED', None)
+        if current_setting is None or current_setting != value:
+            config.update_setting(['LUAROCKS_ENABLED'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"LuaRocks bootstrap for {self.current_env} is now {state}")
 
     def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
         main_screen = self._get_main_screen()
@@ -1853,6 +1885,11 @@ class Redfetch(App):
 
     def on_sync_event(self, event: SyncEvent) -> None:
         """Handle events from the sync process to update the UI."""
+        if event[0] == "luarocks_failed":
+            _, redist_url, _ = event
+            self._show_luarocks_failure(redist_url)
+            return
+
         event_type, resource_id, details = event
         self._process_sync_event(event_type, resource_id, details)
 
@@ -1883,6 +1920,17 @@ class Redfetch(App):
                 progress_bar.advance(1)
         except Exception:
             pass
+
+    def _show_luarocks_failure(self, redist_url: str) -> None:
+        """Surface a LuaRocks install failure with a toast and a download modal."""
+        self.notify(
+            "Some MacroQuest Lua modules failed to install. You may be missing "
+            "the Microsoft Visual C++ runtime.",
+            title="LuaRocks",
+            severity="error",
+            timeout=10,
+        )
+        self.push_screen(LuaRocksFailedScreen(redist_url))
 
     async def run_synchronization(self, resource_ids=None, navmesh_override=None):
         try:
@@ -2103,9 +2151,9 @@ class Redfetch(App):
                 main_screen.update_account_label(greetingacct)
             self.notify("🎉 DING! Welcome to level 2!", severity="information")
         else:
-            # Still level 1, send them to the upgrade page
+            # Still level 1, send them to the signup page
             self.notify("You're still level 1. Opening upgrade page...", severity="warning")
-            self.action_link("https://www.redguides.com/community/amember-sso/?to=member")
+            self.action_link("https://www.redguides.com/community/amember-sso/?to=signup")
 
 
 # display print statements in the log widget
@@ -2173,6 +2221,37 @@ class NavMeshPromptScreen(ModalScreen):
             self.dismiss(self.RESPONSE_NEVER)
         else:
             self.dismiss(self.RESPONSE_NO)
+
+
+class LuaRocksFailedScreen(ModalScreen):
+    """Shown when the LuaRocks bootstrap fails; offers the VC++ redist download."""
+
+    RESPONSE_DOWNLOAD = "download"
+    RESPONSE_CLOSE = "close"
+
+    def __init__(self, redist_url: str):
+        super().__init__()
+        self.redist_url = redist_url
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label("Some MacroQuest Lua modules failed to install.", id="luarocks_message"),
+            Label(
+                "This is usually a missing Microsoft Visual C++ runtime. Install it, "
+                "then run an update again. See the log for more details.",
+                id="luarocks_hint",
+            ),
+            Button("Download from Microsoft", variant="primary", id="download_redist"),
+            Button("Close", variant="default", id="close_luarocks"),
+            id="luarocks_dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "download_redist":
+            webbrowser.open(self.redist_url)
+            self.dismiss(self.RESPONSE_DOWNLOAD)
+        else:
+            self.dismiss(self.RESPONSE_CLOSE)
 
 
 class ProcessTerminationScreen(ModalScreen):

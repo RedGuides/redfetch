@@ -33,6 +33,7 @@ dependencies = [
     "platformdirs~=4.5",
     "psutil~=7.2",
     "pyperclip~=1.11",
+    "pyyaml~=6.0",
     "rich~=14.3",
     "tenacity~=9.1",
     "textual~=8.1",

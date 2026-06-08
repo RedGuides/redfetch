@@ -63,6 +63,19 @@ async def get_json(client: httpx.AsyncClient, url: str, params: Optional[Dict[st
     return response.json()
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+    retry=retry_if_exception_type(httpx.RequestError),
+    reraise=True,
+)
+async def get_text(client: httpx.AsyncClient, url: str) -> str:
+    """GET raw text with retry on transient network errors."""
+    response = await client.get(url, timeout=30.0)
+    response.raise_for_status()
+    return response.text
+
+
 async def fetch_manifest_cached(client: httpx.AsyncClient) -> dict:
     """Fetch manifest with a 60-second cache."""
     manifest = _manifest_cache.get("manifest")

@@ -27,6 +27,7 @@ opt_in = false
 # ========================================
 [LIVE]
 THEME = "textual-dark"
+LUAROCKS_ENABLED = true
 
 [LIVE.PROTECTED_FILES_BY_RESOURCE]
 1974 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
@@ -127,6 +128,7 @@ staff_pick = true
 # ========================================
 [TEST]
 THEME = "gruvbox"
+LUAROCKS_ENABLED = true
 
 [TEST.PROTECTED_FILES_BY_RESOURCE]
 2218 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
@@ -227,6 +229,7 @@ staff_pick = true
 # ========================================
 [EMU]
 THEME = "dracula"
+LUAROCKS_ENABLED = true
 
 [EMU.PROTECTED_FILES_BY_RESOURCE]
 60 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
