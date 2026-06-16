@@ -161,7 +161,6 @@ Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 - Option: Close after update
 - Launch programs with cli options
 - Indicate when updated VV is available
-- Launch more than just mq (eqbcs, etc) upon update. 
 - Run from MQ
 - Deeper integration with the forums
 

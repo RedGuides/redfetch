@@ -500,6 +500,14 @@ class SettingsTab(ScrollableContainer):
                 ),
                 tooltip="Automatically run Very Vanilla MQ after successful updates.",
             )
+            yield Label("Start EQBCS post-update:", classes="left_middle")
+            yield Switch(
+                id="auto_run_eqbcs",
+                value=config.settings.from_env(current_env).get(
+                    "AUTO_RUN_EQBCS", False
+                ),
+                tooltip="Automatically run EQBCS (EQ Box Chat server) after successful updates.",
+            )
             if sys.platform == "win32":
                 yield Label("Desktop shortcut:", classes="left_middle")
                 yield Switch(
@@ -559,6 +567,9 @@ class SettingsTab(ScrollableContainer):
         # Update env-specific switches
         auto_run_vvmq_switch = self.query_one("#auto_run_vvmq", Switch)
         auto_run_vvmq_switch.value = settings_for_env.get("AUTO_RUN_VVMQ", None)
+
+        auto_run_eqbcs_switch = self.query_one("#auto_run_eqbcs", Switch)
+        auto_run_eqbcs_switch.value = settings_for_env.get("AUTO_RUN_EQBCS", False)
 
         auto_terminate_switch = self.query_one("#auto_terminate_processes", Switch)
         auto_terminate_switch.value = settings_for_env.get("AUTO_TERMINATE_PROCESSES", None)
@@ -680,6 +691,8 @@ class SettingsTab(ScrollableContainer):
             self.app.handle_toggle_navmesh(event.value)
         elif event.switch.id == "auto_run_vvmq":
             self.app.handle_toggle_auto_run_vvmq(event.value)
+        elif event.switch.id == "auto_run_eqbcs":
+            self.app.handle_toggle_auto_run_eqbcs(event.value)
         elif event.switch.id == "auto_terminate_processes":
             self.app.handle_toggle_auto_terminate_processes(event.value)
         elif event.switch.id == "desktop_shortcut":
@@ -1533,6 +1546,16 @@ class Redfetch(App):
         if main_screen:
             main_screen.query_one("#auto_run_vvmq", Switch).value = value
 
+    def handle_toggle_auto_run_eqbcs(self, value: bool) -> None:
+        main_screen = self._get_main_screen()
+        current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_EQBCS', False)
+        if current_value != value:
+            config.update_setting(['AUTO_RUN_EQBCS'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"Auto-run EQBCS is now {state}")
+        if main_screen:
+            main_screen.query_one("#auto_run_eqbcs", Switch).value = value
+
     #
     # Settings updaters
     #
@@ -1945,6 +1968,10 @@ class Redfetch(App):
                 self.set_timer(6, lambda: main_screen.reset_button("update_resource_id", "default"))
             elif button.id == "update_watched":
                 if sys.platform == 'win32':
+                    if config.settings.from_env(self.current_env).get('AUTO_RUN_EQBCS', False):
+                        vvmq_path = utils.get_vvmq_path()
+                        if vvmq_path and utils.validate_file_in_path(vvmq_path, "EQBCS.exe"):
+                            self.run_executable(vvmq_path, "EQBCS.exe")
                     auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
                     if auto_run is True:
                         self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
