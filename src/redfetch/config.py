@@ -29,11 +29,6 @@ MYSEQ_MAP = {
     164: "TEST"
 }
 
-EQMAPS_MAP = {
-    153: "Brewall",
-    303: "Goods"
-}
-
 # to make settings.local.toml easier to read, names are added in comments
 RESOURCE_NAMES = {
     "1974": "Very Vanilla MQ Live",
@@ -67,20 +62,10 @@ env_file_path = None
 settings = None
 
 
-def validate_no_eqgame(path):
-    """Validate that the path and its parents don't contain eqgame.exe."""
-    current_path = os.path.abspath(path)
-    while current_path != os.path.dirname(current_path):  # Stop at root
-        if os.path.exists(os.path.join(current_path, 'eqgame.exe')):
-            raise ValidationError(f"Path '{path}' or its parent contains eqgame.exe")
-        current_path = os.path.dirname(current_path)
-
-
 def normalize_and_create_path(path):
     if not path:
         raise ValidationError("Path is not set.")
     normalized_path = os.path.normpath(path)
-    validate_no_eqgame(normalized_path)
     if not os.path.exists(normalized_path):
         try:
             os.makedirs(normalized_path, exist_ok=True)
@@ -103,8 +88,6 @@ def normalize_category_paths(data):
             )
         if isinstance(value, str) and value:
             normalized = os.path.normpath(value)
-            if os.path.isabs(normalized):
-                validate_no_eqgame(normalized)
             data[key] = normalized
     return data
 
@@ -120,9 +103,6 @@ def normalize_paths_in_dict(data, parent_key=None):
                     normalize_paths_in_dict(item, parent_key=key)
             elif key in ['default_path', 'custom_path'] and isinstance(value, str):
                 normalized_value = os.path.normpath(value) if value else value
-                parent_key_int = int(parent_key) if isinstance(parent_key, str) and parent_key.isdigit() else parent_key
-                if parent_key_int not in EQMAPS_MAP:
-                    validate_no_eqgame(normalized_value)
                 data[key] = normalized_value
     elif isinstance(data, list):
         for index, item in enumerate(data):

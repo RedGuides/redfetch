@@ -6,7 +6,6 @@ import platform
 import json
 
 # Third-party
-from dynaconf import ValidationError
 from platformdirs import user_config_dir
 from rich.console import Console
 from rich.panel import Panel
@@ -16,7 +15,8 @@ from rich.box import ASCII2
 from tomlkit import table, TOMLDocument
 
 # Custom
-from redfetch.config import load_config, save_config, validate_no_eqgame
+from redfetch import utils
+from redfetch.config import load_config, save_config
 from redfetch.detecteq import find_everquest_uninstall_location
 
 console = Console()
@@ -103,16 +103,13 @@ def setup_directories():
                 return setup_directories()
 
         # At this point, the directory should exist (either pre-existing or newly created).
-        # We can now safely reuse the shared eqgame checker.
-        try:
-            validate_no_eqgame(custom_dir)
-        except ValidationError:
+        if utils.validate_file_in_path(custom_dir, 'eqgame.exe'):
             console.print(
                 Panel(
                     Text.from_markup(
                         "[bold red blink]WHAT THE FUCK ARE YOU DOING?!?!![/bold red blink]\n"
                         "There's an EQGame.exe in this path!!\n"
-                        "Please select a different directory, please, thank you in advance. :pray:",
+                        "Please select a different folder, please, thank you in advance. :pray:",
                         justify="center"
                     ),
                     title="[bold underline red]Critical Warning[/bold underline red]",
@@ -120,8 +117,13 @@ def setup_directories():
                     expand=False
                 )
             )
-            # Restart the directory selection process
-            return setup_directories()
+            choice = CustomPrompt.ask(
+                "[o]k, I'll pick somewhere else  /  [f]uck you, I like it here.",
+                choices=["o", "f"],
+                default="o",
+            )
+            if choice == "o":
+                return setup_directories()
 
         # Use the custom directory if it exists and is valid
         config_dir = custom_dir

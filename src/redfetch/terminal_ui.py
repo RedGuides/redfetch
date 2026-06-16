@@ -462,7 +462,6 @@ class SettingsTab(ScrollableContainer):
                     "normal EverQuest map, using Brewall and Good's folders."
                 ),
             )
-            yield Static(classes="spacer_for_special_resources")
             yield Label("IonBC:", classes="left_middle")
             yield Switch(
                 id="ionbc",
@@ -566,6 +565,13 @@ class SettingsTab(ScrollableContainer):
 
         navmesh_switch = self.query_one("#navmesh", Switch)
         navmesh_switch.value = settings_for_env.get("NAVMESH_OPT_IN", False)
+
+        ionbc_switch = self.query_one("#ionbc", Switch)
+        ionbc_switch.value = (
+            config.settings.from_env("DEFAULT")
+            .SPECIAL_RESOURCES.get("2463", {})
+            .get("opt_in", False)
+        )
 
         # Staff picks switch - per-environment setting
         staff_switch = self.query_one("#staff_picks", Switch)
@@ -1185,7 +1191,7 @@ class Redfetch(App):
         yield SystemCommand(
             "Upgrade to Level 2",
             "Upgrade your RedGuides account to level 2",
-            lambda: self.action_link("https://www.redguides.com/community/amember-sso/?to=member"),
+            lambda: self.action_link("https://www.redguides.com/community/amember-sso/?to=signup"),
             discover=False,
         )
 
@@ -1378,6 +1384,11 @@ class Redfetch(App):
                 settings_tab = main_screen.query_one(SettingsTab)
                 settings_tab.update_vvmq_path_display()
                 self.notify("Download folder updated" if input_value else "Download folder cleared")
+                if utils.validate_file_in_path(input_value, 'eqgame.exe'):
+                    self.notify(
+                        "Heads up: eqgame.exe is in this folder, which looks like your EverQuest directory. That's a bad place for downloads.",
+                        severity="warning",
+                    )
                 self._queue_signature_reconcile()
             except ValidationError as e:
                 self.notify(f"Invalid Download Folder: {e}", severity="error")
@@ -1403,6 +1414,11 @@ class Redfetch(App):
                 try:
                     config.update_setting(['SPECIAL_RESOURCES', vvmq_id, 'custom_path'], input_value, env=self.current_env)
                     self.notify("Very Vanilla MQ folder updated" if input_value else "Very Vanilla MQ folder cleared")
+                    if utils.validate_file_in_path(input_value, 'eqgame.exe'):
+                        self.notify(
+                            "Heads up: eqgame.exe is in this folder, which looks like your EverQuest directory. MacroQuest shouldn't live inside EverQuest.",
+                            severity="warning",
+                        )
                     self._queue_signature_reconcile()
                 except ValidationError as e:
                     self.notify(f"Invalid VVMQ Path: {e}", severity="error")
@@ -2103,9 +2119,9 @@ class Redfetch(App):
                 main_screen.update_account_label(greetingacct)
             self.notify("🎉 DING! Welcome to level 2!", severity="information")
         else:
-            # Still level 1, send them to the upgrade page
+            # Still level 1, send them to the signup page
             self.notify("You're still level 1. Opening upgrade page...", severity="warning")
-            self.action_link("https://www.redguides.com/community/amember-sso/?to=member")
+            self.action_link("https://www.redguides.com/community/amember-sso/?to=signup")
 
 
 # display print statements in the log widget

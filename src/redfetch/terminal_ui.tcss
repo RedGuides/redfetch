@@ -223,9 +223,10 @@ Label {
 }
 #special_resources_grid {
     layout: grid;
-    grid-size: 4;  
-    grid-rows: auto;   
-    border: round $secondary-background;  
+    grid-size: 2;
+    grid-rows: auto;
+    grid-gutter: 1 0;
+    border: round $secondary-background;
     margin-bottom: 1;
     min-width: 50;
 }
@@ -239,15 +240,6 @@ Label {
 }
 #dl_path_input, #eq_path_input, #vvmq_path_input, #auto_terminate_processes, #auto_run_vvmq, #desktop_shortcut {
     column-span: 3;
-}
-#myseq, #ionbc, #navmesh {
-    column-span: 3;
-}
-#eq_maps {
-    column-span: 2;
-}
-.spacer_for_special_resources {
-    column-span: 1;
 }
 .bordertitles {
     border: round $secondary-background;
