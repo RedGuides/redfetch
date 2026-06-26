@@ -40,14 +40,17 @@ RESOURCE_NAMES = {
     "164": "MySEQ Test",
     "153": "Brewall's EverQuest Maps",
     "303": "Good's EverQuest Maps",
-    "2463": "IonBC",
     "2318": "guildclicky",
-    "3003": "buttonmaster",
+    "2174": "buttonmaster",
     "2062": "alertmaster",
     "3040": "rgmercs",
     "2196": "lootly",
     "2088": "boxhud",
+    "2391": "scriber",
+    "3001": "bazaar / auction helper",
+    "2937": "skill skillup: spells and others",
     "2675": "lootnscoot",
+    "973": "Ninjadvloot.inc",
 }
 
 BREADCRUMB_FILENAME = "last_command.json"
@@ -361,8 +364,11 @@ def update_setting(setting_path, setting_value, env=None):
     if isinstance(setting_value, str) and setting_value.lower() in ('true', 'false'):
         setting_value = setting_value.lower() == 'true'
 
-    # Update the setting in the TOML data structure
-    current_data[setting_path[-1]] = setting_value
+    # None means "unset", TOML can't store None, so remove the key
+    if setting_value is None:
+        current_data.pop(setting_path[-1], None)
+    else:
+        current_data[setting_path[-1]] = setting_value
 
     # Update the environment using from_env to target the correct environment
     settings.from_env(env).set(config_key, setting_value)

@@ -1,4 +1,4 @@
-"""Windows-specific helpers for managing external executables."""
+"""Helpers for managing external processes."""
 from __future__ import annotations
 
 import os
@@ -84,23 +84,35 @@ def terminate_executables_in_folder(folder_path: str) -> None:
 def run_executable(folder_path: str, executable_name: str, args: Sequence[str] | None = None) -> bool:
     """Launch ``executable_name`` located in ``folder_path`` with optional arguments."""
     if not IS_WINDOWS:
-        print("Running executables is only supported on Windows.")
-        return False
+        raise RuntimeError("Running executables is only supported on Windows.")
 
     if not folder_path:
-        print(f"Folder path not set for {executable_name}")
-        return False
+        raise ValueError(f"Folder path not set for {executable_name}")
 
     executable_path = os.path.join(folder_path, executable_name)
     if not os.path.isfile(executable_path):
-        print(f"{executable_name} not found in the specified folder.")
-        return False
+        raise FileNotFoundError(f"{executable_name} not found in the specified folder.")
 
-    try:
-        subprocess.Popen([executable_path, *(args or [])], cwd=folder_path)
-        print(f"{executable_name} started successfully.")
-        return True
-    except Exception as exc:
-        print(f"Failed to start {executable_name}: {exc}")
-        return False
+    subprocess.Popen([executable_path, *(args or [])], cwd=folder_path)
+    print(f"{executable_name} started successfully.")
+    return True
+
+
+def run_command(command: "str | Sequence[str]", cwd: str | None = None) -> bool:
+    """Launch a command that may be resolved through PATH."""
+    if isinstance(command, str):
+        if not command.strip():
+            raise ValueError("No command to run.")
+        popen_arg: "str | list[str]" = command
+        display = command
+    else:
+        argv = list(command)
+        if not argv:
+            raise ValueError("No command to run.")
+        popen_arg = argv
+        display = subprocess.list2cmdline(argv)
+
+    subprocess.Popen(popen_arg, cwd=cwd)
+    print(f"Started: {display}")
+    return True
 

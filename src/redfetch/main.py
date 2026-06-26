@@ -183,17 +183,15 @@ def prompt_auto_run_macroquest() -> None:
         console.print("MacroQuest path not found. Please check your configuration.")
 
 
-def run_eqbcs_post_update() -> None:
-    """Start EQBCS after a successful update."""
-    if os.environ.get("CI") == "true" or sys.platform != "win32":
+def run_post_update_launch() -> None:
+    """Launch the configured post-update program."""
+    if os.environ.get("CI") == "true":
         return
 
-    if not config.settings.from_env(config.settings.ENV).get("AUTO_RUN_EQBCS", False):
-        return
-
-    vvmq_path = utils.get_vvmq_path()
-    if vvmq_path and utils.validate_file_in_path(vvmq_path, "EQBCS.exe"):
-        processes.run_executable(vvmq_path, "EQBCS.exe")
+    resolved = utils.resolve_post_update_launch(config.settings.ENV)
+    if resolved:
+        command, cwd = resolved
+        processes.run_command(command, cwd)
 
 
 async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
@@ -220,8 +218,8 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
         db_path, headers, navmesh_override=navmesh_override
     )
     if success:
-        run_eqbcs_post_update()
         prompt_auto_run_macroquest()
+        run_post_update_launch()
         return True
     return False
 

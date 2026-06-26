@@ -118,7 +118,7 @@ def setup_directories():
                 )
             )
             choice = CustomPrompt.ask(
-                "[o]k, I'll pick somewhere else  /  [f]uck you, I like it here.",
+                "[o]k,  /  [f] you, I'm staying",
                 choices=["o", "f"],
                 default="o",
             )

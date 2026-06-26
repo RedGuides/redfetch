@@ -22,7 +22,7 @@ from rich.console import detect_legacy_windows
 from textual import work, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar
+from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar, RadioSet, RadioButton
 from textual.events import Print
 from textual.containers import ScrollableContainer, Center, CenterMiddle, Grid, ItemGrid, Vertical
 from textual.reactive import reactive
@@ -48,6 +48,48 @@ from redfetch.runtime_errors import display_fatal_error
 # for dev mode, from root dir:
 # "hatch shell dev" 
 # "textual run --dev .\src\redfetch\main.py"
+
+
+# Tri-state toggle: No / Ask / Yes maps to config values False / None / True.
+TRISTATE_OPTIONS: list[tuple[str, bool | None]] = [
+    ("No", False),
+    ("Ask", None),
+    ("Yes", True),
+]
+
+
+def tristate_index(value) -> int:
+    """Return the radio index for a stored config value (defaults to Ask)."""
+    if value is True:
+        return 2
+    if value is False:
+        return 0
+    return 1  # None / unset -> Ask
+
+
+def tristate_label(value) -> str:
+    """Human-readable label for a stored config value."""
+    return TRISTATE_OPTIONS[tristate_index(value)][0]
+
+
+def make_tristate(widget_id: str, value) -> RadioSet:
+    """Build a horizontal No/Ask/Yes radio set for ``value``."""
+    selected = tristate_index(value)
+    return RadioSet(
+        *(
+            RadioButton(label, value=(i == selected), compact=True)
+            for i, (label, _v) in enumerate(TRISTATE_OPTIONS)
+        ),
+        id=widget_id,
+        compact=True,
+    )
+
+
+def set_tristate(radio_set: RadioSet, value) -> None:
+    """Select the No/Ask/Yes button matching ``value`` without firing Changed."""
+    target = list(radio_set.query(RadioButton))[tristate_index(value)]
+    if not target.value:
+        target.value = True
 
 
 def get_staff_pick_ids_for_env(env: str) -> list[str]:
@@ -462,14 +504,6 @@ class SettingsTab(ScrollableContainer):
                     "normal EverQuest map, using Brewall and Good's folders."
                 ),
             )
-            yield Label("IonBC:", classes="left_middle")
-            yield Switch(
-                id="ionbc",
-                value=config.settings.from_env("DEFAULT")
-                .SPECIAL_RESOURCES.get("2463", {})
-                .get("opt_in", False),
-                tooltip="Adds IonBC to your 'special resources'.",
-            )
             staff_ids = get_staff_pick_ids_for_env(current_env)
             yield Label("Staff Picks:", classes="left_middle")
             yield Switch(
@@ -485,28 +519,29 @@ class SettingsTab(ScrollableContainer):
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
             yield Label("Close MQ pre-update:", classes="left_middle")
-            yield Switch(
-                id="auto_terminate_processes",
-                value=config.settings.from_env(current_env).get(
-                    "AUTO_TERMINATE_PROCESSES", None
-                ),
-                tooltip="Automatically terminate running processes before updates.",
+            yield make_tristate(
+                "auto_terminate_processes",
+                config.settings.from_env(current_env).get("AUTO_TERMINATE_PROCESSES", None),
             )
             yield Label("Start MQ post-update:", classes="left_middle")
-            yield Switch(
-                id="auto_run_vvmq",
-                value=config.settings.from_env(current_env).get(
-                    "AUTO_RUN_VVMQ", False
-                ),
-                tooltip="Automatically run Very Vanilla MQ after successful updates.",
+            yield make_tristate(
+                "auto_run_vvmq",
+                config.settings.from_env(current_env).get("AUTO_RUN_VVMQ", None),
             )
-            yield Label("Start EQBCS post-update:", classes="left_middle")
-            yield Switch(
-                id="auto_run_eqbcs",
-                value=config.settings.from_env(current_env).get(
-                    "AUTO_RUN_EQBCS", False
-                ),
-                tooltip="Automatically run EQBCS (EQ Box Chat server) after successful updates.",
+            yield Label("Also start post-update:", classes="left_middle")
+            launch_options = utils.post_update_launch_options()
+            launch_target = (
+                config.settings.from_env(current_env)
+                .get("POST_UPDATE_LAUNCH", {})
+                .get("target")
+                or "none"
+            )
+            valid_launch_targets = {value for _, value in launch_options}
+            yield Select(
+                launch_options,
+                id="post_update_launch",
+                value=launch_target if launch_target in valid_launch_targets else "none",
+                allow_blank=False,
             )
             if sys.platform == "win32":
                 yield Label("Desktop shortcut:", classes="left_middle")
@@ -565,24 +600,25 @@ class SettingsTab(ScrollableContainer):
         settings_for_env = config.settings.from_env(app.current_env)
 
         # Update env-specific switches
-        auto_run_vvmq_switch = self.query_one("#auto_run_vvmq", Switch)
-        auto_run_vvmq_switch.value = settings_for_env.get("AUTO_RUN_VVMQ", None)
+        auto_run_vvmq_radio = self.query_one("#auto_run_vvmq", RadioSet)
+        with self.prevent(RadioSet.Changed):
+            set_tristate(auto_run_vvmq_radio, settings_for_env.get("AUTO_RUN_VVMQ", None))
 
-        auto_run_eqbcs_switch = self.query_one("#auto_run_eqbcs", Switch)
-        auto_run_eqbcs_switch.value = settings_for_env.get("AUTO_RUN_EQBCS", False)
+        # Keep the per-env launch target from writing back during app sync.
+        launch_select = self.query_one("#post_update_launch", Select)
+        valid_launch_targets = {value for _, value in utils.post_update_launch_options()}
+        launch_target = settings_for_env.get("POST_UPDATE_LAUNCH", {}).get("target") or "none"
+        with self.prevent(Select.Changed):
+            launch_select.value = (
+                launch_target if launch_target in valid_launch_targets else "none"
+            )
 
-        auto_terminate_switch = self.query_one("#auto_terminate_processes", Switch)
-        auto_terminate_switch.value = settings_for_env.get("AUTO_TERMINATE_PROCESSES", None)
+        auto_terminate_radio = self.query_one("#auto_terminate_processes", RadioSet)
+        with self.prevent(RadioSet.Changed):
+            set_tristate(auto_terminate_radio, settings_for_env.get("AUTO_TERMINATE_PROCESSES", None))
 
         navmesh_switch = self.query_one("#navmesh", Switch)
         navmesh_switch.value = settings_for_env.get("NAVMESH_OPT_IN", False)
-
-        ionbc_switch = self.query_one("#ionbc", Switch)
-        ionbc_switch.value = (
-            config.settings.from_env("DEFAULT")
-            .SPECIAL_RESOURCES.get("2463", {})
-            .get("opt_in", False)
-        )
 
         # Staff picks switch - per-environment setting
         staff_switch = self.query_one("#staff_picks", Switch)
@@ -683,20 +719,19 @@ class SettingsTab(ScrollableContainer):
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "myseq":
             self.app.handle_toggle_myseq(event.value)
-        elif event.switch.id == "ionbc":
-            self.app.handle_toggle_ionbc(event.value)
         elif event.switch.id == "staff_picks":
             self.app.handle_toggle_staff_picks(event.value)
         elif event.switch.id == "navmesh":
             self.app.handle_toggle_navmesh(event.value)
-        elif event.switch.id == "auto_run_vvmq":
-            self.app.handle_toggle_auto_run_vvmq(event.value)
-        elif event.switch.id == "auto_run_eqbcs":
-            self.app.handle_toggle_auto_run_eqbcs(event.value)
-        elif event.switch.id == "auto_terminate_processes":
-            self.app.handle_toggle_auto_terminate_processes(event.value)
         elif event.switch.id == "desktop_shortcut":
             self.app.handle_toggle_desktop_shortcut(event.value)
+
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        value = TRISTATE_OPTIONS[event.index][1]
+        if event.radio_set.id == "auto_run_vvmq":
+            self.app.handle_toggle_auto_run_vvmq(value)
+        elif event.radio_set.id == "auto_terminate_processes":
+            self.app.handle_toggle_auto_terminate_processes(value)
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "eq_maps":
@@ -707,6 +742,9 @@ class SettingsTab(ScrollableContainer):
         if event.select.id == "server_type":
             new_env = event.value
             self.app.current_env = new_env
+
+        if event.select.id == "post_update_launch":
+            self.app.handle_set_post_update_launch(event.value)
 
 
 class ShortcutsTab(ScrollableContainer):
@@ -745,15 +783,6 @@ class ShortcutsTab(ScrollableContainer):
                 tooltip="The EverQuest client *WITHOUT* updating.",
             )
             yield Button(
-                "IonBC 💻",
-                id="run_ionbc",
-                classes="executable",
-                tooltip=(
-                    "run IonBC.exe, a self-contained EQ box chat server for multiple "
-                    "computers that doesn't use MacroQuest."
-                ),
-            )
-            yield Button(
                 "MySEQ 📍",
                 id="run_myseq",
                 classes="executable",
@@ -778,12 +807,6 @@ class ShortcutsTab(ScrollableContainer):
                 id="open_eq_folder",
                 classes="folder",
                 tooltip="Open EverQuest game folder",
-            )
-            yield Button(
-                "IonBC 💻",
-                id="open_ionbc_folder",
-                classes="folder",
-                tooltip="Open IonBC folder",
             )
             yield Button(
                 "MySEQ 📍",
@@ -857,13 +880,6 @@ class ShortcutsTab(ScrollableContainer):
         )
         self.query_one("#open_myseq_folder", Button).disabled = not bool(myseq_path)
 
-        # IonBC
-        ionbc_path = utils.get_ionbc_path()
-        self.query_one("#run_ionbc", Button).disabled = (
-            not utils.validate_file_in_path(ionbc_path, "IonBC.exe")
-        )
-        self.query_one("#open_ionbc_folder", Button).disabled = not bool(ionbc_path)
-
         # Folder shortcuts
         self.query_one("#open_dl_folder", Button).disabled = not bool(app.download_folder)
         self.query_one("#open_vvmq_folder", Button).disabled = not bool(vvmq_path)
@@ -904,13 +920,6 @@ class ShortcutsTab(ScrollableContainer):
     def handle_open_myseq_folder_pressed(self, event: Button.Pressed) -> None:
         self.app.open_myseq_folder()
 
-    @on(Button.Pressed, "#open_ionbc_folder")
-    def handle_open_ionbc_folder_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_ionbc_folder()
-
-    @on(Button.Pressed, "#run_ionbc")
-    def handle_run_ionbc_pressed(self, event: Button.Pressed) -> None:
-        self.app.run_ionbc_executable()
 
     @on(Button.Pressed, "#run_meshupdater")
     def handle_run_meshupdater_pressed(self, event: Button.Pressed) -> None:
@@ -1489,14 +1498,6 @@ class Redfetch(App):
             if current_opt_in != value:
                 self.update_myseq_settings(value)
 
-    def handle_toggle_ionbc(self, value: bool) -> None:
-        ionbc_id = "2463"
-        current_opt_in = config.settings.from_env('DEFAULT').SPECIAL_RESOURCES[ionbc_id]['opt_in']
-        if current_opt_in != value:
-            config.update_setting(['SPECIAL_RESOURCES', ionbc_id, 'opt_in'], value, env='DEFAULT')
-            state = "enabled" if value else "disabled"
-            self.notify(f"IonBC is now {state}")
-
     def handle_toggle_staff_picks(self, value: bool) -> None:
         """Toggle opt-in status for staff picks."""
         env = self.current_env
@@ -1526,35 +1527,55 @@ class Redfetch(App):
             state = "enabled" if value else "disabled"
             self.notify(f"navmesh downloads for {self.current_env} are now {state}")
 
-    def handle_toggle_auto_terminate_processes(self, value: bool) -> None:
+    def handle_toggle_auto_terminate_processes(self, value) -> None:
         main_screen = self._get_main_screen()
         current_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
         if current_value != value:
             config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
-            state = "enabled" if value else "disabled"
-            self.notify(f"Auto-terminate processes is now {state}")
+            self.notify(f"Close MQ pre-update set to {tristate_label(value)}.")
         if main_screen:
-            main_screen.query_one("#auto_terminate_processes", Switch).value = value
+            with main_screen.prevent(RadioSet.Changed):
+                set_tristate(main_screen.query_one("#auto_terminate_processes", RadioSet), value)
 
-    def handle_toggle_auto_run_vvmq(self, value: bool) -> None:
+    def handle_toggle_auto_run_vvmq(self, value) -> None:
         main_screen = self._get_main_screen()
         current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
         if current_value != value:
             config.update_setting(['AUTO_RUN_VVMQ'], value, env=self.current_env)
-            state = "enabled" if value else "disabled"
-            self.notify(f"Auto-run VVMQ is now {state}")
+            self.notify(f"Start MQ post-update set to {tristate_label(value)}.")
         if main_screen:
-            main_screen.query_one("#auto_run_vvmq", Switch).value = value
+            with main_screen.prevent(RadioSet.Changed):
+                set_tristate(main_screen.query_one("#auto_run_vvmq", RadioSet), value)
 
-    def handle_toggle_auto_run_eqbcs(self, value: bool) -> None:
-        main_screen = self._get_main_screen()
-        current_value = config.settings.from_env(self.current_env).get('AUTO_RUN_EQBCS', False)
-        if current_value != value:
-            config.update_setting(['AUTO_RUN_EQBCS'], value, env=self.current_env)
-            state = "enabled" if value else "disabled"
-            self.notify(f"Auto-run EQBCS is now {state}")
-        if main_screen:
-            main_screen.query_one("#auto_run_eqbcs", Switch).value = value
+    def handle_set_post_update_launch(self, target) -> None:
+        value = "none" if target is Select.BLANK else str(target).strip().lower()
+        current = (
+            config.settings.from_env(self.current_env)
+            .get("POST_UPDATE_LAUNCH", {})
+            .get("target")
+            or "none"
+        )
+        if current == value:
+            return
+        config.update_setting(["POST_UPDATE_LAUNCH", "target"], value, env=self.current_env)
+        if value == "custom":
+            self.notify(
+                "Custom post-update launch is defined in settings.local.toml (see the redfetch resource for details)"
+            )
+        elif value == "none":
+            self.notify("Post-update launch disabled.")
+        else:
+            label = utils.POST_UPDATE_PRESET_LABELS.get(value, value)
+            self.notify(f"Post-update launch set to {label}.")
+
+        if value == "myseq":
+            auto_run = config.settings.from_env(self.current_env).get("AUTO_RUN_VVMQ", None)
+            if auto_run is not True:
+                self.notify(
+                    "RedGuides strongly recommends using MySEQ only with MQ. "
+                    "Consider setting 'Start MQ post-update' to Yes.",
+                    severity="warning",
+                )
 
     #
     # Settings updaters
@@ -1712,20 +1733,25 @@ class Redfetch(App):
         else:
             self.notify("MySEQ path not found.", severity="error")
 
-    def open_ionbc_folder(self) -> None:
-        ionbc_path = utils.get_ionbc_path()
-        if ionbc_path and os.path.exists(ionbc_path):
-            self.open_folder(ionbc_path)
-        else:
-            self.notify("IonBC path not found.", severity="error")
-    
     def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
         """Run an executable and show appropriate notifications."""
-        success = processes.run_executable(folder_path, executable_name, args)
-        if success:
+        try:
+            processes.run_executable(folder_path, executable_name, args)
             self.notify(f"{executable_name} started successfully.")
-        else:
-            self.notify(f"Failed to start {executable_name}", severity="error")
+        except Exception as exc:
+            message = f"Failed to start {executable_name}: {exc}"
+            print(message)
+            self.notify(message, severity="error")
+
+    def run_command(self, command, cwd=None) -> None:
+        """Run a command and notify on failure."""
+        try:
+            processes.run_command(command, cwd)
+        except Exception as exc:
+            label = command if isinstance(command, str) else (command[0] if command else "command")
+            message = f"Failed to start {label}: {exc}"
+            print(message)
+            self.notify(message, severity="error")
 
     def run_myseq_executable(self) -> None:
         myseq_path = utils.get_myseq_path()
@@ -1737,17 +1763,6 @@ class Redfetch(App):
                 self.notify("MySEQ executable not found.", severity="error")
         else:
             self.notify("MySEQ path not found.", severity="error")
-
-    def run_ionbc_executable(self) -> None:
-        ionbc_path = utils.get_ionbc_path()
-        if ionbc_path:
-            ionbc_executable = os.path.join(ionbc_path, "IonBC.exe")
-            if os.path.exists(ionbc_executable):
-                self.run_executable(ionbc_path, "IonBC.exe")
-            else:
-                self.notify("IonBC executable not found.", severity="error")
-        else:
-            self.notify("IonBC path not found.", severity="error")
 
     def handle_uninstall(self) -> None:
         """Handle the uninstall button press."""
@@ -1946,6 +1961,13 @@ class Redfetch(App):
             traceback.print_exc()
             return False
 
+    def _start_post_update_program(self) -> None:
+        """Launch the configured 'Also start post-update' program (called after MQ)."""
+        resolved = utils.resolve_post_update_launch(self.current_env)
+        if resolved:
+            command, cwd = resolved
+            self.run_command(command, cwd)
+
     def update_complete(self, result: bool, button: Button) -> None:
         main_screen = self._get_main_screen()
         
@@ -1968,16 +1990,14 @@ class Redfetch(App):
                 self.set_timer(6, lambda: main_screen.reset_button("update_resource_id", "default"))
             elif button.id == "update_watched":
                 if sys.platform == 'win32':
-                    if config.settings.from_env(self.current_env).get('AUTO_RUN_EQBCS', False):
-                        vvmq_path = utils.get_vvmq_path()
-                        if vvmq_path and utils.validate_file_in_path(vvmq_path, "EQBCS.exe"):
-                            self.run_executable(vvmq_path, "EQBCS.exe")
                     auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
                     if auto_run is True:
                         self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+                        self._start_post_update_program()
                         if main_screen:
                             self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
                     elif auto_run is False:
+                        self._start_post_update_program()
                         if main_screen:
                             self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
                     else:
@@ -1988,11 +2008,13 @@ class Redfetch(App):
                                 self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
                             elif response == RunVVMQScreen.RESPONSE_NEVER:
                                 self.handle_toggle_auto_run_vvmq(False)
+                            self._start_post_update_program()
                             if main_screen:
                                 main_screen.reset_button("update_watched", "primary")
                                 main_screen.update_widget_states()
                         self.push_screen(RunVVMQScreen(), handle_vvmq_response)
                 else:
+                    self._start_post_update_program()
                     if main_screen:
                         self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
         else:

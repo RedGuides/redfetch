@@ -3,6 +3,8 @@
 # Standard
 import os
 import re
+import shlex
+import sys
 from urllib.parse import urlparse
 
 # Local
@@ -75,25 +77,6 @@ def get_myseq_path() -> str | None:
     return _resolve_current_special_path(myseq_id)
 
 
-def get_ionbc_path() -> str | None:
-    """Get the path to the IonBC resource, checking both the base directory and the subdirectory."""
-    base_path = _resolve_current_special_path("2463")
-    if not base_path:
-        return None
-
-    # Check both the base path and the subdirectory for the IonBC executable
-    possible_paths = [
-        base_path,
-        os.path.join(base_path, "IonBC")
-    ]
-
-    for path in possible_paths:
-        if os.path.exists(os.path.join(path, "IonBC.exe")):
-            return path
-
-    return None
-
-
 def get_current_download_folder() -> str:
     return os.path.normpath(config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER)
 
@@ -149,3 +132,96 @@ def validate_file_in_path(path: str | None, filename: str) -> bool:
         return os.path.isfile(os.path.join(path, filename))
     except (TypeError, ValueError):
         return False
+
+
+#
+# post-update launch
+#
+
+# Presets offered in the "Launch after update" dropdown.
+POST_UPDATE_PRESETS = {
+    "eqbcs": (get_vvmq_path, "EQBCS.exe"),
+    "myseq": (get_myseq_path, "MySEQ.exe"),
+}
+
+POST_UPDATE_PRESET_LABELS = {
+    "eqbcs": "EQBCS",
+    "myseq": "MySEQ",
+}
+
+
+def post_update_launch_options() -> list[tuple[str, str]]:
+    """Return ordered ``(label, value)`` choices for the launch dropdown."""
+    options: list[tuple[str, str]] = [("None", "none")]
+    for key in POST_UPDATE_PRESETS:
+        options.append((POST_UPDATE_PRESET_LABELS[key], key))
+    options.append(("Custom (settings.local.toml)", "custom"))
+    return options
+
+
+def _command_program(command: list[str] | str) -> str:
+    """Return the program (first token) of a command list or string."""
+    if isinstance(command, str):
+        s = command.strip()
+        if s.startswith('"'):
+            end = s.find('"', 1)
+            return s[1:end] if end != -1 else s[1:]
+        return s.split(None, 1)[0] if s else ""
+    return str(command[0]) if command else ""
+
+
+def resolve_post_update_launch(
+    env: str | None = None,
+) -> tuple[list[str] | str, str | None] | None:
+    """Resolve the configured post-update program for ``env``."""
+    env = env or config.settings.ENV
+    cfg = config.settings.from_env(env).get("POST_UPDATE_LAUNCH", {})
+    if not cfg:
+        return None
+
+    target = str(cfg.get("target") or "").strip().lower()
+    if not target or target == "none":
+        return None
+
+    if target == "custom":
+        command = cfg.get("command")
+        if not command:
+            print("Post-update launch is set to Custom, but no command is configured; skipping.")
+            return None
+
+        is_ps1 = (
+            sys.platform == "win32"
+            and _command_program(command).lower().endswith(".ps1")
+        )
+
+        if isinstance(command, str):
+            command = command.strip()
+            if not command:
+                print("Post-update launch command is empty; skipping.")
+                return None
+            if sys.platform == "win32":
+                if is_ps1:
+                    command = (
+                        "powershell -NoProfile -ExecutionPolicy Bypass -File " + command
+                    )
+                return (command, None)
+            return (shlex.split(command, posix=True), None)
+
+        if not isinstance(command, (list, tuple)):
+            raise TypeError("POST_UPDATE_LAUNCH command must be a string or list.")
+        argv = [str(part) for part in command]
+        if not argv:
+            print("Post-update launch command is empty; skipping.")
+            return None
+        if is_ps1:
+            argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", *argv]
+        return (argv, None)
+
+    preset = POST_UPDATE_PRESETS.get(target)
+    if not preset:
+        raise ValueError(f"Unknown POST_UPDATE_LAUNCH target: {target}")
+    resolver, exe = preset
+    folder = resolver()
+    if folder and validate_file_in_path(folder, exe):
+        return ([os.path.join(folder, exe)], folder)
+    return None
