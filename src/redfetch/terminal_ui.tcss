@@ -241,13 +241,13 @@ Label {
 #dl_path_input, #eq_path_input, #vvmq_path_input, #auto_terminate_processes, #auto_run_vvmq, #post_update_launch, #desktop_shortcut {
     column-span: 3;
 }
-#auto_terminate_processes, #auto_run_vvmq {
+#auto_terminate_processes, #auto_run_vvmq, #post_update_launch {
     layout: horizontal;
     width: auto;
     height: auto;
     background: transparent;
 }
-#auto_terminate_processes > RadioButton, #auto_run_vvmq > RadioButton {
+#auto_terminate_processes > RadioButton, #auto_run_vvmq > RadioButton, #post_update_launch > Checkbox {
     width: auto;
     margin-right: 2;
 }

@@ -138,7 +138,7 @@ def validate_file_in_path(path: str | None, filename: str) -> bool:
 # post-update launch
 #
 
-# Presets offered in the "Launch after update" dropdown.
+# Presets offered as "Also start post-update" toggles.
 POST_UPDATE_PRESETS = {
     "eqbcs": (get_vvmq_path, "EQBCS.exe"),
     "myseq": (get_myseq_path, "MySEQ.exe"),
@@ -147,16 +147,36 @@ POST_UPDATE_PRESETS = {
 POST_UPDATE_PRESET_LABELS = {
     "eqbcs": "EQBCS",
     "myseq": "MySEQ",
+    "custom": "Custom",
 }
 
 
-def post_update_launch_options() -> list[tuple[str, str]]:
-    """Return ordered ``(label, value)`` choices for the launch dropdown."""
-    options: list[tuple[str, str]] = [("None", "none")]
-    for key in POST_UPDATE_PRESETS:
-        options.append((POST_UPDATE_PRESET_LABELS[key], key))
-    options.append(("Custom (settings.local.toml)", "custom"))
-    return options
+def post_update_launch_choices() -> list[tuple[str, str]]:
+    """Return ordered ``(value, label)`` toggle choices (presets + custom)."""
+    choices: list[tuple[str, str]] = [
+        (key, POST_UPDATE_PRESET_LABELS[key]) for key in POST_UPDATE_PRESETS
+    ]
+    choices.append(("custom", POST_UPDATE_PRESET_LABELS["custom"]))
+    return choices
+
+
+def get_post_update_targets(env: str | None = None) -> list[str]:
+    """Return enabled post-update targets for ``env`` (``targets``, or legacy ``target``)."""
+    env = env or config.settings.ENV
+    cfg = config.settings.from_env(env).get("POST_UPDATE_LAUNCH", {})
+    raw = cfg.get("targets")
+    if raw is None:
+        single = cfg.get("target")
+        raw = [single] if single else []
+    elif isinstance(raw, str):
+        raw = [raw]
+
+    result: list[str] = []
+    for item in raw:
+        value = str(item).strip().lower()
+        if value and value != "none" and value not in result:
+            result.append(value)
+    return result
 
 
 def _command_program(command: list[str] | str) -> str:
@@ -172,16 +192,24 @@ def _command_program(command: list[str] | str) -> str:
 
 def resolve_post_update_launch(
     env: str | None = None,
+) -> list[tuple[list[str] | str, str | None]]:
+    """Resolve enabled targets for ``env`` to ``(command, cwd)`` pairs, skipping unresolvable ones."""
+    env = env or config.settings.ENV
+    resolved: list[tuple[list[str] | str, str | None]] = []
+    for target in get_post_update_targets(env):
+        item = _resolve_launch_target(target, env)
+        if item:
+            resolved.append(item)
+    return resolved
+
+
+def _resolve_launch_target(
+    target: str,
+    env: str | None = None,
 ) -> tuple[list[str] | str, str | None] | None:
-    """Resolve the configured post-update program for ``env``."""
+    """Resolve a single post-update ``target`` to a ``(command, cwd)`` pair."""
     env = env or config.settings.ENV
     cfg = config.settings.from_env(env).get("POST_UPDATE_LAUNCH", {})
-    if not cfg:
-        return None
-
-    target = str(cfg.get("target") or "").strip().lower()
-    if not target or target == "none":
-        return None
 
     if target == "custom":
         command = cfg.get("command")
@@ -219,7 +247,8 @@ def resolve_post_update_launch(
 
     preset = POST_UPDATE_PRESETS.get(target)
     if not preset:
-        raise ValueError(f"Unknown POST_UPDATE_LAUNCH target: {target}")
+        print(f"Unknown POST_UPDATE_LAUNCH target: {target}; skipping.")
+        return None
     resolver, exe = preset
     folder = resolver()
     if folder and validate_file_in_path(folder, exe):

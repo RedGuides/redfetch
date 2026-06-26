@@ -188,9 +188,7 @@ def run_post_update_launch() -> None:
     if os.environ.get("CI") == "true":
         return
 
-    resolved = utils.resolve_post_update_launch(config.settings.ENV)
-    if resolved:
-        command, cwd = resolved
+    for command, cwd in utils.resolve_post_update_launch(config.settings.ENV):
         processes.run_command(command, cwd)
 
 

@@ -277,57 +277,132 @@ def load_config(file_path):
 
 
 def _annotate_special_resource_comments(toml_text: str) -> str:
-    """
-    Insert comments above SPECIAL_RESOURCES sections with friendly names, when known.
-
-    This makes settings.local.toml easier for users to read by annotating lines like
-    [LIVE.SPECIAL_RESOURCES.2318] with a preceding comment such as "# guildclicky".
-    """
-    lines = toml_text.splitlines()
-    if not lines:
-        return toml_text
-
-    known_names = set(RESOURCE_NAMES.values())
-    section_pattern = re.compile(r"^\[(DEFAULT|LIVE|TEST|EMU)\.SPECIAL_RESOURCES\.(\d+)\]\s*$")
-
-    stripped = []
-    for line in lines:
-        if line.lstrip().startswith("#") and line.lstrip().lstrip("#").strip() in known_names:
-            continue
-        stripped.append(line)
+    """Add a `# friendly-name` comment above each known SPECIAL_RESOURCES section."""
+    section_pattern = re.compile(r"^\[(?:DEFAULT|LIVE|TEST|EMU)\.SPECIAL_RESOURCES\.(\d+)\]\s*$")
 
     new_lines = []
-    for line in stripped:
+    for line in toml_text.splitlines():
         match = section_pattern.match(line)
-        if not match:
-            new_lines.append(line)
-            continue
-
-        _env_name, resource_id = match.groups()
-        friendly_name = RESOURCE_NAMES.get(resource_id)
-        if not friendly_name:
-            new_lines.append(line)
-            continue
-
-        idx = len(new_lines) - 1
-        while idx >= 0 and new_lines[idx].strip() == "":
-            idx -= 1
-
-        if idx >= 0 and new_lines[idx].lstrip().startswith("#"):
-            new_lines.append(line)
-            continue
-
-        new_lines.append(f"# {friendly_name}")
+        if match:
+            friendly_name = RESOURCE_NAMES.get(match.group(1))
+            if friendly_name and not (new_lines and new_lines[-1] == f"# {friendly_name}"):
+                new_lines.append(f"# {friendly_name}")
         new_lines.append(line)
 
     ending = "\n" if toml_text.endswith("\n") else ""
     return "\n".join(new_lines) + ending
 
 
+# Header for settings.local.toml, which redfetch rewrites on every save.
+SETTINGS_LOCAL_HEADER = (
+    "# Managed by redfetch: stores only your changes from settings.toml defaults.\n"
+    "# Editable by hand, but redfetch rewrites on save, so comments may be dropped\n"
+    "# and values matching a default are removed. See settings.toml for all options.\n"
+)
+
+# Path-valued keys, compared with path-aware equality (slash vs backslash).
+_PATH_LIKE_KEYS = {"EQPATH", "DOWNLOAD_FOLDER", "custom_path", "default_path"}
+
+_MISSING = object()
+_base_settings_cache = None
+
+
+def _base_settings():
+    """Cached Dynaconf view of the bundled settings.toml defaults (no overrides)."""
+    global _base_settings_cache
+    if _base_settings_cache is None:
+        _base_settings_cache = Dynaconf(
+            settings_files=[os.path.join(script_dir, "settings.toml")],
+            environments=True,
+            merge_enabled=True,
+            env_switcher="REDFETCH_ENV",
+        )
+    return _base_settings_cache
+
+
+def _to_plain(data):
+    """Convert a tomlkit document/table (or any nested mapping) to plain dicts/lists."""
+    if hasattr(data, "unwrap"):
+        return data.unwrap()
+    if isinstance(data, dict):
+        return {k: _to_plain(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_to_plain(v) for v in data]
+    return data
+
+
+def _base_lookup(base, key):
+    """Fetch key from base defaults, tolerating Dynaconf case folding."""
+    if not isinstance(base, dict):
+        return _MISSING
+    if key in base:
+        return base[key]
+    lowered = key.lower()
+    for bkey, bval in base.items():
+        if isinstance(bkey, str) and bkey.lower() == lowered:
+            return bval
+    return _MISSING
+
+
+def _equals_default(value, default, key):
+    """True if value matches the default (and can be dropped)."""
+    if value == default:
+        return True
+    if (
+        key in _PATH_LIKE_KEYS
+        and isinstance(value, str) and value
+        and isinstance(default, str) and default
+    ):
+        return os.path.normpath(value) == os.path.normpath(default)
+    return False
+
+
+def _prune_branch(local, base):
+    """Recursively drop leaves equal to their default and tables left empty."""
+    for key in list(local.keys()):
+        value = local[key]
+        base_value = _base_lookup(base, key)
+        if isinstance(value, dict):
+            _prune_branch(value, base_value if isinstance(base_value, dict) else {})
+            if not value:
+                del local[key]
+        elif base_value is not _MISSING and _equals_default(value, base_value, key):
+            del local[key]
+
+
+def _prune_to_deltas(data):
+    """Drop entries equal to the defaults, leaving only deltas.
+
+    Each top-level table is an environment (LIVE/TEST/EMU/DEFAULT), compared
+    against the same environment's defaults from the bundled settings.toml.
+    """
+    base = _base_settings()
+    for env in list(data.keys()):
+        if not isinstance(data[env], dict):
+            continue
+        try:
+            base_env = base.from_env(env).as_dict()
+        except Exception:
+            continue  # defaults unresolvable; keep env verbatim
+        _prune_branch(data[env], base_env)
+        if not data[env]:
+            del data[env]
+
+
 def save_config(file_path, config_data):
-    """Save the updated configuration data to the TOML file."""
-    toml_text = tomlkit.dumps(config_data)
-    toml_text = _annotate_special_resource_comments(toml_text)
+    """Regenerate settings.local.toml, keeping only deltas from the defaults.
+
+    Accepts a tomlkit document or a plain dict.
+    """
+    data = _to_plain(config_data)
+    _prune_to_deltas(data)
+
+    body = _annotate_special_resource_comments(tomlkit.dumps(data)).strip("\n")
+
+    if body:
+        toml_text = f"{SETTINGS_LOCAL_HEADER}\n{body}\n"
+    else:
+        toml_text = SETTINGS_LOCAL_HEADER
     atomic_write_text(file_path, toml_text)
 
 

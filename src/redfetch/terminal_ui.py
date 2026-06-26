@@ -22,9 +22,9 @@ from rich.console import detect_legacy_windows
 from textual import work, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar, RadioSet, RadioButton
+from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar, RadioSet, RadioButton, Checkbox
 from textual.events import Print
-from textual.containers import ScrollableContainer, Center, CenterMiddle, Grid, ItemGrid, Vertical
+from textual.containers import ScrollableContainer, Center, CenterMiddle, Grid, ItemGrid, Vertical, Horizontal
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState, WorkerFailed
 from textual.screen import ModalScreen, Screen
@@ -90,6 +90,17 @@ def set_tristate(radio_set: RadioSet, value) -> None:
     target = list(radio_set.query(RadioButton))[tristate_index(value)]
     if not target.value:
         target.value = True
+
+
+def make_launch_toggles(selected: set[str]) -> Horizontal:
+    """Build a horizontal row of post-update launch checkboxes."""
+    return Horizontal(
+        *(
+            Checkbox(label, value=(value in selected), id=f"launch_{value}", compact=True)
+            for value, label in utils.post_update_launch_choices()
+        ),
+        id="post_update_launch",
+    )
 
 
 def get_staff_pick_ids_for_env(env: str) -> list[str]:
@@ -529,20 +540,7 @@ class SettingsTab(ScrollableContainer):
                 config.settings.from_env(current_env).get("AUTO_RUN_VVMQ", None),
             )
             yield Label("Also start post-update:", classes="left_middle")
-            launch_options = utils.post_update_launch_options()
-            launch_target = (
-                config.settings.from_env(current_env)
-                .get("POST_UPDATE_LAUNCH", {})
-                .get("target")
-                or "none"
-            )
-            valid_launch_targets = {value for _, value in launch_options}
-            yield Select(
-                launch_options,
-                id="post_update_launch",
-                value=launch_target if launch_target in valid_launch_targets else "none",
-                allow_blank=False,
-            )
+            yield make_launch_toggles(set(utils.get_post_update_targets(current_env)))
             if sys.platform == "win32":
                 yield Label("Desktop shortcut:", classes="left_middle")
                 yield Switch(
@@ -604,14 +602,12 @@ class SettingsTab(ScrollableContainer):
         with self.prevent(RadioSet.Changed):
             set_tristate(auto_run_vvmq_radio, settings_for_env.get("AUTO_RUN_VVMQ", None))
 
-        # Keep the per-env launch target from writing back during app sync.
-        launch_select = self.query_one("#post_update_launch", Select)
-        valid_launch_targets = {value for _, value in utils.post_update_launch_options()}
-        launch_target = settings_for_env.get("POST_UPDATE_LAUNCH", {}).get("target") or "none"
-        with self.prevent(Select.Changed):
-            launch_select.value = (
-                launch_target if launch_target in valid_launch_targets else "none"
-            )
+        # Keep the per-env launch toggles from writing back during app sync.
+        enabled_targets = set(utils.get_post_update_targets(app.current_env))
+        with self.prevent(Checkbox.Changed):
+            for value, _label in utils.post_update_launch_choices():
+                checkbox = self.query_one(f"#launch_{value}", Checkbox)
+                checkbox.value = value in enabled_targets
 
         auto_terminate_radio = self.query_one("#auto_terminate_processes", RadioSet)
         with self.prevent(RadioSet.Changed):
@@ -743,8 +739,11 @@ class SettingsTab(ScrollableContainer):
             new_env = event.value
             self.app.current_env = new_env
 
-        if event.select.id == "post_update_launch":
-            self.app.handle_set_post_update_launch(event.value)
+    @on(Checkbox.Changed, "#post_update_launch Checkbox")
+    def on_launch_toggle_changed(self, event: Checkbox.Changed) -> None:
+        target = (event.checkbox.id or "").removeprefix("launch_")
+        if target:
+            self.app.handle_toggle_post_update_launch(target, event.value)
 
 
 class ShortcutsTab(ScrollableContainer):
@@ -1547,28 +1546,35 @@ class Redfetch(App):
             with main_screen.prevent(RadioSet.Changed):
                 set_tristate(main_screen.query_one("#auto_run_vvmq", RadioSet), value)
 
-    def handle_set_post_update_launch(self, target) -> None:
-        value = "none" if target is Select.BLANK else str(target).strip().lower()
-        current = (
-            config.settings.from_env(self.current_env)
-            .get("POST_UPDATE_LAUNCH", {})
-            .get("target")
-            or "none"
-        )
-        if current == value:
+    def handle_toggle_post_update_launch(self, target: str, enabled: bool) -> None:
+        target = str(target).strip().lower()
+        if not target:
             return
-        config.update_setting(["POST_UPDATE_LAUNCH", "target"], value, env=self.current_env)
-        if value == "custom":
+
+        targets = utils.get_post_update_targets(self.current_env)
+        if enabled and target not in targets:
+            targets.append(target)
+        elif not enabled and target in targets:
+            targets.remove(target)
+        else:
+            return  # already in desired state
+
+        config.update_setting(["POST_UPDATE_LAUNCH", "targets"], targets, env=self.current_env)
+        # Drop the superseded legacy single-target key if it lingers in config.
+        if config.settings.from_env(self.current_env).get("POST_UPDATE_LAUNCH", {}).get("target"):
+            config.update_setting(["POST_UPDATE_LAUNCH", "target"], None, env=self.current_env)
+
+        label = utils.POST_UPDATE_PRESET_LABELS.get(target, target)
+        if not enabled:
+            self.notify(f"Post-update launch of {label} disabled.")
+        elif target == "custom":
             self.notify(
                 "Custom post-update launch is defined in settings.local.toml (see the redfetch resource for details)"
             )
-        elif value == "none":
-            self.notify("Post-update launch disabled.")
         else:
-            label = utils.POST_UPDATE_PRESET_LABELS.get(value, value)
-            self.notify(f"Post-update launch set to {label}.")
+            self.notify(f"Post-update launch of {label} enabled.")
 
-        if value == "myseq":
+        if enabled and target == "myseq":
             auto_run = config.settings.from_env(self.current_env).get("AUTO_RUN_VVMQ", None)
             if auto_run is not True:
                 self.notify(
@@ -1962,10 +1968,8 @@ class Redfetch(App):
             return False
 
     def _start_post_update_program(self) -> None:
-        """Launch the configured 'Also start post-update' program (called after MQ)."""
-        resolved = utils.resolve_post_update_launch(self.current_env)
-        if resolved:
-            command, cwd = resolved
+        """Launch the configured 'Also start post-update' programs (called after MQ)."""
+        for command, cwd in utils.resolve_post_update_launch(self.current_env):
             self.run_command(command, cwd)
 
     def update_complete(self, result: bool, button: Button) -> None:
