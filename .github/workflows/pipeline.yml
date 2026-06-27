@@ -184,11 +184,36 @@ jobs:
             --set-version-string "InternalName" "redfetch" `
             --set-icon "redfetch.ico"
 
-      - name: Sign Executable
+      - name: Install Google Cloud KMS CNG Provider
         shell: pwsh
         run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.CERTIFICATE_PFX }}"))
+          if (Test-Path "$env:SystemRoot\System32\kmscng.dll") {
+            Write-Host "kmscng already installed."
+            return
+          }
+          $url = "https://github.com/GoogleCloudPlatform/kms-integrations/releases/download/cng-v1.3/kmscng-1.3-windows-amd64.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "kmscng.zip"
+          $dest = Join-Path $env:RUNNER_TEMP "kmscng"
+          Invoke-WebRequest $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          $msi = Get-ChildItem -Path $dest -Recurse -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { throw "kmscng MSI not found in archive" }
+          Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait -NoNewWindow
+          if (-not (Test-Path "$env:SystemRoot\System32\kmscng.dll")) { throw "kmscng installation failed" }
+          Write-Host "kmscng installed."
+
+      - name: Sign Executable
+        shell: pwsh
+        env:
+          KMS_KEY: projects/code-signing-rg/locations/global/keyRings/redkeys/cryptoKeys/rgkey/cryptoKeyVersions/1
+          SIGNING_CERT: ${{ secrets.SIGNING_CERT }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          $CertFile = Join-Path $env:RUNNER_TEMP "user.crt"
+          $KeyFile  = Join-Path $env:RUNNER_TEMP "gcp-sa.json"
+          [IO.File]::WriteAllBytes($CertFile, [Convert]::FromBase64String($env:SIGNING_CERT))
+          [IO.File]::WriteAllText($KeyFile, $env:GCP_SA_KEY)
+          $env:GOOGLE_APPLICATION_CREDENTIALS = $KeyFile
 
           $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits" -Recurse -Filter "signtool.exe" |
             Where-Object { $_.FullName -match "\\x64\\" } |
@@ -198,10 +223,18 @@ jobs:
           if (-not $signtool) { throw "signtool.exe not found" }
           Write-Host "Using signtool: $signtool"
 
-          & $signtool sign /f $certPath /p "${{ secrets.CERTIFICATE_PFX_PASSWORD }}" /fd sha256 /tr "http://timestamp.digicert.com" /td sha256 /v redfetch.exe
+          $tsaServers = @('http://timestamp.digicert.com', 'http://timestamp.sectigo.com')
+          $maxAttempts = 5
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            $tsa = $tsaServers[($attempt - 1) % $tsaServers.Count]
+            & $signtool sign /fd SHA256 /f $CertFile /csp "Google Cloud KMS Provider" /kc $env:KMS_KEY /tr $tsa /td sha256 /v redfetch.exe
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq $maxAttempts) { throw "Signing failed after $maxAttempts attempts" }
+            Start-Sleep -Seconds 2
+          }
           & $signtool verify /pa /v redfetch.exe
 
-          Remove-Item $certPath
+          Remove-Item -Force $CertFile, $KeyFile
 
       - name: Upload Executable Artifact
         uses: actions/upload-artifact@v7
