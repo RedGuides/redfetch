@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Licensed resources will now download even if you have duplicates. ([#24](https://github.com/RedGuides/redfetch/issues/24))
 - Update checks notice when a resource's subfolder changes.
+- Fixed "RecursionError" on startup by rolling back a dependency.
 
 ## [1.2.0] - 2026-04-05
 
