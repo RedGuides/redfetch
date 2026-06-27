@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-26
+
+### Added
+- `--server` on `update` and `download`: use a different server for one run.
+- TUI: "Also start post-update" — launch EQBCS, MySEQ, or a custom program after a successful update. ([#18](https://github.com/RedGuides/redfetch/issues/18))
+- Staff picks: Ninjadvloot.inc is now on LIVE/TEST/EMU.
+
+### Changed
+- Config paths that contain `eqgame.exe` are allowed with a warning instead of being blocked outright. ([#22](https://github.com/RedGuides/redfetch/issues/22))
+- TUI: "Close MQ pre-update" and "Start MQ post-update" are now No / Ask / Yes toggles, so you can pick the prompt-each-time ("Ask") behavior from the UI instead of only on/off.
+- Only settings you've actually changed are written to `settings.local.toml`, keeping the file tidy.
+
+### Fixed
+- Licensed resources will now download even if you have duplicates. ([#24](https://github.com/RedGuides/redfetch/issues/24))
+- Update checks notice when a resource's subfolder changes.
+
 ## [1.2.0] - 2026-04-05
 
 ### Added

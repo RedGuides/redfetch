@@ -156,10 +156,30 @@ redfetch.exe config SPECIAL_RESOURCES.2218.opt_in false --server TEST
 
 Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
 
+### Custom post-update launch
+
+redfetch can launch extra programs after an update completes. Aside from the normal UI toggles, you can add `custom` to `POST_UPDATE_LAUNCH.targets` in `settings.local.toml`, then set `command` to whatever redfetch should run:
+
+```toml
+[LIVE.POST_UPDATE_LAUNCH]
+targets = ["custom"]
+command = ['C:\Tools\AfterRedfetch\after-update.exe', '--server', 'LIVE']
+```
+
+You can also combine it with the built-in post-update launches. For example, to start EQBCS and MySEQ and run your own Python script:
+
+```toml
+[LIVE.POST_UPDATE_LAUNCH]
+targets = ["myseq", "custom", "eqbcs"]
+command = ["C:\\Users\\Public\\Python\\python.exe", "C:\\Users\\Public\\redfetch\\after_update.py"]
+```
+
+You can set these per-server, e.g. `[TEST.POST_UPDATE_LAUNCH]`, or global `[DEFAULT.POST_UPDATE_LAUNCH]`.
+
+
 ## Trailmap
 - Add custom buttons for "fetch" tab.
 - Option: Close after update
-- Launch programs with cli options
 - Indicate when updated VV is available
 - Run from MQ
 - Deeper integration with the forums
