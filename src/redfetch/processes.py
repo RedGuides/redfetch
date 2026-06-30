@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from typing import List, Sequence, Tuple
+from pathlib import Path
+from typing import Iterable, List, Sequence, Tuple
 
 import psutil
 
@@ -12,10 +13,13 @@ IS_WINDOWS = sys.platform == "win32"
 
 
 if IS_WINDOWS:
-    from .unloadmq import force_remote_unload
+    from .unloadmq import force_remote_unload, get_eqgame_process_pids
 else:  # skip if not on windows
     def force_remote_unload() -> None:
         pass
+
+    def get_eqgame_process_pids() -> List[int]:
+        return []
 
 
 def _normalized_executables(folder_path: str) -> List[str]:
@@ -55,6 +59,55 @@ def are_executables_running_in_folder(folder_path: str) -> List[Tuple[int, str]]
     except Exception as exc:
         print(f"An error occurred while checking running processes: {exc}")
         return running
+
+
+def find_processes_locking_dirs(
+    folder_path: str, target_dirs: Iterable[str]
+) -> List[Tuple[int, str]]:
+    """Return processes whose mapped modules live under any of ``target_dirs`` (those files
+    can't be overwritten while the process is running).
+    """
+    if not IS_WINDOWS:
+        return []
+
+    normalized_targets = [
+        os.path.normcase(os.path.normpath(d)) for d in target_dirs if d
+    ]
+    if not normalized_targets:
+        return []
+
+    candidates: dict[int, str] = {}
+    for pid, exe_path in are_executables_running_in_folder(folder_path):
+        candidates[pid] = exe_path
+    for pid in get_eqgame_process_pids():
+        if pid in candidates:
+            continue
+        try:
+            candidates[pid] = psutil.Process(pid).exe() or "eqgame.exe"
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            candidates[pid] = "eqgame.exe"
+
+    def _maps_under_target(pid: int) -> bool:
+        try:
+            for mmap in psutil.Process(pid).memory_maps():
+                path = getattr(mmap, "path", None)
+                if not path:
+                    continue
+                normalized = Path(os.path.normcase(os.path.normpath(path)))
+                if any(normalized.is_relative_to(target) for target in normalized_targets):
+                    return True
+            return False
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return True  # can't see the maps -> assume collision to stay safe
+        except Exception as exc:
+            print(f"Could not inspect modules for PID {pid}: {exc}")
+            return True
+
+    colliding: List[Tuple[int, str]] = []
+    for pid, exe_path in candidates.items():
+        if _maps_under_target(pid):
+            colliding.append((pid, exe_path))
+    return colliding
 
 
 def terminate_executables_in_folder(folder_path: str) -> None:

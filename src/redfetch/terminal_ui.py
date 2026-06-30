@@ -1850,33 +1850,45 @@ class Redfetch(App):
     async def _update_watched_worker(self) -> bool:
         print("Starting update of all watched & special resources, please wait...")
 
-        mq_folder = utils.get_base_path()
-        running_executables = await asyncio.to_thread(processes.are_executables_running_in_folder, mq_folder)
-        if running_executables:
-            auto_terminate = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
-            if auto_terminate is True:
-                await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
-            elif auto_terminate is False:
-                self.notify("Continuing update without closing processes...", severity="warning")
-            else:
-                response = await self.push_screen_wait(
-                    ProcessTerminationScreen(running_executables=running_executables)
-                )
-
-                if response in [ProcessTerminationScreen.RESPONSE_TERMINATE, ProcessTerminationScreen.RESPONSE_ALWAYS]:
-                    if response == ProcessTerminationScreen.RESPONSE_ALWAYS:
-                        self.handle_toggle_auto_terminate_processes(True)
-                    await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
-                elif response == ProcessTerminationScreen.RESPONSE_NEVER:
-                    self.handle_toggle_auto_terminate_processes(False)
-                else:
-                    self.notify("Continuing update without closing processes...", severity="warning")
-
         # Check navmesh preference (prompt if not configured and VVMQ exists)
         navmesh_override = await self._prompt_navmesh_opt_in()
 
-        result = await self.run_synchronization(navmesh_override=navmesh_override)
+        result = await self.run_synchronization(
+            navmesh_override=navmesh_override,
+            on_plan_ready=self._close_processes_if_needed,
+        )
         return result
+
+    async def _close_processes_if_needed(self, execution_plan) -> None:
+        """Close MQ only when an update will write into a folder with loaded binaries."""
+        mq_folder = utils.get_base_path()
+        target_dirs = sync.download_target_dirs(execution_plan)
+        colliding = await asyncio.to_thread(
+            processes.find_processes_locking_dirs, mq_folder, target_dirs
+        )
+        if not colliding:
+            return
+
+        auto_terminate = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
+        if auto_terminate is True:
+            await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
+            return
+        if auto_terminate is False:
+            self.notify("Continuing update without closing processes...", severity="warning")
+            return
+
+        response = await self.push_screen_wait(
+            ProcessTerminationScreen(running_executables=colliding)
+        )
+
+        if response in [ProcessTerminationScreen.RESPONSE_TERMINATE, ProcessTerminationScreen.RESPONSE_ALWAYS]:
+            if response == ProcessTerminationScreen.RESPONSE_ALWAYS:
+                self.handle_toggle_auto_terminate_processes(True)
+            await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
+        elif response == ProcessTerminationScreen.RESPONSE_NEVER:
+            self.handle_toggle_auto_terminate_processes(False)
+        else:
+            self.notify("Continuing update without closing processes...", severity="warning")
 
     async def _prompt_navmesh_opt_in(self) -> bool | None:
         """Prompt user about navmesh downloads if not configured."""
@@ -1944,7 +1956,7 @@ class Redfetch(App):
         except Exception:
             pass
 
-    async def run_synchronization(self, resource_ids=None, navmesh_override=None):
+    async def run_synchronization(self, resource_ids=None, navmesh_override=None, on_plan_ready=None):
         try:
             db_name = f"{self.current_env}_resources.db"
             await asyncio.to_thread(store.initialize_db, db_name)
@@ -1961,6 +1973,7 @@ class Redfetch(App):
                 resource_ids=resource_ids,
                 on_event=self.on_sync_event,
                 navmesh_override=navmesh_override,
+                on_plan_ready=on_plan_ready,
             )
             return result
         except Exception:

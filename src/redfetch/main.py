@@ -76,10 +76,11 @@ def initialize_db_only(server: "Optional[Env]" = None):
 
 # ===== CLI prompt helpers =====
 
-def prompt_terminate_processes(mq_folder: str) -> None:
+def prompt_terminate_processes(
+    running_executables: "list[tuple[int, str]]",
+) -> None:
     """Handle the 'AUTO_TERMINATE_PROCESSES' prompt and action."""
-    # Check if MQ or any other executable is running
-    if not processes.are_executables_running_in_folder(mq_folder):
+    if not running_executables:
         return
 
     auto_terminate = config.settings.from_env(config.settings.ENV).get(
@@ -87,7 +88,7 @@ def prompt_terminate_processes(mq_folder: str) -> None:
     )
 
     if auto_terminate is True:
-        processes.terminate_executables_in_folder(mq_folder)
+        processes.terminate_processes(running_executables)
         return
 
     if auto_terminate is False:
@@ -101,9 +102,9 @@ def prompt_terminate_processes(mq_folder: str) -> None:
         default="yes",
     )
     if user_choice == "yes":
-        processes.terminate_executables_in_folder(mq_folder)
+        processes.terminate_processes(running_executables)
     elif user_choice == "always":
-        processes.terminate_executables_in_folder(mq_folder)
+        processes.terminate_processes(running_executables)
         config.update_setting(["AUTO_TERMINATE_PROCESSES"], True)
         console.print("Updated settings to always terminate processes.")
     elif user_choice == "never":
@@ -184,11 +185,14 @@ def prompt_auto_run_macroquest() -> None:
 
 
 def run_post_update_launch() -> None:
-    """Launch the configured post-update program."""
+    """Launch the configured post-update programs, skipping any already running."""
     if os.environ.get("CI") == "true":
         return
 
-    for command, cwd in utils.resolve_post_update_launch(config.settings.ENV):
+    to_run, skipped = utils.resolve_post_update_launch_filtered(config.settings.ENV)
+    for program in skipped:
+        console.print(f"{os.path.basename(program)} is already running; not starting another.")
+    for command, cwd in to_run:
         processes.run_command(command, cwd)
 
 
@@ -206,14 +210,20 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
             return False
 
     mq_folder = utils.get_base_path()
-    prompt_terminate_processes(mq_folder)
 
-    # Check navmesh preference (prompt if not configured)
+    async def _close_processes_if_needed(execution_plan) -> None:
+        target_dirs = sync.download_target_dirs(execution_plan)
+        colliding = await asyncio.to_thread(
+            processes.find_processes_locking_dirs, mq_folder, target_dirs
+        )
+        prompt_terminate_processes(colliding)
+
     navmesh_override = prompt_navmesh_opt_in()
 
-    # Perform the download via async pipeline
     success = await sync.run_sync(
-        db_path, headers, navmesh_override=navmesh_override
+        db_path, headers,
+        navmesh_override=navmesh_override,
+        on_plan_ready=_close_processes_if_needed,
     )
     if success:
         prompt_auto_run_macroquest()

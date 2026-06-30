@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Awaitable, Callable
 
 import httpx
 
@@ -23,6 +24,17 @@ from redfetch.sync_types import (
 
 _sync_lock: asyncio.Lock | None = None
 _DEFAULT_REASON = ReasonInfo(message="")
+
+PlanReadyHook = Callable[[ExecutionPlan], Awaitable[None]]
+
+
+def download_target_dirs(execution_plan: ExecutionPlan) -> set[str]:
+    """Destination directories (always folders) for actions that will write files to disk."""
+    return {
+        action.resolved_path
+        for action in execution_plan.actions.values()
+        if action.action == "download" and action.resolved_path
+    }
 
 
 def _print_plan_summary(
@@ -157,6 +169,7 @@ async def sync(
     headers: dict,
     resource_ids: list[str] | None = None,
     on_event: SyncEventCallback | None = None,
+    on_plan_ready: PlanReadyHook | None = None,
 ) -> bool:
     """Discover, plan, and execute a sync run against the API."""
     prepared = await prepare_sync(db_path, headers, resource_ids=resource_ids)
@@ -166,6 +179,11 @@ async def sync(
     execution_plan = prepared.execution_plan
 
     _print_plan_summary(execution_plan, resource_ids=resource_ids)
+
+    # Decide on closing running processes before any file is downloaded or extracted.
+    if on_plan_ready:
+        await on_plan_ready(execution_plan)
+
     if on_event:
         on_event(("total", len(execution_plan.actions), None))
 
@@ -228,6 +246,7 @@ async def run_sync(
     resource_ids: list[str] | None = None,
     on_event: SyncEventCallback | None = None,
     navmesh_override: bool | None = None,
+    on_plan_ready: PlanReadyHook | None = None,
 ) -> bool:
     """Top-level entry point: run the sync pipeline under a global lock, then navmesh if applicable."""
     global _sync_lock
@@ -241,6 +260,7 @@ async def run_sync(
                 headers,
                 resource_ids=resource_ids,
                 on_event=on_event,
+                on_plan_ready=on_plan_ready,
             )
 
             if resource_ids is None:
