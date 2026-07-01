@@ -77,6 +77,21 @@ def get_myseq_path() -> str | None:
     return _resolve_current_special_path(myseq_id)
 
 
+def macroquest_exe_path() -> str | None:
+    """Full path to MacroQuest.exe for the active environment, if VVMQ is configured."""
+    vvmq = get_vvmq_path()
+    return os.path.join(vvmq, "MacroQuest.exe") if vvmq else None
+
+
+def should_offer_mq_start(running: set[str] | None = None) -> bool:
+    from redfetch import processes  # local import: processes imports utils
+
+    if sys.platform != "win32":
+        return False
+    mq_path = macroquest_exe_path()
+    return bool(mq_path) and not processes.is_executable_running(mq_path, running)
+
+
 def get_current_download_folder() -> str:
     return os.path.normpath(config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER)
 
@@ -201,6 +216,39 @@ def resolve_post_update_launch(
         if item:
             resolved.append(item)
     return resolved
+
+
+def resolve_post_update_launch_filtered(
+    env: str | None = None,
+    running: set[str] | None = None,
+) -> tuple[list[tuple[list[str] | str, str | None]], list[str]]:
+    from redfetch import processes
+
+    if running is None:
+        running = processes.running_executable_paths()
+    to_run: list[tuple[list[str] | str, str | None]] = []
+    skipped: list[str] = []
+    for command, cwd in resolve_post_update_launch(env):
+        program = _command_program(command)
+        if program and os.path.isfile(program) and \
+                os.path.normcase(os.path.normpath(program)) in running:
+            skipped.append(program)
+            continue
+        to_run.append((command, cwd))
+    return to_run, skipped
+
+
+def plan_post_update_session(
+    env: str | None = None,
+) -> tuple[bool, list[tuple[list[str] | str, str | None]], list[str]]:
+    from redfetch import processes
+
+    if sys.platform != "win32":
+        return False, [], []
+    running = processes.running_executable_paths()
+    offer_mq = should_offer_mq_start(running)
+    to_run, skipped = resolve_post_update_launch_filtered(env, running) if offer_mq else ([], [])
+    return offer_mq, to_run, skipped
 
 
 def _resolve_launch_target(

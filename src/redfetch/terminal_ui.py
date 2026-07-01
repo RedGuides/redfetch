@@ -1750,11 +1750,12 @@ class Redfetch(App):
             self.notify(message, severity="error")
 
     def run_command(self, command, cwd=None) -> None:
-        """Run a command and notify on failure."""
+        """Run a command and notify on success or failure."""
+        label = os.path.basename(utils._command_program(command)) or "post-update program"
         try:
             processes.run_command(command, cwd)
+            self.notify(f"{label} started successfully.")
         except Exception as exc:
-            label = command if isinstance(command, str) else (command[0] if command else "command")
             message = f"Failed to start {label}: {exc}"
             print(message)
             self.notify(message, severity="error")
@@ -1857,10 +1858,15 @@ class Redfetch(App):
             navmesh_override=navmesh_override,
             on_plan_ready=self._close_processes_if_needed,
         )
+
+        offer, to_run, skipped = await asyncio.to_thread(
+            utils.plan_post_update_session, self.current_env
+        )
+        self._offer_mq_start = offer
+        self._post_update_loadout = (to_run, skipped)
         return result
 
     async def _close_processes_if_needed(self, execution_plan) -> None:
-        """Close MQ only when an update will write into a folder with loaded binaries."""
         mq_folder = utils.get_base_path()
         target_dirs = sync.download_target_dirs(execution_plan)
         colliding = await asyncio.to_thread(
@@ -1871,7 +1877,7 @@ class Redfetch(App):
 
         auto_terminate = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
         if auto_terminate is True:
-            await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
+            await asyncio.to_thread(processes.terminate_processes, colliding, mq_folder)
             return
         if auto_terminate is False:
             self.notify("Continuing update without closing processes...", severity="warning")
@@ -1884,7 +1890,7 @@ class Redfetch(App):
         if response in [ProcessTerminationScreen.RESPONSE_TERMINATE, ProcessTerminationScreen.RESPONSE_ALWAYS]:
             if response == ProcessTerminationScreen.RESPONSE_ALWAYS:
                 self.handle_toggle_auto_terminate_processes(True)
-            await asyncio.to_thread(processes.terminate_executables_in_folder, mq_folder)
+            await asyncio.to_thread(processes.terminate_processes, colliding, mq_folder)
         elif response == ProcessTerminationScreen.RESPONSE_NEVER:
             self.handle_toggle_auto_terminate_processes(False)
         else:
@@ -1981,9 +1987,41 @@ class Redfetch(App):
             return False
 
     def _start_post_update_program(self) -> None:
-        """Launch the configured 'Also start post-update' programs (called after MQ)."""
-        for command, cwd in utils.resolve_post_update_launch(self.current_env):
+        to_run, skipped = getattr(self, "_post_update_loadout", ([], []))
+        for program in skipped:
+            self.notify(f"{os.path.basename(program)} is already running; not starting another.")
+        for command, cwd in to_run:
             self.run_command(command, cwd)
+
+    def _post_update_session_start(self, main_screen) -> None:
+        def reset_button() -> None:
+            if main_screen:
+                self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
+
+        if not getattr(self, "_offer_mq_start", False):
+            reset_button()
+            return
+
+        auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
+        if auto_run is True:
+            self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+            self._start_post_update_program()
+            reset_button()
+        elif auto_run is False:
+            reset_button()
+        else:
+            def handle_vvmq_response(response: str) -> None:
+                if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
+                    if response == RunVVMQScreen.RESPONSE_ALWAYS:
+                        self.handle_toggle_auto_run_vvmq(True)
+                    self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
+                    self._start_post_update_program()
+                elif response == RunVVMQScreen.RESPONSE_NEVER:
+                    self.handle_toggle_auto_run_vvmq(False)
+                if main_screen:
+                    main_screen.reset_button("update_watched", "primary")
+                    main_screen.update_widget_states()
+            self.push_screen(RunVVMQScreen(), handle_vvmq_response)
 
     def update_complete(self, result: bool, button: Button) -> None:
         main_screen = self._get_main_screen()
@@ -2006,34 +2044,7 @@ class Redfetch(App):
                 input_widget.value = ""
                 self.set_timer(6, lambda: main_screen.reset_button("update_resource_id", "default"))
             elif button.id == "update_watched":
-                if sys.platform == 'win32':
-                    auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
-                    if auto_run is True:
-                        self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-                        self._start_post_update_program()
-                        if main_screen:
-                            self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
-                    elif auto_run is False:
-                        self._start_post_update_program()
-                        if main_screen:
-                            self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
-                    else:
-                        def handle_vvmq_response(response: str) -> None:
-                            if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
-                                if response == RunVVMQScreen.RESPONSE_ALWAYS:
-                                    self.handle_toggle_auto_run_vvmq(True)
-                                self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-                            elif response == RunVVMQScreen.RESPONSE_NEVER:
-                                self.handle_toggle_auto_run_vvmq(False)
-                            self._start_post_update_program()
-                            if main_screen:
-                                main_screen.reset_button("update_watched", "primary")
-                                main_screen.update_widget_states()
-                        self.push_screen(RunVVMQScreen(), handle_vvmq_response)
-                else:
-                    self._start_post_update_program()
-                    if main_screen:
-                        self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
+                self._post_update_session_start(main_screen)
         else:
             button.variant = "error"
             print("Some resources failed to update.")

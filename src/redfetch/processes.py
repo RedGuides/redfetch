@@ -11,6 +11,13 @@ import psutil
 
 IS_WINDOWS = sys.platform == "win32"
 
+# Common psutil failures while scanning processes.
+_PROC_GONE = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
 
 if IS_WINDOWS:
     from .unloadmq import force_remote_unload, get_eqgame_process_pids
@@ -49,11 +56,10 @@ def are_executables_running_in_folder(folder_path: str) -> List[Tuple[int, str]]
                 exe_path = proc.info.get("exe")
                 if not exe_path or not os.path.isfile(exe_path):
                     continue
-                normalized = os.path.normcase(os.path.normpath(exe_path))
-                if normalized in exec_paths:
+                if _norm(exe_path) in exec_paths:
                     print(f"Process '{exe_path}' (PID {proc.pid}) is currently running.")
                     running.append((proc.pid, exe_path))
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            except _PROC_GONE:
                 continue
         return running
     except Exception as exc:
@@ -61,63 +67,106 @@ def are_executables_running_in_folder(folder_path: str) -> List[Tuple[int, str]]
         return running
 
 
+def running_executable_paths() -> set[str]:
+    paths: set[str] = set()
+    for proc in psutil.process_iter(["exe"]):
+        try:
+            exe_path = proc.info.get("exe")
+            if exe_path:
+                paths.add(_norm(exe_path))
+        except _PROC_GONE:
+            continue
+    return paths
+
+
+def is_executable_running(exe_path: str, running: set[str] | None = None) -> bool:
+    if running is None:
+        running = running_executable_paths()
+    return _norm(exe_path) in running
+
+
+def _is_under_any(path: str, targets: Sequence[str]) -> bool:
+    normalized = Path(_norm(path))
+    return any(normalized.is_relative_to(target) for target in targets)
+
+
+def _has_module_under(pid: int, targets: Sequence[str]) -> bool:
+    try:
+        return any(
+            _is_under_any(p, targets)
+            for m in psutil.Process(pid).memory_maps()
+            if (p := getattr(m, "path", None))
+        )
+    except _PROC_GONE:
+        return True
+    except Exception as exc:
+        # Access failures are safer to treat as locks; otherwise the overwrite can fail later.
+        print(f"Could not inspect modules for PID {pid}: {exc}")
+        return True
+
+
+def _mq_module_holders(folder_path: str) -> dict[int, str]:
+    holders: dict[int, str] = dict(are_executables_running_in_folder(folder_path))
+    # eqgame lives outside MQ but can hold injected MQ modules open.
+    for pid in get_eqgame_process_pids():
+        if pid not in holders:
+            try:
+                holders[pid] = psutil.Process(pid).exe() or "eqgame.exe"
+            except _PROC_GONE:
+                holders[pid] = "eqgame.exe"
+    return holders
+
+
 def find_processes_locking_dirs(
     folder_path: str, target_dirs: Iterable[str]
 ) -> List[Tuple[int, str]]:
-    """Return processes whose mapped modules live under any of ``target_dirs`` (those files
-    can't be overwritten while the process is running).
-    """
     if not IS_WINDOWS:
         return []
 
-    normalized_targets = [
-        os.path.normcase(os.path.normpath(d)) for d in target_dirs if d
-    ]
-    if not normalized_targets:
+    targets = [_norm(d) for d in target_dirs if d]
+    if not targets:
         return []
 
-    candidates: dict[int, str] = {}
-    for pid, exe_path in are_executables_running_in_folder(folder_path):
-        candidates[pid] = exe_path
-    for pid in get_eqgame_process_pids():
-        if pid in candidates:
+    # (1) MQ/eqgame processes with a target-dir module mapped.
+    colliding: dict[int, str] = {
+        pid: exe
+        for pid, exe in _mq_module_holders(folder_path).items()
+        if _has_module_under(pid, targets)
+    }
+
+    # (2) Any process whose own executable sits under a target dir.
+    for proc in psutil.process_iter(["pid", "exe"]):
+        try:
+            exe_path = proc.info.get("exe")
+            if exe_path and proc.pid not in colliding and _is_under_any(exe_path, targets):
+                colliding[proc.pid] = exe_path
+        except _PROC_GONE:
             continue
-        try:
-            candidates[pid] = psutil.Process(pid).exe() or "eqgame.exe"
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            candidates[pid] = "eqgame.exe"
 
-    def _maps_under_target(pid: int) -> bool:
-        try:
-            for mmap in psutil.Process(pid).memory_maps():
-                path = getattr(mmap, "path", None)
-                if not path:
-                    continue
-                normalized = Path(os.path.normcase(os.path.normpath(path)))
-                if any(normalized.is_relative_to(target) for target in normalized_targets):
-                    return True
-            return False
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            return True  # can't see the maps -> assume collision to stay safe
-        except Exception as exc:
-            print(f"Could not inspect modules for PID {pid}: {exc}")
-            return True
-
-    colliding: List[Tuple[int, str]] = []
-    for pid, exe_path in candidates.items():
-        if _maps_under_target(pid):
-            colliding.append((pid, exe_path))
-    return colliding
+    return list(colliding.items())
 
 
-def terminate_executables_in_folder(folder_path: str) -> None:
-    """Terminate running executables inside ``folder_path`` and unload MacroQuest."""
+def terminate_processes(
+    processes_to_close: Sequence[Tuple[int, str]], mq_folder: str | None = None
+) -> None:
+    """Close colliders; if MQ is involved, close the MQ folder and unload eqgame."""
     if not IS_WINDOWS:
         print("Terminating executables is only supported on Windows platforms.")
         return
 
-    running = are_executables_running_in_folder(folder_path)
-    for pid, exe_path in running:
+    eqgame_pids = set(get_eqgame_process_pids())
+    mq_folder_exes = dict(are_executables_running_in_folder(mq_folder)) if mq_folder else {}
+    mq_involved = any(
+        pid in eqgame_pids or pid in mq_folder_exes for pid, _ in processes_to_close
+    )
+
+    to_close = dict(processes_to_close)
+    if mq_involved:
+        to_close.update(mq_folder_exes)
+
+    for pid, exe_path in to_close.items():
+        if pid in eqgame_pids:
+            continue  # unload MacroQuest from the game, but do not kill the game
         try:
             proc = psutil.Process(pid)
             proc.terminate()
@@ -128,10 +177,11 @@ def terminate_executables_in_folder(folder_path: str) -> None:
         except (psutil.AccessDenied, psutil.ZombieProcess) as err:
             print(f"Could not terminate process: {err}")
 
-    try:
-        force_remote_unload()
-    except Exception as exc:
-        print(f"Error unloading MacroQuest: {exc}")
+    if mq_involved:
+        try:
+            force_remote_unload()
+        except Exception as exc:
+            print(f"Error unloading MacroQuest: {exc}")
 
 
 def run_executable(folder_path: str, executable_name: str, args: Sequence[str] | None = None) -> bool:

@@ -77,9 +77,9 @@ def initialize_db_only(server: "Optional[Env]" = None):
 # ===== CLI prompt helpers =====
 
 def prompt_terminate_processes(
-    running_executables: "list[tuple[int, str]]",
+    running_executables: "list[tuple[int, str]]", mq_folder: str | None = None
 ) -> None:
-    """Handle the 'AUTO_TERMINATE_PROCESSES' prompt and action."""
+    """Handle the 'AUTO_TERMINATE_PROCESSES' prompt and close the colliding processes."""
     if not running_executables:
         return
 
@@ -88,7 +88,7 @@ def prompt_terminate_processes(
     )
 
     if auto_terminate is True:
-        processes.terminate_processes(running_executables)
+        processes.terminate_processes(running_executables, mq_folder)
         return
 
     if auto_terminate is False:
@@ -102,9 +102,9 @@ def prompt_terminate_processes(
         default="yes",
     )
     if user_choice == "yes":
-        processes.terminate_processes(running_executables)
+        processes.terminate_processes(running_executables, mq_folder)
     elif user_choice == "always":
-        processes.terminate_processes(running_executables)
+        processes.terminate_processes(running_executables, mq_folder)
         config.update_setting(["AUTO_TERMINATE_PROCESSES"], True)
         console.print("Updated settings to always terminate processes.")
     elif user_choice == "never":
@@ -150,15 +150,15 @@ def prompt_navmesh_opt_in() -> bool | None:
         return False  # One-time no
 
 
-def prompt_auto_run_macroquest() -> None:
-    """Prompt to start MacroQuest after a successful update, if not configured."""
+def prompt_auto_run_macroquest() -> bool:
+    """Prompt after a successful update."""
     if os.environ.get("CI") == "true" or sys.platform != "win32":
-        return
+        return False
 
     auto_run = config.settings.from_env(config.settings.ENV).get("AUTO_RUN_VVMQ", None)
 
     if auto_run is False:
-        return
+        return False
 
     if auto_run is None:
         user_choice = Prompt.ask(
@@ -172,24 +172,25 @@ def prompt_auto_run_macroquest() -> None:
         elif user_choice == "never":
             config.update_setting(["AUTO_RUN_VVMQ"], False)
             console.print("Updated settings to never run MacroQuest after updates.")
-            return
+            return False
         elif user_choice == "no":
             console.print("Not starting MacroQuest.")
-            return
+            return False
 
     mq_path = utils.get_vvmq_path()
     if mq_path:
         processes.run_executable(mq_path, "MacroQuest.exe")
-    else:
-        console.print("MacroQuest path not found. Please check your configuration.")
+        return True
+    console.print("MacroQuest path not found. Please check your configuration.")
+    return False
 
 
-def run_post_update_launch() -> None:
-    """Launch the configured post-update programs, skipping any already running."""
+def run_post_update_launch(running: set[str] | None = None) -> None:
+    """Skipping any already running. Pass *running* to reuse a caller's scan."""
     if os.environ.get("CI") == "true":
         return
 
-    to_run, skipped = utils.resolve_post_update_launch_filtered(config.settings.ENV)
+    to_run, skipped = utils.resolve_post_update_launch_filtered(config.settings.ENV, running)
     for program in skipped:
         console.print(f"{os.path.basename(program)} is already running; not starting another.")
     for command, cwd in to_run:
@@ -216,7 +217,7 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
         colliding = await asyncio.to_thread(
             processes.find_processes_locking_dirs, mq_folder, target_dirs
         )
-        prompt_terminate_processes(colliding)
+        prompt_terminate_processes(colliding, mq_folder)
 
     navmesh_override = prompt_navmesh_opt_in()
 
@@ -226,8 +227,13 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
         on_plan_ready=_close_processes_if_needed,
     )
     if success:
-        prompt_auto_run_macroquest()
-        run_post_update_launch()
+        # "Also start" means in addition to MQ, not instead of it.
+        running = (
+            await asyncio.to_thread(processes.running_executable_paths)
+            if sys.platform == "win32" else None
+        )
+        if utils.should_offer_mq_start(running) and prompt_auto_run_macroquest():
+            run_post_update_launch(running)
         return True
     return False
 
