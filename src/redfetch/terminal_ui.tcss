@@ -75,10 +75,6 @@ Label {
     display: none;
 }
 
-.visible {
-    display: block;
-}
-
 /* Fetch Grid */
 
 #fetch_scroll {

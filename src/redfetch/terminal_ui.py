@@ -294,11 +294,24 @@ class FetchTab(ScrollableContainer):
         self._log_search_index = -1
         self._log_search_term = ""
 
-    def sync_from_app(self, app: "Redfetch") -> None:
-        """Update this tab's widgets from top-level app state."""
-        self._update_from_state()
+    def on_mount(self) -> None:
+        for attr in ("mq_down", "is_updating", "progress_visible", "interface_running",
+                     "download_folder", "current_env", "_offer_active"):
+            self.watch(self.app, attr, self._recompute)
+        self.watch(self.app, "username", self._refresh_welcome)
+        self.watch(self.app, "is_level_2", self._refresh_welcome)
 
-    def _update_from_state(self) -> None:
+    def _refresh_welcome(self) -> None:
+        app: "Redfetch" = self.app  # type: ignore[assignment]
+        if not app.username:
+            return  # keep the compose default until identity resolves
+        if app.is_level_2:
+            greeting = f"[italic]Hail, [bold]{app.username}![/bold][/italic]"
+        else:
+            greeting = f"Hey {app.username}, you're level 1 😞"
+        self.query_one("#welcome_label", Label).update(greeting)
+
+    def _recompute(self) -> None:
         """Apply current app state to widgets."""
         app: "Redfetch" = self.app  # type: ignore[assignment]
         busy = app.is_updating
@@ -321,7 +334,7 @@ class FetchTab(ScrollableContainer):
             update_watched_button.variant = "default"
         else:
             if app.is_updating:
-                if getattr(app, "_offer_active", False):
+                if app._offer_active:
                     # sync already finished; the restart/offer flow can't be cancelled
                     update_watched_button.label = "Finishing update... 🏁"
                     update_watched_button.tooltip = "Waiting on the post-update prompts."
@@ -342,7 +355,6 @@ class FetchTab(ScrollableContainer):
             update_watched_button.refresh(layout=True)
 
         # Progress bar and resource-id input are a pair: bar shown ⇒ input hidden.
-        # Driven by app.progress_visible so any resync (e.g. after a covering modal) restores them.
         progress_bar = self.query_one("#update_progress", ProgressBar)
         resource_input = self.query_one("#resource_id_input", Input)
         if app.progress_visible:
@@ -577,8 +589,19 @@ class SettingsTab(ScrollableContainer):
                 tooltip="Uninstall redfetch and guide through manual cleanup.",
             )
 
-    def sync_from_app(self, app: "Redfetch") -> None:
-        """Apply top-level app state to Settings tab widgets."""
+    def on_mount(self) -> None:
+        # recompute's per-env helpers to read the new env.
+        for attr in ("current_env", "download_folder", "eq_path", "is_updating", "interface_running"):
+            self.watch(self.app, attr, self._recompute)
+
+    def on_show(self) -> None:
+        # Only the shortcut switch needs an fs re-probe; _recompute would clobber path-input text
+ 
+        self._refresh_desktop_shortcut()
+
+    def _recompute(self) -> None:
+        """Derive every Settings widget from app state + per-env config."""
+        app: "Redfetch" = self.app  # type: ignore[assignment]
         busy = app.is_updating or app.interface_running
 
         # Disable entire tab while busy
@@ -653,17 +676,20 @@ class SettingsTab(ScrollableContainer):
             with self.prevent(Select.Changed):
                 eq_maps_select.value = new_eq_maps_value
 
-        # Desktop shortcut state (Windows-only)
-        if sys.platform == "win32":
-            try:
-                shortcut_switch = self.query_one("#desktop_shortcut", Switch)
-            except Exception:
-                shortcut_switch = None
-            if shortcut_switch:
-                exists = desktop_shortcut.get_shortcut_path().exists()
-                if shortcut_switch.value != exists:
-                    with self.prevent(Switch.Changed):
-                        shortcut_switch.value = exists
+        self._refresh_desktop_shortcut()
+
+    def _refresh_desktop_shortcut(self) -> None:
+        """Sync the Desktop-shortcut switch to the filesystem (win32; no reactive source)."""
+        if sys.platform != "win32":
+            return
+        try:
+            shortcut_switch = self.query_one("#desktop_shortcut", Switch)
+        except Exception:
+            return
+        exists = desktop_shortcut.get_shortcut_path().exists()
+        if shortcut_switch.value != exists:
+            with self.prevent(Switch.Changed):
+                shortcut_switch.value = exists
 
     def update_vvmq_path_display(self) -> None:
         """Update the VVMQ path input based on the current environment."""
@@ -848,12 +874,19 @@ class ShortcutsTab(ScrollableContainer):
                 ),
             )
 
-    def sync_from_app(self, app: "Redfetch") -> None:
-        """Apply top-level app state to Shortcuts tab widgets."""
-        busy = app.is_updating
+    def on_mount(self) -> None:
+        for attr in ("is_updating", "download_folder", "eq_path", "current_env"):
+            self.watch(self.app, attr, self._recompute)
+
+    def on_show(self) -> None:
+        self._recompute()  # external installs/deletes fire no reactive; re-probe fs on show
+
+    def _recompute(self) -> None:
+        """Derive button enabled/disabled state from app state + filesystem probes."""
+        app: "Redfetch" = self.app  # type: ignore[assignment]
 
         # Disable entire tab while busy.
-        self.disabled = busy
+        self.disabled = app.is_updating
 
         # VVMQ-related executables
         vvmq_path = utils.get_vvmq_path()
@@ -992,6 +1025,22 @@ class AccountTab(ScrollableContainer):
                 classes="web_link",
             )
 
+    def on_mount(self) -> None:
+        # observe app-owned state directly
+        self.watch(self.app, "username", self._refresh_account_state)
+        self.watch(self.app, "is_level_2", self._refresh_account_state)
+
+    def _refresh_account_state(self) -> None:
+        app: "Redfetch" = self.app  # type: ignore[assignment]
+        self.query_one("#btn_ding", Button).display = not app.is_level_2
+        if not app.username:
+            return  # keep the "Loading..." compose default until the level check resolves
+        if app.is_level_2:
+            text = f"[italic][bold]{app.username}, thank you for being level 2[/bold][/italic] 💛"
+        else:
+            text = f"Hey {app.username}, you're level 1 😞 some resources won't be downloaded."
+        self.query_one("#account_label", Label).update(text)
+
     #
     # Event handlers for widgets on this tab
     #
@@ -1056,40 +1105,11 @@ class MainScreen(Screen):
         self.query_one("#executables_grid").border_title = "Executables ⚡"
         self.query_one("#folders_grid").border_title = "Folders 📁"
         self.query_one("#files_grid").border_title = "Files 📎"
-
-        # Apply initial enabled/disabled state across the UI using tab-local reactives
-        self.sync_tabs_from_app(self.app)  # type: ignore[arg-type]
-
-    #
-    # Widget state update methods
-    #
-
-    def update_widget_states(self) -> None:
-        """Update the state of all widgets based on application state."""
-        self.sync_tabs_from_app(self.app)  # type: ignore[arg-type]
-
-    def sync_tabs_from_app(self, app: "Redfetch") -> None:
-        """Push top-level app state in to the tab widgets."""
-        # Each tab owns its own tab-local reactive view of app state.
-        self.query_one(FetchTab).sync_from_app(app)
-        self.query_one(SettingsTab).sync_from_app(app)
-        self.query_one(ShortcutsTab).sync_from_app(app)
+        # Initial widget state is applied by each tab's own on_mount watch wiring (init=True).
 
     #
     # UI update helpers
     #
-
-    def update_welcome_label(self, greeting: str) -> None:
-        welcome_label = self.query_one("#welcome_label", Label)
-        welcome_label.update(greeting)
-
-    def update_account_label(self, greetingacct: str) -> None:
-        account_label = self.query_one("#account_label", Label)
-        account_label.update(greetingacct)
-
-    def show_ding_button(self, show: bool) -> None:
-        ding_button = self.query_one("#btn_ding", Button)
-        ding_button.display = show
 
     def reset_button(self, button_id: str, variant: str = "default") -> None:
         button = self.query_one(f"#{button_id}", Button)
@@ -1125,10 +1145,14 @@ class Redfetch(App):
     download_folder: reactive[str] = reactive("")
     eq_path: reactive[str] = reactive("")
     current_env: reactive[str] = reactive(config.settings.ENV)
+    # User account identity and permissions: set reactively by background workers, observed by AccountTab for live updates
+    username: reactive[str] = reactive("")
+    is_level_2: reactive[bool] = reactive(False)
 
     # Post-update offer handoff between the update worker and the offer worker
     _pending_offer: post_update.PendingOffer | None = None
-    _offer_active: bool = False  # a dispatched offer holds the is_updating gate
+    # This state tracks whether an offer is actively displayed; it's reactive to trigger FetchTab updates when changed.
+    _offer_active: reactive[bool] = reactive(False)
 
     CSS_PATH = "terminal_ui.tcss"
 
@@ -1255,32 +1279,11 @@ class Redfetch(App):
         self.workers.cancel_all()
 
     #
-    # Watchers - delegate to MainScreen if it's active
+    # Watchers
     #
-
-    def watch_is_updating(self, old_value: bool, new_value: bool) -> None:
-        """Update all widgets when updating state changes."""
-        self._update_main_screen()
-
-    def watch_progress_visible(self, old_value: bool, new_value: bool) -> None:
-        """Show/hide the progress bar (and its paired input) via a normal resync."""
-        self._update_main_screen()
-
-    def watch_interface_running(self, old_value: bool, new_value: bool) -> None:
-        """Update all widgets when interface running state changes."""
-        self._update_main_screen()
-
-    def watch_mq_down(self, old: bool | None, new: bool | None) -> None:
-        """Update UI when MQ status changes."""
-        self._update_main_screen()
-
-    def watch_download_folder(self, old: str, new: str) -> None:
-        """Update relevant widgets when the download folder changes."""
-        self._update_main_screen()
-
-    def watch_eq_path(self, old: str, new: str) -> None:
-        """Update relevant widgets when the EverQuest path changes."""
-        self._update_main_screen()
+    # Only current_env is watched reactively at the App (Application) level;
+    # all other reactive values are watched and updated directly by the tab Views themselves
+    # (using self.watch), so they remain live and responsive even when the MainScreen is not visible.
 
     def watch_current_env(self, old: str, new: str) -> None:
         """Handle changes to the current environment."""
@@ -1301,12 +1304,8 @@ class Redfetch(App):
         new_theme = settings_for_env.get('THEME', 'textual-dark')
         self.theme = new_theme
 
-        # Re-check MQ status and notify
         self.check_mq_status_worker()
         self.notify(f"Server type changed to: {new}")
-
-        # Let the active screen sync its tab state from the app
-        self._update_main_screen()
 
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
@@ -1330,12 +1329,6 @@ class Redfetch(App):
         if stack and isinstance(stack[0], MainScreen):
             return stack[0]
         return None
-
-    def _update_main_screen(self) -> None:
-        """Resync widget state onto the main screen even if a modal covers it."""
-        main_screen = self._base_main_screen()
-        if main_screen:
-            main_screen.update_widget_states()
 
     #
     # Action handlers
@@ -1796,7 +1789,8 @@ class Redfetch(App):
                     print("bye bye!")
                     self.exit()
             else:
-                username = getattr(self, "username", "You")
+                # username is always a reactive
+                username = self.username or "You"
                 self.notify(f"{username} enjoys clicking things for no reason.")
 
         self.push_screen(UninstallScreen(), handle_uninstall_response)
@@ -1862,8 +1856,6 @@ class Redfetch(App):
             elif worker.name == "_prepare_redguides_interface_worker":
                 if state in {WorkerState.ERROR, WorkerState.CANCELLED}:
                     self.interface_running = False
-
-        self._update_main_screen()
 
     @work(exclusive=True, group="mq_status_group")
     async def check_mq_status_worker(self):
@@ -1984,9 +1976,10 @@ class Redfetch(App):
         try:
             await post_update.execute(pending, _TuiPostUpdate(self))
         finally:
+            # Tab state is recalculated based on is_updating/_offer_active, which are updated in on_worker_state_changed
+     
             screen = main_screen or self._get_main_screen()
             if screen:
-                screen.update_widget_states()
                 self.set_timer(6, lambda: screen.reset_button("update_watched", "primary"))
 
     def update_complete(self, result, button: Button) -> None:
@@ -2054,8 +2047,7 @@ class Redfetch(App):
         else:
             desktop_shortcut.remove_shortcut()
             self.notify("Desktop shortcut removed.")
-
-        self._update_main_screen()
+        # The switch already reflects the user's toggle; SettingsTab.on_show re-probes the fs.
 
     def handle_reset_downloads(self) -> None:
         if self.is_updating:
@@ -2106,26 +2098,12 @@ class Redfetch(App):
     
     @work
     async def load_user_level(self):
-        main_screen = self._get_main_screen()
-        self.username = await auth.get_username()
+        username = await auth.get_username()
         headers = await auth.get_api_headers()
-        if await api.is_kiss_downloadable(headers):
-            greeting = f"[italic]Hail, [bold]{self.username}![/bold][/italic]"
-            greetingacct = (
-                f"[italic][bold]{self.username}, thank you for being level 2[/bold][/italic] 💛"
-            )
-            if main_screen:
-                main_screen.show_ding_button(False)
-        else:
-            greeting = f"Hey {self.username}, you're level 1 😞"
-            greetingacct = (
-                f"Hey {self.username}, you're level 1 😞 some resources won't be downloaded."
-            )
-            if main_screen:
-                main_screen.show_ding_button(True)
-        if main_screen:
-            main_screen.update_welcome_label(greeting)
-            main_screen.update_account_label(greetingacct)
+        level_2 = await api.is_kiss_downloadable(headers)
+        # AccountTab + FetchTab watch these and render their own label/button/welcome
+        self.is_level_2 = level_2
+        self.username = username  # set last so the recomputes see the resolved level
 
     def handle_ding_check(self) -> None:
         """Check if user has upgraded to level 2 and update UI accordingly."""
@@ -2139,23 +2117,12 @@ class Redfetch(App):
         if os.environ.get("REDFETCH_CRASH_TEST") == "ding":
             raise RuntimeError("Intentional crash test from _check_ding_level_worker.")
 
-        main_screen = self._get_main_screen()
         headers = await auth.get_api_headers()
-        
         # Force a fresh check, bypassing cache
-        is_level_2 = await api.is_kiss_downloadable(headers, force_refresh=True)
-        
-        if is_level_2:
-            # User is now level 2! Update the UI
-            username = getattr(self, 'username', await auth.get_username())
-            greeting = f"[italic]Hail, [bold]{username}![/bold][/italic]"
-            greetingacct = (
-                f"[italic][bold]{username}, thank you for being level 2[/bold][/italic] 💛"
-            )
-            if main_screen:
-                main_screen.show_ding_button(False)
-                main_screen.update_welcome_label(greeting)
-                main_screen.update_account_label(greetingacct)
+        if await api.is_kiss_downloadable(headers, force_refresh=True):
+            # User is now level 2! AccountTab + FetchTab react to the reactives below.
+            self.username = self.username or await auth.get_username()
+            self.is_level_2 = True
             self.notify("🎉 DING! Welcome to level 2!", severity="information")
         else:
             # Still level 1, send them to the signup page
