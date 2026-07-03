@@ -93,7 +93,7 @@ def test_cancel_before_stage_build_returns_false(tmp_path):
     ) as execute_mock:
         ok = asyncio.run(sync.run_sync(db_path, headers={}, resource_ids=None))
 
-    assert ok is False
+    assert ok.success is False
     assert execute_mock.await_count == 0
 
 
@@ -120,4 +120,4 @@ def test_cancel_during_execution_returns_false(tmp_path):
     ):
         ok = asyncio.run(sync.run_sync(db_path, headers={}, resource_ids=None))
 
-    assert ok is False
+    assert ok.success is False

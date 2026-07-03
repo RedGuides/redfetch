@@ -24,6 +24,7 @@ dependencies = [
     "cachetools~=7.1",
     "diskcache~=5.6",
     "dynaconf~=3.2,<3.3",  # 3.3 has a bug
+    "filelock~=3.29",
     "httpx[http2]~=0.28",
     "keepachangelog~=2.0",
     "keyring~=25.7",

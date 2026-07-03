@@ -238,16 +238,16 @@ Label {
 #dropdowns_grid {
     min-width: 30;
 }
-#dl_path_input, #eq_path_input, #vvmq_path_input, #auto_terminate_processes, #auto_run_vvmq, #post_update_launch, #desktop_shortcut {
+#dl_path_input, #eq_path_input, #vvmq_path_input, #auto_run_vvmq, #post_update_launch, #desktop_shortcut {
     column-span: 3;
 }
-#auto_terminate_processes, #auto_run_vvmq, #post_update_launch {
+#auto_run_vvmq, #post_update_launch {
     layout: horizontal;
     width: auto;
     height: auto;
     background: transparent;
 }
-#auto_terminate_processes > RadioButton, #auto_run_vvmq > RadioButton, #post_update_launch > Checkbox {
+#auto_run_vvmq > RadioButton, #post_update_launch > Checkbox {
     width: auto;
     margin-right: 2;
 }
@@ -410,6 +410,16 @@ NavMeshPromptScreen Button {
     width: 100%;
 }
 
+CloseEQScreen {
+    align: center top;
+    background: $background-darken-2 70%;
+}
+
+CloseEQScreen Center {
+    column-span: 2;
+    width: 1fr;
+}
+
 #dialog {
     grid-size: 2;
     grid-gutter: 1 2;
@@ -426,6 +436,10 @@ NavMeshPromptScreen Button {
     height: 1fr;
     width: 1fr;
     content-align: center middle;
+}
+
+#dialog.two_row {
+    height: 9;
 }
 
 #nomq:hover {
@@ -455,67 +469,6 @@ NavMeshPromptScreen Button {
     border-top: tall $error 15%;
 }
 
-ProcessTerminationScreen {
-    align: center top;
-    background: $background-darken-2 70%; 
-}
-
-ProcessTerminationScreen Button {
-    width: 100%;
-}
-
-#process_dialog {
-    grid-size: 2;
-    grid-gutter: 0 1;
-    margin: 2 1;
-    padding: 0 1;
-    width: 50;
-    height: 19;
-    border: thick $primary-background-darken-3;
-    background: $surface;
-}
-
-#process_message {
-    color: $text-primary;
-    column-span: 2;
-    height: 40;
-    width: 100%;
-    content-align: center middle;
-}
-
-#close_them {
-    column-span: 2;
-    color: $text-error;
-    width: 100%;
-    content-align: center middle;
-}
-
-#noterminate:hover {
-    background: $surface-darken-1;
-    border-top: tall $surface;
-}
-#alwaysterminate {
-    background: $primary 15%;
-    border-top: tall $primary-lighten-3 15%;
-    border-bottom: tall $primary-darken-3 15%;
-    color: $text-muted;
-    width: 17;
-}
-#alwaysterminate:hover {
-    background: $primary-darken-2 15%;
-    border-top: tall $primary 15%;
-}
-#neverterminate {
-    background: $error 15%;
-    border-top: tall $error-lighten-1 15%;
-    border-bottom: tall $error-darken-1 15%;
-    color: $text-muted;
-    width: 17;
-}
-#neverterminate:hover {
-    background: $error-darken-1 15%;
-    border-top: tall $error 15%;
-}
 UninstallScreen {
     align: center top;
     background: $background-darken-2 70%; 

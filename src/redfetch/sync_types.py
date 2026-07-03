@@ -346,3 +346,19 @@ class PreparedSync:
     remote_snapshot: RemoteSnapshot
     local_snapshot: LocalSnapshot
     execution_plan: ExecutionPlan
+
+
+@dataclass(frozen=True, slots=True)
+class SyncOutcome:
+    """Truthy on success so existing ``if result:`` callers keep working."""
+
+    success: bool
+    vvmq_updated: bool = False
+    status: Literal["ok", "failed", "busy", "cancelled"] | None = None
+
+    def __post_init__(self) -> None:
+        if self.status is None:
+            object.__setattr__(self, "status", "ok" if self.success else "failed")
+
+    def __bool__(self) -> bool:
+        return self.success

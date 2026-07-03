@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 # Local
@@ -41,10 +42,10 @@ def _resolve_current_special_path(resource_id: str) -> str | None:
 
 
 def is_safe_path(base_directory: str, target_path: str) -> bool:
-    """Check for directory traversal."""
+    """Directory-traversal check; is_relative_to is False (not ValueError) across drives."""
     abs_base = os.path.realpath(base_directory)
     abs_target = os.path.realpath(target_path)
-    return os.path.commonpath([abs_base, abs_target]) == abs_base
+    return Path(abs_target).is_relative_to(abs_base)
 
 
 def get_current_vvmq_id(settings_env: str | None = None) -> str | None:
@@ -77,19 +78,37 @@ def get_myseq_path() -> str | None:
     return _resolve_current_special_path(myseq_id)
 
 
-def macroquest_exe_path() -> str | None:
-    """Full path to MacroQuest.exe for the active environment, if VVMQ is configured."""
-    vvmq = get_vvmq_path()
-    return os.path.join(vvmq, "MacroQuest.exe") if vvmq else None
-
-
-def should_offer_mq_start(running: set[str] | None = None) -> bool:
-    from redfetch import processes  # local import: processes imports utils
+def macroquest_running(running: set[str] | None = None) -> bool:
+    """Session detection — the loader never runs as the canonical MacroQuest.exe."""
+    from redfetch import processes
 
     if sys.platform != "win32":
         return False
-    mq_path = macroquest_exe_path()
-    return bool(mq_path) and not processes.is_executable_running(mq_path, running)
+    vvmq = get_vvmq_path()
+    return bool(vvmq) and processes.macroquest_session_running(vvmq, running)
+
+
+def should_offer_mq_start(running: set[str] | None = None) -> bool:
+    """MQ is configured and no session is running — the cold-start surface guard."""
+    from redfetch import processes
+
+    if sys.platform != "win32":
+        return False
+    vvmq = get_vvmq_path()
+    return bool(vvmq) and not processes.macroquest_session_running(vvmq, running)
+
+
+def sweep_stale_update_debris() -> None:
+    """Sweep .rfnew/.rfold debris across install dirs at session start."""
+    from redfetch import download
+
+    for get_path in (get_vvmq_path, get_myseq_path, get_current_download_folder):
+        try:
+            path = get_path()
+            if path and os.path.isdir(path):
+                download.sweep_stale_swap_files(path)
+        except Exception:
+            continue
 
 
 def get_current_download_folder() -> str:
@@ -231,24 +250,11 @@ def resolve_post_update_launch_filtered(
     for command, cwd in resolve_post_update_launch(env):
         program = _command_program(command)
         if program and os.path.isfile(program) and \
-                os.path.normcase(os.path.normpath(program)) in running:
+                processes.is_executable_running(program, running):
             skipped.append(program)
             continue
         to_run.append((command, cwd))
     return to_run, skipped
-
-
-def plan_post_update_session(
-    env: str | None = None,
-) -> tuple[bool, list[tuple[list[str] | str, str | None]], list[str]]:
-    from redfetch import processes
-
-    if sys.platform != "win32":
-        return False, [], []
-    running = processes.running_executable_paths()
-    offer_mq = should_offer_mq_start(running)
-    to_run, skipped = resolve_post_update_launch_filtered(env, running) if offer_mq else ([], [])
-    return offer_mq, to_run, skipped
 
 
 def _resolve_launch_target(

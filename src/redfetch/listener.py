@@ -89,9 +89,14 @@ async def handle_download(request: web.Request) -> web.Response:
     try:
         resource_id_str = str(resource_id)
         db_path = store.get_db_path(db_name)
-        success = await sync.run_sync(db_path, headers, resource_ids=[resource_id_str])
-        if success:
+        outcome = await sync.run_sync(db_path, headers, resource_ids=[resource_id_str])
+        if outcome.success:
             return web.json_response({"success": True, "message": "Download completed successfully."})
+        if outcome.status == "busy":
+            return web.json_response(
+                {"success": False, "message": "Another update is already in progress; please retry shortly."},
+                status=503, headers={"Retry-After": "5"},
+            )
         return web.json_response({"success": False, "message": "Download failed due to internal error."}, status=500)
     except Exception as e:
         log.error("Error during download: %s", e, exc_info=True)
@@ -105,10 +110,15 @@ async def handle_download_watched(request: web.Request) -> web.Response:
 
     try:
         db_path = store.get_db_path(db_name)
-        success = await sync.run_sync(db_path, headers)
-        if success:
+        outcome = await sync.run_sync(db_path, headers)
+        if outcome.success:
             return web.json_response(
                 {"success": True, "message": "All watched resources downloaded successfully."}
+            )
+        if outcome.status == "busy":
+            return web.json_response(
+                {"success": False, "message": "Another update is already in progress; please retry shortly."},
+                status=503, headers={"Retry-After": "5"},
             )
         return web.json_response(
             {"success": False, "message": "Download of one or more resources failed."}, status=500

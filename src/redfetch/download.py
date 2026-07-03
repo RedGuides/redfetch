@@ -1,8 +1,12 @@
 # standard
 import os
+import glob
 import shutil
-import time
 import hashlib
+import stat
+import sys
+import time
+import zlib
 from zipfile import ZipFile, is_zipfile
 import asyncio
 
@@ -206,6 +210,7 @@ def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=Fa
 
             if protected_files is None:
                 protected_files = config.settings.from_env(config.settings.ENV).PROTECTED_FILES_BY_RESOURCE.get(resource_id, [])
+            sweep_stale_swap_files(extract_to)
             if should_flatten:
                 extract_flattened(zip_ref, extract_to, protected_files)
             else:
@@ -218,6 +223,7 @@ def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=Fa
 def extract_flattened(zip_ref, extract_to, protected_files):
     print(f"Flattening extraction to {extract_to}")
     protected_files_lower = {f.lower() for f in protected_files}
+    pairs = []
     for member in zip_ref.infolist():
         filename = os.path.basename(member.filename)
         if not filename:
@@ -228,14 +234,16 @@ def extract_flattened(zip_ref, extract_to, protected_files):
             print(f"Skipping protected file {filename}")
             continue
         if is_safe_path(extract_to, normalized_path):
-            extract_zip_member(zip_ref, member, normalized_path)
+            pairs.append((member, normalized_path))
         else:
             print(f"Skipping unsafe file {member.filename}")
+    _extract_members_staged(zip_ref, pairs)
 
 
 def extract_with_structure(zip_ref, extract_to, protected_files):
     print(f"Extracting with structure to {extract_to}")
     protected_files_lower = {f.lower() for f in protected_files}
+    pairs = []
     for member in zip_ref.infolist():
         target_path = os.path.join(extract_to, member.filename)
         normalized_path = os.path.normpath(target_path)
@@ -248,45 +256,199 @@ def extract_with_structure(zip_ref, extract_to, protected_files):
         if member.is_dir():
             os.makedirs(normalized_path, exist_ok=True)
             continue
-        extract_zip_member(zip_ref, member, normalized_path)
+        pairs.append((member, normalized_path))
+    _extract_members_staged(zip_ref, pairs)
 
 
-def extract_zip_member(zip_ref, member, target_path):
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    max_retries = 3
-    retry_delay = 10  # seconds
+def _extract_members_staged(zip_ref, pairs) -> None:
+    """Stage every member to a sibling ``.rfnew``, then swap all in."""
+    # duplicate targets, last member wins
+    fold = str.lower if sys.platform == "darwin" else os.path.normcase
+    deduped = {fold(target): (member, target) for member, target in pairs}
+    staged = []  # (tmp_path, target_path)
+    try:
+        for member, target_path in deduped.values():
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            if _member_matches_disk(zip_ref, member, target_path):
+                continue
+            # sibling temp: same volume, so the swap is an atomic rename
+            tmp_path = target_path + ".rfnew"
+            try:
+                with zip_ref.open(member) as source, open(tmp_path, 'wb') as target:
+                    shutil.copyfileobj(source, target)
+            except BaseException:
+                _remove_if_exists(tmp_path)
+                raise
+            staged.append((tmp_path, target_path))
+    except BaseException as e:  # cancellation must clean up too
+        for tmp_path, _ in staged:
+            _remove_if_exists(tmp_path)
+        if isinstance(e, Exception):
+            print(f"Extraction failed while staging; no files were changed: {e}")
+        raise
 
-    for attempt in range(max_retries):
+    failed = []
+    for tmp_path, target_path in staged:
         try:
-            with zip_ref.open(member) as source, open(target_path, 'wb') as target:
-                shutil.copyfileobj(source, target)
-            return  # Successful extraction, exit the function
+            displaced = _swap_into_place(tmp_path, target_path)
         except PermissionError:
-            file_name = os.path.basename(target_path)
-            folder_path = os.path.dirname(target_path)
-            
-            error_msg = [
-                f"\nPermission Error: Unable to extract {file_name}",
-                "\nThis could be because:",
-                "1. The file is currently in use by another program (e.g., MacroQuest, EQBCS)",
-                "2. You don't have write permissions for this location",
-                "\nPossible solutions:",
-                "1. Close all EverQuest-related programs (MacroQuest, EQBCS, etc.)",
-                f"2. Change the installation directory in settings to a location you own",
-                f"3. Manually set write permissions on: {folder_path}",
-            ]
-            
-            if attempt < max_retries - 1:
-                error_msg.append(f"\nRetrying in {retry_delay} seconds... (Attempt {attempt + 1} of {max_retries})")
-                print("\n".join(error_msg))
-                time.sleep(retry_delay)
-            else:
-                error_msg.append("\nMaximum retry attempts reached. Please resolve the permission issue and try again.")
-                print("\n".join(error_msg))
-                raise PermissionError(f"Failed to extract {file_name} after {max_retries} attempts.")
-        except Exception as e:
-            print(f"Unexpected error while extracting {os.path.basename(target_path)}: {str(e)}")
-            raise
+            _report_locked_target(target_path)
+            failed.append(target_path)
+            continue
+        except OSError as e:  # e.g. AV quarantined the .rfnew; don't abort the rest
+            print(f"Could not update {os.path.basename(target_path)}: {e}")
+            _remove_if_exists(tmp_path)
+            failed.append(target_path)
+            continue
+        if displaced:
+            print(f"Staged update for {os.path.basename(target_path)}; applies on next launch.")
+    if failed:
+        names = ", ".join(os.path.basename(path) for path in failed)
+        raise OSError(f"Could not update file(s): {names}")
+
+
+def _swap_into_place(tmp_path: str, target_path: str) -> bool:
+    """On Windows, files that are in use (like loaded executables) can't be overwritten directly. 
+    Instead, we rename the locked file out of the way and put the new one in its place."""
+    try:
+        os.replace(tmp_path, target_path)
+        return False
+    except PermissionError:
+        pass
+
+    if os.path.isdir(target_path):
+        # a directory shadowing a file member
+        _remove_if_exists(tmp_path)
+        raise IsADirectoryError(f"Target is a directory: {target_path}")
+
+    # a read-only target fails the same way a locked one does
+    cleared_readonly = _clear_readonly(target_path)
+    if cleared_readonly:
+        try:
+            os.replace(tmp_path, target_path)
+            return False
+        except PermissionError:
+            pass
+
+    old_path = _displacement_path(target_path)
+    try:
+        os.replace(target_path, old_path)
+    except PermissionError:
+        if cleared_readonly:
+            _restore_readonly(target_path)
+        _remove_if_exists(tmp_path)
+        raise
+    _mark_fresh(old_path)  # rename kept the old mtime; a concurrent sweep would eat it
+    try:
+        os.replace(tmp_path, target_path)
+    except BaseException:
+        # roll back so the target never goes missing
+        try:
+            os.replace(old_path, target_path)
+        except OSError:
+            pass
+        else:
+            if cleared_readonly:
+                _restore_readonly(target_path)
+        _remove_if_exists(tmp_path)
+        raise
+    return True
+
+
+def _displacement_path(target_path: str) -> str:
+    """Pick a free name for the displaced old file."""
+    for n in range(1000):
+        candidate = f"{target_path}.rfold{n or ''}"
+        _remove_if_exists(candidate)
+        if not os.path.exists(candidate):
+            return candidate
+    return candidate  # 1000 stuck generations: let the swap fail loudly
+
+
+def _member_matches_disk(zip_ref, member, target_path: str) -> bool:
+    """checks if the file on disk matches the zip member, to skip the swap"""
+    try:
+        if not os.path.isfile(target_path) or os.path.getsize(target_path) != member.file_size:
+            return False
+        crc = 0
+        with open(target_path, 'rb') as existing:
+            for chunk in iter(lambda: existing.read(262_144), b""):
+                crc = zlib.crc32(chunk, crc)
+        return crc == member.CRC
+    except OSError:
+        return False
+
+
+def _clear_readonly(path: str) -> bool:
+    """True if *path* was read-only and the attribute was cleared."""
+    try:
+        if os.access(path, os.W_OK):
+            return False
+        os.chmod(path, stat.S_IWRITE)
+        return True
+    except OSError:
+        return False
+
+
+def _restore_readonly(path: str) -> None:
+    """Put back a read-only bit we cleared for a swap that then failed."""
+    try:
+        os.chmod(path, stat.S_IREAD)
+    except OSError:
+        pass
+
+
+def _mark_fresh(path: str) -> None:
+    """Stamp now so the mtime sweep guard sees an in-flight file, not stale debris."""
+    try:
+        os.utime(path)
+    except OSError:
+        pass
+
+
+def _remove_if_exists(path: str) -> None:
+    try:
+        os.remove(path)
+    except PermissionError:
+        # the read-only bit survives displacement renames and blocks deletion
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            os.remove(path)
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+_STALE_DEBRIS_AGE = 3600  # seconds
+
+
+def sweep_stale_swap_files(directory: str) -> None:
+    """Recursively remove .rfnew/.rfold debris left by prior runs."""
+    cutoff = time.time() - _STALE_DEBRIS_AGE
+    base = glob.escape(directory)
+    for pattern in ("*.rfnew", "*.rfold*"):
+        for path in glob.glob(os.path.join(base, "**", pattern), recursive=True):
+            try:
+                if os.path.getmtime(path) >= cutoff:
+                    continue
+            except OSError:
+                continue
+            _remove_if_exists(path)
+
+
+def _report_locked_target(target_path: str) -> None:
+    """Friendly report for swap failure."""
+    file_name = os.path.basename(target_path)
+    folder_path = os.path.dirname(target_path)
+    print("\n".join([
+        f"\nPermission Error: Unable to update {file_name}",
+        "\nThe file is held open by another program and can't be replaced.",
+        "\nPossible solutions:",
+        "1. Close the program holding it open (e.g. one keeping a database file open)",
+        "2. Change the installation directory in settings to a location you own",
+        f"3. Manually set write permissions on: {folder_path}",
+    ]))
 
 
 def delete_zip_file(zip_path):

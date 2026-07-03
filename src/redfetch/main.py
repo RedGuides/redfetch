@@ -17,6 +17,7 @@ from redfetch import auth
 from redfetch import config
 from redfetch import meta
 from redfetch import net
+from redfetch import post_update
 from redfetch import processes
 from redfetch import utils
 from redfetch import push
@@ -76,45 +77,6 @@ def initialize_db_only(server: "Optional[Env]" = None):
 
 # ===== CLI prompt helpers =====
 
-def prompt_terminate_processes(
-    running_executables: "list[tuple[int, str]]", mq_folder: str | None = None
-) -> None:
-    """Handle the 'AUTO_TERMINATE_PROCESSES' prompt and close the colliding processes."""
-    if not running_executables:
-        return
-
-    auto_terminate = config.settings.from_env(config.settings.ENV).get(
-        "AUTO_TERMINATE_PROCESSES", None
-    )
-
-    if auto_terminate is True:
-        processes.terminate_processes(running_executables, mq_folder)
-        return
-
-    if auto_terminate is False:
-        console.print("Continuing update without closing processes...")
-        return
-
-    # auto_terminate is None -> ask the user
-    user_choice = Prompt.ask(
-        "Processes are running from the folder. Attempt to close them?",
-        choices=["yes", "no", "always", "never"],
-        default="yes",
-    )
-    if user_choice == "yes":
-        processes.terminate_processes(running_executables, mq_folder)
-    elif user_choice == "always":
-        processes.terminate_processes(running_executables, mq_folder)
-        config.update_setting(["AUTO_TERMINATE_PROCESSES"], True)
-        console.print("Updated settings to always terminate processes.")
-    elif user_choice == "never":
-        console.print("Continuing update without closing processes...")
-        config.update_setting(["AUTO_TERMINATE_PROCESSES"], False)
-        console.print("Updated settings to never terminate processes.")
-    else:  # "no"
-        console.print("Continuing update without closing processes...")
-
-
 def prompt_navmesh_opt_in() -> bool | None:
     """Prompt user about navmesh downloads if not configured."""
     from redfetch import navmesh
@@ -150,51 +112,43 @@ def prompt_navmesh_opt_in() -> bool | None:
         return False  # One-time no
 
 
-def prompt_auto_run_macroquest() -> bool:
-    """Prompt after a successful update."""
-    if os.environ.get("CI") == "true" or sys.platform != "win32":
-        return False
+class _CliPostUpdate:
+    """CLI adapter for post_update.execute: rich prompts, console output."""
 
-    auto_run = config.settings.from_env(config.settings.ENV).get("AUTO_RUN_VVMQ", None)
+    def notify(self, message: str, *, error: bool = False) -> None:
+        console.print(message)
 
-    if auto_run is False:
-        return False
+    async def confirm_restart(self) -> bool:
+        try:
+            choice = Prompt.ask(
+                "Restart MacroQuest to apply the update now?",
+                choices=["yes", "no"],
+                default="yes",
+            )
+        except (KeyboardInterrupt, EOFError):
+            return False  # headless/no-stdin: skip the restart, update applies next launch
+        return choice == "yes"
 
-    if auto_run is None:
-        user_choice = Prompt.ask(
-            "Do you want to start MacroQuest now?",
-            choices=["yes", "no", "always", "never"],
-            default="yes",
-        )
-        if user_choice == "always":
-            config.update_setting(["AUTO_RUN_VVMQ"], True)
-            console.print("Updated settings to always run MacroQuest after updates.")
-        elif user_choice == "never":
-            config.update_setting(["AUTO_RUN_VVMQ"], False)
-            console.print("Updated settings to never run MacroQuest after updates.")
-            return False
-        elif user_choice == "no":
-            console.print("Not starting MacroQuest.")
-            return False
+    async def ask_cold_start(self) -> post_update.ColdStartChoice:
+        try:
+            return Prompt.ask(
+                "Do you want to start MacroQuest now?",
+                choices=["yes", "no", "always", "never"],
+                default="yes",
+            )
+        except (KeyboardInterrupt, EOFError):
+            return "no"  # headless/no-stdin: don't start MacroQuest
 
-    mq_path = utils.get_vvmq_path()
-    if mq_path:
-        processes.run_executable(mq_path, "MacroQuest.exe")
+    def auto_run_persisted(self, value: bool) -> None:
+        pass  # the policy notifies; nothing to sync in the CLI
+
+    async def wait_for_eq_close(self) -> bool:
+        while processes.get_eqgame_process_pids():
+            try:
+                Prompt.ask("Close EverQuest to finish the restart, then press Enter (Ctrl-C to skip)")
+            except (KeyboardInterrupt, EOFError):
+                return False
         return True
-    console.print("MacroQuest path not found. Please check your configuration.")
-    return False
-
-
-def run_post_update_launch(running: set[str] | None = None) -> None:
-    """Skipping any already running. Pass *running* to reuse a caller's scan."""
-    if os.environ.get("CI") == "true":
-        return
-
-    to_run, skipped = utils.resolve_post_update_launch_filtered(config.settings.ENV, running)
-    for program in skipped:
-        console.print(f"{os.path.basename(program)} is already running; not starting another.")
-    for command, cwd in to_run:
-        processes.run_command(command, cwd)
 
 
 async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
@@ -210,35 +164,19 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
             console.print("Download cancelled by user.")
             return False
 
-    mq_folder = utils.get_base_path()
-
-    async def _close_processes_if_needed(execution_plan) -> None:
-        target_dirs = sync.download_target_dirs(execution_plan)
-        colliding = await asyncio.to_thread(
-            processes.find_processes_locking_dirs, mq_folder, target_dirs
-        )
-        prompt_terminate_processes(colliding, mq_folder)
-
     navmesh_override = prompt_navmesh_opt_in()
 
-    success = await sync.run_sync(
+    outcome = await sync.run_sync(
         db_path, headers,
         navmesh_override=navmesh_override,
-        on_plan_ready=_close_processes_if_needed,
     )
-    if success:
-        # "Also start" means in addition to MQ, not instead of it.
-        running = (
-            await asyncio.to_thread(processes.running_executable_paths)
-            if sys.platform == "win32" else None
-        )
-        if utils.should_offer_mq_start(running) and prompt_auto_run_macroquest():
-            run_post_update_launch(running)
-        return True
-    return False
+    # offer regardless of overall success:
+    await post_update.offer(outcome, _CliPostUpdate())
+    return outcome.success
 
 
 async def update_command_async(db_name: str, db_path: str, force: bool) -> None:
+    await asyncio.to_thread(utils.sweep_stale_update_debris)
     headers = await auth.get_api_headers()
     # Only check KISS access for bulk operations (not single resource downloads)
     if not await api.is_kiss_downloadable(headers):
@@ -383,6 +321,7 @@ async def _check_command_async(db_path: str) -> tuple[str, list[dict] | None]:
 def run_tui():
     """Initialize configuration and launch the Terminal User Interface."""
     _initialize_auth()
+    utils.sweep_stale_update_debris()
     from redfetch.terminal_ui import run_textual_ui
     run_textual_ui()
 

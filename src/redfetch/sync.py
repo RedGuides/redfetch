@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable
+import os
 
 import httpx
+from filelock import FileLock, Timeout
+from platformdirs import user_data_dir
 
 from redfetch import config
 from redfetch import store
@@ -11,6 +13,7 @@ from redfetch import sync_discovery
 from redfetch import sync_executor
 from redfetch import sync_planner
 from redfetch import sync_remote
+from redfetch import utils
 from redfetch.sync_types import (
     ExecutionPlan,
     ExecutionResult,
@@ -18,23 +21,33 @@ from redfetch.sync_types import (
     PreparedSync,
     ReasonInfo,
     SyncEventCallback,
+    SyncOutcome,
     reason_message,
 )
 
 
 _sync_lock: asyncio.Lock | None = None
+_file_lock: FileLock | None = None
 _DEFAULT_REASON = ReasonInfo(message="")
 
-PlanReadyHook = Callable[[ExecutionPlan], Awaitable[None]]
+
+def _process_lock() -> FileLock:
+    """Cross-process sync guard; the OS releases a hard FileLock if the holder dies."""
+    global _file_lock
+    if _file_lock is None:
+        lock_dir = os.environ.get("REDFETCH_DATA_DIR") or user_data_dir("redfetch", "RedGuides")
+        _file_lock = FileLock(os.path.join(lock_dir, "sync.lock"))
+    return _file_lock
 
 
-def download_target_dirs(execution_plan: ExecutionPlan) -> set[str]:
-    """Destination directories (always folders) for actions that will write files to disk."""
-    return {
-        action.resolved_path
-        for action in execution_plan.actions.values()
-        if action.action == "download" and action.resolved_path
-    }
+def vvmq_was_updated(execution_result: ExecutionResult, vvmq_id: str | None) -> bool:
+    """True when this run actually wrote VVMQ (an already-current one is "skipped")."""
+    if not vvmq_id:
+        return False
+    return any(
+        item.resource_id == vvmq_id and item.outcome == "downloaded"
+        for item in execution_result.items.values()
+    )
 
 
 def _print_plan_summary(
@@ -169,8 +182,7 @@ async def sync(
     headers: dict,
     resource_ids: list[str] | None = None,
     on_event: SyncEventCallback | None = None,
-    on_plan_ready: PlanReadyHook | None = None,
-) -> bool:
+) -> SyncOutcome:
     """Discover, plan, and execute a sync run against the API."""
     prepared = await prepare_sync(db_path, headers, resource_ids=resource_ids)
     desired_set = prepared.desired_set
@@ -179,10 +191,6 @@ async def sync(
     execution_plan = prepared.execution_plan
 
     _print_plan_summary(execution_plan, resource_ids=resource_ids)
-
-    # Decide on closing running processes before any file is downloaded or extracted.
-    if on_plan_ready:
-        await on_plan_ready(execution_plan)
 
     if on_event:
         on_event(("total", len(execution_plan.actions), None))
@@ -218,6 +226,9 @@ async def sync(
         execution_result=execution_result,
         resource_ids=resource_ids,
     )
+    vvmq_updated = vvmq_was_updated(
+        execution_result, utils.get_current_vvmq_id(config.settings.ENV)
+    )
 
     if execution_result.has_errors():
         errored_items = [
@@ -237,7 +248,7 @@ async def sync(
     else:
         print("All resources are up-to-date; no downloads were necessary.")
 
-    return success
+    return SyncOutcome(success=success, vvmq_updated=vvmq_updated)
 
 
 async def run_sync(
@@ -246,8 +257,7 @@ async def run_sync(
     resource_ids: list[str] | None = None,
     on_event: SyncEventCallback | None = None,
     navmesh_override: bool | None = None,
-    on_plan_ready: PlanReadyHook | None = None,
-) -> bool:
+) -> SyncOutcome:
     """Top-level entry point: run the sync pipeline under a global lock, then navmesh if applicable."""
     global _sync_lock
     if _sync_lock is None:
@@ -255,27 +265,35 @@ async def run_sync(
 
     try:
         async with _sync_lock:
-            result = await sync(
-                db_path,
-                headers,
-                resource_ids=resource_ids,
-                on_event=on_event,
-                on_plan_ready=on_plan_ready,
-            )
-
-            if resource_ids is None:
-                from redfetch import navmesh
-
-                navmesh_ok = await navmesh.sync_navmeshes(
+            process_lock = _process_lock()
+            try:
+                process_lock.acquire(blocking=False)
+            except Timeout:
+                print("Another redfetch process is already updating; skipping this run.")
+                return SyncOutcome(success=False, status="busy")
+            try:
+                result = await sync(
                     db_path,
                     headers,
+                    resource_ids=resource_ids,
                     on_event=on_event,
-                    override=navmesh_override,
                 )
-                if not navmesh_ok:
-                    print("navmesh sync encountered errors")
 
-            return result
+                if resource_ids is None:
+                    from redfetch import navmesh
+
+                    navmesh_ok = await navmesh.sync_navmeshes(
+                        db_path,
+                        headers,
+                        on_event=on_event,
+                        override=navmesh_override,
+                    )
+                    if not navmesh_ok:
+                        print("navmesh sync encountered errors")
+
+                return result
+            finally:
+                process_lock.release()
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("Download cancelled by user.")
-        return False
+        return SyncOutcome(success=False, status="cancelled")

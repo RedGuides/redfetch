@@ -37,12 +37,13 @@ from redfetch import api
 from redfetch import auth
 from redfetch import config
 from redfetch import net
+from redfetch import post_update
 from redfetch import processes
 from redfetch import utils
 from redfetch import meta
 from redfetch import sync
 from redfetch import desktop_shortcut
-from redfetch.sync_types import SyncEvent
+from redfetch.sync_types import SyncEvent, SyncOutcome
 from redfetch.runtime_errors import display_fatal_error
 
 # for dev mode, from root dir:
@@ -320,9 +321,15 @@ class FetchTab(ScrollableContainer):
             update_watched_button.variant = "default"
         else:
             if app.is_updating:
-                update_watched_button.label = "Stop Update 🛑"
-                update_watched_button.tooltip = "Update in progress. Click to cancel."
-                update_watched_button.disabled = False
+                if getattr(app, "_offer_active", False):
+                    # sync already finished; the restart/offer flow can't be cancelled
+                    update_watched_button.label = "Finishing update... 🏁"
+                    update_watched_button.tooltip = "Waiting on the post-update prompts."
+                    update_watched_button.disabled = True
+                else:
+                    update_watched_button.label = "Stop Update 🛑"
+                    update_watched_button.tooltip = "Update in progress. Click to cancel."
+                    update_watched_button.disabled = False
             else:
                 update_watched_button.label = "Easy Update Button 🍦"
                 update_watched_button.tooltip = (
@@ -334,8 +341,18 @@ class FetchTab(ScrollableContainer):
                 update_watched_button.disabled = busy or not bool(download_folder)
             update_watched_button.refresh(layout=True)
 
-        # Resource ID input and button
+        # Progress bar and resource-id input are a pair: bar shown ⇒ input hidden.
+        # Driven by app.progress_visible so any resync (e.g. after a covering modal) restores them.
+        progress_bar = self.query_one("#update_progress", ProgressBar)
         resource_input = self.query_one("#resource_id_input", Input)
+        if app.progress_visible:
+            progress_bar.remove_class("hidden")
+            resource_input.add_class("hidden")
+        else:
+            progress_bar.add_class("hidden")
+            resource_input.remove_class("hidden")
+
+        # Resource ID input and button
         resource_input.disabled = busy
         self.query_one("#update_resource_id", Button).disabled = (
             busy or not bool(download_folder) or not bool(resource_input.value)
@@ -529,11 +546,6 @@ class SettingsTab(ScrollableContainer):
                 tooltip="A collection of scripts for this server type that RedGuides staff recommends.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
-            yield Label("Close MQ pre-update:", classes="left_middle")
-            yield make_tristate(
-                "auto_terminate_processes",
-                config.settings.from_env(current_env).get("AUTO_TERMINATE_PROCESSES", None),
-            )
             yield Label("Start MQ post-update:", classes="left_middle")
             yield make_tristate(
                 "auto_run_vvmq",
@@ -608,10 +620,6 @@ class SettingsTab(ScrollableContainer):
             for value, _label in utils.post_update_launch_choices():
                 checkbox = self.query_one(f"#launch_{value}", Checkbox)
                 checkbox.value = value in enabled_targets
-
-        auto_terminate_radio = self.query_one("#auto_terminate_processes", RadioSet)
-        with self.prevent(RadioSet.Changed):
-            set_tristate(auto_terminate_radio, settings_for_env.get("AUTO_TERMINATE_PROCESSES", None))
 
         navmesh_switch = self.query_one("#navmesh", Switch)
         navmesh_switch.value = settings_for_env.get("NAVMESH_OPT_IN", False)
@@ -726,8 +734,6 @@ class SettingsTab(ScrollableContainer):
         value = TRISTATE_OPTIONS[event.index][1]
         if event.radio_set.id == "auto_run_vvmq":
             self.app.handle_toggle_auto_run_vvmq(value)
-        elif event.radio_set.id == "auto_terminate_processes":
-            self.app.handle_toggle_auto_terminate_processes(value)
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "eq_maps":
@@ -1113,10 +1119,16 @@ class Redfetch(App):
     # Reactive state - initialized with neutral defaults; real values set when MainScreen mounts
     interface_running: reactive[bool] = reactive(False, bindings=True)
     is_updating: reactive[bool] = reactive(False)
+    # single source of truth for the progress bar (and its paired resource-id input)
+    progress_visible: reactive[bool] = reactive(False)
     mq_down: reactive[bool | None] = reactive(None)
     download_folder: reactive[str] = reactive("")
     eq_path: reactive[str] = reactive("")
     current_env: reactive[str] = reactive(config.settings.ENV)
+
+    # Post-update offer handoff between the update worker and the offer worker
+    _pending_offer: post_update.PendingOffer | None = None
+    _offer_active: bool = False  # a dispatched offer holds the is_updating gate
 
     CSS_PATH = "terminal_ui.tcss"
 
@@ -1250,6 +1262,10 @@ class Redfetch(App):
         """Update all widgets when updating state changes."""
         self._update_main_screen()
 
+    def watch_progress_visible(self, old_value: bool, new_value: bool) -> None:
+        """Show/hide the progress bar (and its paired input) via a normal resync."""
+        self._update_main_screen()
+
     def watch_interface_running(self, old_value: bool, new_value: bool) -> None:
         """Update all widgets when interface running state changes."""
         self._update_main_screen()
@@ -1302,14 +1318,22 @@ class Redfetch(App):
                 self.notify(f"Failed to save theme preference: {e}", severity="error")
 
     def _get_main_screen(self) -> MainScreen | None:
-        """Get the MainScreen if it's the current screen."""
+        """The MainScreen only when it's the current (top) screen. Callers that push
+        modals or need the active screen rely on the None-when-covered result."""
         if isinstance(self.screen, MainScreen):
             return self.screen
         return None
 
+    def _base_main_screen(self) -> MainScreen | None:
+        """The MainScreen even when a modal covers it."""
+        stack = self.screen_stack
+        if stack and isinstance(stack[0], MainScreen):
+            return stack[0]
+        return None
+
     def _update_main_screen(self) -> None:
-        """Update widget states on the main screen if it's active."""
-        main_screen = self._get_main_screen()
+        """Resync widget state onto the main screen even if a modal covers it."""
+        main_screen = self._base_main_screen()
         if main_screen:
             main_screen.update_widget_states()
 
@@ -1525,16 +1549,6 @@ class Redfetch(App):
             config.update_setting(['NAVMESH_OPT_IN'], value, env=self.current_env)
             state = "enabled" if value else "disabled"
             self.notify(f"navmesh downloads for {self.current_env} are now {state}")
-
-    def handle_toggle_auto_terminate_processes(self, value) -> None:
-        main_screen = self._get_main_screen()
-        current_value = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
-        if current_value != value:
-            config.update_setting(['AUTO_TERMINATE_PROCESSES'], value, env=self.current_env)
-            self.notify(f"Close MQ pre-update set to {tristate_label(value)}.")
-        if main_screen:
-            with main_screen.prevent(RadioSet.Changed):
-                set_tristate(main_screen.query_one("#auto_terminate_processes", RadioSet), value)
 
     def handle_toggle_auto_run_vvmq(self, value) -> None:
         main_screen = self._get_main_screen()
@@ -1798,8 +1812,18 @@ class Redfetch(App):
         main_screen = self._get_main_screen()
 
         if state == WorkerState.SUCCESS:
-            if worker.name == "_update_watched_worker" and main_screen:
-                self.update_complete(worker.result, main_screen.query_one("#update_watched", Button))
+            if worker.name == "_update_watched_worker":
+                # consume here, not in update_complete: a covering screen would drop the offer
+                pending, self._pending_offer = self._pending_offer, None
+                if main_screen:
+                    self.update_complete(worker.result, main_screen.query_one("#update_watched", Button))
+                # Use pending.decision (not worker.result)
+         
+                if pending is not None and pending.decision is not post_update.Decision.NONE:
+                    self._offer_active = True  # holds is_updating until the offer worker finishes
+                    self._post_update_worker(pending)
+                elif worker.result and main_screen:
+                    self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
             elif worker.name == "_update_single_resource_worker" and main_screen:
                 self.update_complete(worker.result, main_screen.query_one("#update_resource_id", Button))
             elif worker.name == "_redguides_interface_worker":
@@ -1821,6 +1845,14 @@ class Redfetch(App):
 
         if group in {"update_watched_group", "single_update_group", "maintenance_group"}:
             if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
+                # hide the bar on any terminal state — ERROR skips update_complete entirely
+                self.progress_visible = False
+                # a dispatched offer keeps the gate until the offer worker finishes
+                if not self._offer_active:
+                    self.is_updating = False
+        elif group == "post_update_group":
+            if state in {WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED}:
+                self._offer_active = False
                 self.is_updating = False
 
         if group == "interface_group":
@@ -1848,53 +1880,16 @@ class Redfetch(App):
         self._update_watched_worker()
 
     @work(exclusive=True, group="update_watched_group")
-    async def _update_watched_worker(self) -> bool:
+    async def _update_watched_worker(self) -> SyncOutcome:
         print("Starting update of all watched & special resources, please wait...")
 
         # Check navmesh preference (prompt if not configured and VVMQ exists)
         navmesh_override = await self._prompt_navmesh_opt_in()
 
-        result = await self.run_synchronization(
-            navmesh_override=navmesh_override,
-            on_plan_ready=self._close_processes_if_needed,
-        )
-
-        offer, to_run, skipped = await asyncio.to_thread(
-            utils.plan_post_update_session, self.current_env
-        )
-        self._offer_mq_start = offer
-        self._post_update_loadout = (to_run, skipped)
-        return result
-
-    async def _close_processes_if_needed(self, execution_plan) -> None:
-        mq_folder = utils.get_base_path()
-        target_dirs = sync.download_target_dirs(execution_plan)
-        colliding = await asyncio.to_thread(
-            processes.find_processes_locking_dirs, mq_folder, target_dirs
-        )
-        if not colliding:
-            return
-
-        auto_terminate = config.settings.from_env(self.current_env).get('AUTO_TERMINATE_PROCESSES', None)
-        if auto_terminate is True:
-            await asyncio.to_thread(processes.terminate_processes, colliding, mq_folder)
-            return
-        if auto_terminate is False:
-            self.notify("Continuing update without closing processes...", severity="warning")
-            return
-
-        response = await self.push_screen_wait(
-            ProcessTerminationScreen(running_executables=colliding)
-        )
-
-        if response in [ProcessTerminationScreen.RESPONSE_TERMINATE, ProcessTerminationScreen.RESPONSE_ALWAYS]:
-            if response == ProcessTerminationScreen.RESPONSE_ALWAYS:
-                self.handle_toggle_auto_terminate_processes(True)
-            await asyncio.to_thread(processes.terminate_processes, colliding, mq_folder)
-        elif response == ProcessTerminationScreen.RESPONSE_NEVER:
-            self.handle_toggle_auto_terminate_processes(False)
-        else:
-            self.notify("Continuing update without closing processes...", severity="warning")
+        outcome = await self.run_synchronization(navmesh_override=navmesh_override)
+        # scan + decide now, while is_updating still gates env switching and re-clicks
+        self._pending_offer = await post_update.prepare(outcome)
+        return outcome
 
     async def _prompt_navmesh_opt_in(self) -> bool | None:
         """Prompt user about navmesh downloads if not configured."""
@@ -1936,33 +1931,30 @@ class Redfetch(App):
 
     def _process_sync_event(self, event_type: str, resource_id: str | int, details: str | None) -> None:
         """Process sync events on the main thread."""
-        main_screen = self._get_main_screen()
-        if not main_screen:
-            return
-
+        # _base_main_screen so the bar advances
+        main_screen = self._base_main_screen()
         try:
-            fetch_tab = main_screen.query_one(FetchTab)
-            progress_bar = fetch_tab.query_one("#update_progress", ProgressBar)
-            resource_input = fetch_tab.query_one("#resource_id_input", Input)
-            
             if event_type == "total":
                 total_tasks = int(resource_id)
                 if total_tasks > 0:
-                    progress_bar.total = total_tasks
-                    progress_bar.progress = 0
-                    progress_bar.remove_class("hidden")
-                    resource_input.add_class("hidden")
-            elif event_type == "add_total":
+                    # visibility is state-derived; _update_from_state pairs the bar with the input
+                    self.progress_visible = True
+                    if main_screen:
+                        progress_bar = main_screen.query_one(FetchTab).query_one("#update_progress", ProgressBar)
+                        progress_bar.total = total_tasks
+                        progress_bar.progress = 0
+            elif event_type == "add_total" and main_screen:
                 # Extend total (e.g., for navmesh phase)
                 additional = int(resource_id)
                 if additional > 0:
+                    progress_bar = main_screen.query_one(FetchTab).query_one("#update_progress", ProgressBar)
                     progress_bar.total = (progress_bar.total or 0) + additional
-            elif event_type == "done":
-                progress_bar.advance(1)
+            elif event_type == "done" and main_screen:
+                main_screen.query_one(FetchTab).query_one("#update_progress", ProgressBar).advance(1)
         except Exception:
             pass
 
-    async def run_synchronization(self, resource_ids=None, navmesh_override=None, on_plan_ready=None):
+    async def run_synchronization(self, resource_ids=None, navmesh_override=None) -> SyncOutcome:
         try:
             db_name = f"{self.current_env}_resources.db"
             await asyncio.to_thread(store.initialize_db, db_name)
@@ -1973,69 +1965,34 @@ class Redfetch(App):
                     store.reset_download_dates_for_resources, db_name, resource_ids
                 )
                 if not reset_success:
-                    return False
+                    return SyncOutcome(success=False)
             result = await sync.run_sync(
                 db_path, headers,
                 resource_ids=resource_ids,
                 on_event=self.on_sync_event,
                 navmesh_override=navmesh_override,
-                on_plan_ready=on_plan_ready,
             )
             return result
         except Exception:
             traceback.print_exc()
-            return False
+            return SyncOutcome(success=False)
 
-    def _start_post_update_program(self) -> None:
-        to_run, skipped = getattr(self, "_post_update_loadout", ([], []))
-        for program in skipped:
-            self.notify(f"{os.path.basename(program)} is already running; not starting another.")
-        for command, cwd in to_run:
-            self.run_command(command, cwd)
-
-    def _post_update_session_start(self, main_screen) -> None:
-        def reset_button() -> None:
-            if main_screen:
-                self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
-
-        if not getattr(self, "_offer_mq_start", False):
-            reset_button()
-            return
-
-        auto_run = config.settings.from_env(self.current_env).get('AUTO_RUN_VVMQ', None)
-        if auto_run is True:
-            self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-            self._start_post_update_program()
-            reset_button()
-        elif auto_run is False:
-            reset_button()
-        else:
-            def handle_vvmq_response(response: str) -> None:
-                if response in [RunVVMQScreen.RESPONSE_RUN, RunVVMQScreen.RESPONSE_ALWAYS]:
-                    if response == RunVVMQScreen.RESPONSE_ALWAYS:
-                        self.handle_toggle_auto_run_vvmq(True)
-                    self.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-                    self._start_post_update_program()
-                elif response == RunVVMQScreen.RESPONSE_NEVER:
-                    self.handle_toggle_auto_run_vvmq(False)
-                if main_screen:
-                    main_screen.reset_button("update_watched", "primary")
-                    main_screen.update_widget_states()
-            self.push_screen(RunVVMQScreen(), handle_vvmq_response)
-
-    def update_complete(self, result: bool, button: Button) -> None:
+    @work(group="post_update_group", exclusive=True)
+    async def _post_update_worker(self, pending: post_update.PendingOffer) -> None:
+        # capture now: another screen may be current by the time the offer resolves
         main_screen = self._get_main_screen()
-        
-        if main_screen:
-            try:
-                fetch_tab = main_screen.query_one(FetchTab)
-                progress_bar = fetch_tab.query_one("#update_progress", ProgressBar)
-                resource_input = fetch_tab.query_one("#resource_id_input", Input)
-                progress_bar.add_class("hidden")
-                resource_input.remove_class("hidden")
-            except Exception:
-                pass
+        try:
+            await post_update.execute(pending, _TuiPostUpdate(self))
+        finally:
+            screen = main_screen or self._get_main_screen()
+            if screen:
+                screen.update_widget_states()
+                self.set_timer(6, lambda: screen.reset_button("update_watched", "primary"))
 
+    def update_complete(self, result, button: Button) -> None:
+        # bar/input visibility follows progress_visible, cleared on worker completion below
+        main_screen = self._get_main_screen()
+        status = getattr(result, "status", "ok" if result else "failed")
         if result:
             button.variant = "success"
             self.notify("All resources updated successfully.")
@@ -2043,8 +2000,13 @@ class Redfetch(App):
                 input_widget = main_screen.query_one("#resource_id_input", Input)
                 input_widget.value = ""
                 self.set_timer(6, lambda: main_screen.reset_button("update_resource_id", "default"))
-            elif button.id == "update_watched":
-                self._post_update_session_start(main_screen)
+        elif status in ("busy", "cancelled"):
+            # not a failure: a peer holds the update lock, or the user stopped it.
+            button.variant = "primary"
+            if status == "busy":
+                self.notify("Another update is already in progress; try again shortly.", severity="warning")
+            if button.id == "update_resource_id" and main_screen:
+                main_screen.query_one("#resource_id_input", Input).value = ""
         else:
             button.variant = "error"
             print("Some resources failed to update.")
@@ -2073,7 +2035,7 @@ class Redfetch(App):
         self._update_single_resource_worker(resource_id)
 
     @work(exclusive=True, group="single_update_group")
-    async def _update_single_resource_worker(self, resource_id: str) -> bool:
+    async def _update_single_resource_worker(self, resource_id: str) -> SyncOutcome:
         result = await self.run_synchronization([resource_id])
         return result
 
@@ -2210,23 +2172,88 @@ class PrintCapturingLog(Log):
         self.write(event.text)
 
 
+class _TuiPostUpdate:
+    """TUI adapter for post_update.execute: modals + notify. Runs inside a worker."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    def notify(self, message: str, *, error: bool = False) -> None:
+        print(message)  # PrintCapturingLog echoes it in the terminal widget
+        self.app.notify(message, severity="error" if error else "information")
+
+    async def confirm_restart(self) -> bool:
+        response = await self.app.push_screen_wait(RunVVMQScreen(post_update.Decision.RESTART))
+        return response == RunVVMQScreen.RESPONSE_RUN
+
+    async def ask_cold_start(self) -> post_update.ColdStartChoice:
+        response = await self.app.push_screen_wait(RunVVMQScreen(post_update.Decision.COLD_START))
+        return {
+            RunVVMQScreen.RESPONSE_RUN: "yes",
+            RunVVMQScreen.RESPONSE_ALWAYS: "always",
+            RunVVMQScreen.RESPONSE_NEVER: "never",
+        }.get(response, "no")
+
+    def auto_run_persisted(self, value: bool) -> None:
+        # config already written; the handler skips the no-op write and syncs the radio set
+        self.app.handle_toggle_auto_run_vvmq(value)
+
+    async def wait_for_eq_close(self) -> bool:
+        return await self.app.push_screen_wait(CloseEQScreen())
+
+
+class CloseEQScreen(ModalScreen[bool]):
+    """Wait for the user to close EverQuest; dismisses True once it's gone, False on Cancel."""
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label(
+                "Close EverQuest to finish restarting MacroQuest.\n"
+                "This closes automatically once EverQuest has exited.",
+                id="question",
+            ),
+            Center(Button("Cancel", variant="default", id="canceleq")),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        self.set_interval(1.0, self._check_closed)
+
+    async def _check_closed(self) -> None:
+        # Cancel may have dismissed mid-poll; dismissing an inactive screen raises
+        if not await asyncio.to_thread(processes.get_eqgame_process_pids):
+            if self.is_current:
+                self.dismiss(True)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if self.is_current:
+            self.dismiss(False)
+
+
 class RunVVMQScreen(ModalScreen):
-    """A modal screen to ask if the user wants to run Very Vanilla MQ."""
+    """A modal screen to ask if the user wants to run (or restart) Very Vanilla MQ."""
 
     RESPONSE_RUN = "run"
     RESPONSE_ALWAYS = "always"
     RESPONSE_NEVER = "never"
     RESPONSE_SKIP = "skip"
 
+    def __init__(self, decision=None):
+        super().__init__()
+        self._decision = decision
+
     def compose(self) -> ComposeResult:
-        yield Grid(
-            Label("Run Very Vanilla MQ?", id="question"),
+        restart = self._decision is post_update.Decision.RESTART
+        widgets = [
+            Label("Restart Very Vanilla MQ?" if restart else "Run Very Vanilla MQ?", id="question"),
             Button("Yes", variant="primary", id="yesmq"),
             Button("No", variant="default", id="nomq"),
-            Center(Button("Always", variant="primary", id="alwaysmq")),
-            Center(Button("Never", variant="default", id="nevermq")),
-            id="dialog",
-        )
+        ]
+        if not restart:
+            # Always/Never persist AUTO_RUN_VVMQ, which governs cold starts only
+            widgets.append(Center(Button("Always", variant="primary", id="alwaysmq")))
+            widgets.append(Center(Button("Never", variant="default", id="nevermq")))
+        yield Grid(*widgets, id="dialog", classes="two_row" if restart else "")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "yesmq":
@@ -2266,49 +2293,6 @@ class NavMeshPromptScreen(ModalScreen):
             self.dismiss(self.RESPONSE_NEVER)
         else:
             self.dismiss(self.RESPONSE_NO)
-
-
-class ProcessTerminationScreen(ModalScreen):
-    """A modal screen to ask if user wants to terminate running processes."""
-
-    RESPONSE_TERMINATE = "terminate"
-    RESPONSE_ALWAYS = "always"
-    RESPONSE_NEVER = "never"
-    RESPONSE_SKIP = "skip"
-
-    def __init__(self, running_executables: list[tuple[int, str]]):
-        super().__init__()
-        self.running_executables = running_executables
-
-    def compose(self) -> ComposeResult:
-        if any("crashpad" in exe_path.lower() for pid, exe_path in self.running_executables):
-            message = "MacroQuest is running, which may interfere with updates."
-        else:
-            exe_names = ", ".join(os.path.basename(exe_path) for pid, exe_path in self.running_executables)
-            message = (
-                f"These processes may interfere with updates:\n"
-                f"[italic]{exe_names}[/italic]"
-            )
-
-        yield Grid(
-            Label(message, id="process_message"),
-            Label("Attempt to close before updating?", id="close_them"),
-            Button("Yes", variant="primary", id="yesterminate"),
-            Button("No", variant="default", id="noterminate"),
-            Center(Button("Always", variant="primary", id="alwaysterminate")),
-            Center(Button("Never", variant="default", id="neverterminate")),
-            id="process_dialog",
-        )
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "yesterminate":
-            self.dismiss(self.RESPONSE_TERMINATE)
-        elif event.button.id == "alwaysterminate":
-            self.dismiss(self.RESPONSE_ALWAYS)
-        elif event.button.id == "neverterminate":
-            self.dismiss(self.RESPONSE_NEVER)
-        else:
-            self.dismiss(self.RESPONSE_SKIP)
 
 
 class UninstallScreen(ModalScreen):

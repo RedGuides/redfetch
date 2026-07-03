@@ -277,7 +277,7 @@ def test_targeted_sync_returns_false_when_dependency_in_requested_closure_is_blo
     ):
         ok = asyncio.run(sync.sync(db_path, headers={}, resource_ids=["151"]))
 
-    assert ok is False
+    assert ok.success is False
 
 
 def test_targeted_sync_returns_true_when_requested_closure_only_untracks_stale_dependency(tmp_path):
@@ -341,4 +341,4 @@ def test_targeted_sync_returns_true_when_requested_closure_only_untracks_stale_d
     ):
         ok = asyncio.run(sync.sync(db_path, headers={}, resource_ids=["151"]))
 
-    assert ok is True
+    assert ok.success is True

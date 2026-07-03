@@ -4,29 +4,18 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+import time
+from typing import List, Sequence, Tuple
 
 import psutil
 
 IS_WINDOWS = sys.platform == "win32"
 
-# Common psutil failures while scanning processes.
 _PROC_GONE = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
 
 
 def _norm(path: str) -> str:
     return os.path.normcase(os.path.normpath(path))
-
-
-if IS_WINDOWS:
-    from .unloadmq import force_remote_unload, get_eqgame_process_pids
-else:  # skip if not on windows
-    def force_remote_unload() -> None:
-        pass
-
-    def get_eqgame_process_pids() -> List[int]:
-        return []
 
 
 def _normalized_executables(folder_path: str) -> List[str]:
@@ -67,6 +56,19 @@ def are_executables_running_in_folder(folder_path: str) -> List[Tuple[int, str]]
         return running
 
 
+def get_eqgame_process_pids() -> List[int]:
+    """PIDs of running eqgame.exe processes. Observed only, never touched."""
+    pids: List[int] = []
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            name = proc.info.get("name")
+            if name and name.lower() == "eqgame.exe":
+                pids.append(proc.info["pid"])
+        except _PROC_GONE:
+            continue
+    return pids
+
+
 def running_executable_paths() -> set[str]:
     paths: set[str] = set()
     for proc in psutil.process_iter(["exe"]):
@@ -85,103 +87,170 @@ def is_executable_running(exe_path: str, running: set[str] | None = None) -> boo
     return _norm(exe_path) in running
 
 
-def _is_under_any(path: str, targets: Sequence[str]) -> bool:
-    normalized = Path(_norm(path))
-    return any(normalized.is_relative_to(target) for target in targets)
-
-
-def _has_module_under(pid: int, targets: Sequence[str]) -> bool:
+def _spawned_loader_name(mq_folder: str) -> str | None:
+    """Loader-copy filename from MacroQuest.ini [Internal] SpawnedProcess."""
+    ini_path = os.path.join(mq_folder, "MacroQuest.ini")
     try:
-        return any(
-            _is_under_any(p, targets)
-            for m in psutil.Process(pid).memory_maps()
-            if (p := getattr(m, "path", None))
-        )
-    except _PROC_GONE:
-        return True
-    except Exception as exc:
-        # Access failures are safer to treat as locks; otherwise the overwrite can fail later.
-        print(f"Could not inspect modules for PID {pid}: {exc}")
-        return True
+        with open(ini_path, encoding="utf-8", errors="ignore") as fh:
+            in_internal = False
+            for line in fh:
+                stripped = line.strip()
+                if stripped.startswith("["):
+                    in_internal = stripped.lower() == "[internal]"
+                    continue
+                if in_internal and "=" in stripped:
+                    key, _, value = stripped.partition("=")
+                    if key.strip().lower() == "spawnedprocess":
+                        return value.strip() or None
+    except OSError:
+        pass
+    return None
 
 
-def _mq_module_holders(folder_path: str) -> dict[int, str]:
-    holders: dict[int, str] = dict(are_executables_running_in_folder(folder_path))
-    # eqgame lives outside MQ but can hold injected MQ modules open.
-    for pid in get_eqgame_process_pids():
-        if pid not in holders:
-            try:
-                holders[pid] = psutil.Process(pid).exe() or "eqgame.exe"
-            except _PROC_GONE:
-                holders[pid] = "eqgame.exe"
-    return holders
-
-
-def find_processes_locking_dirs(
-    folder_path: str, target_dirs: Iterable[str]
-) -> List[Tuple[int, str]]:
-    if not IS_WINDOWS:
+def _spawned_loader_processes(mq_folder: str) -> List[Tuple[int, str]]:
+    """Running processes matching the recorded loader-copy name."""
+    spawned = _spawned_loader_name(mq_folder)
+    if not spawned:
         return []
-
-    targets = [_norm(d) for d in target_dirs if d]
-    if not targets:
-        return []
-
-    # (1) MQ/eqgame processes with a target-dir module mapped.
-    colliding: dict[int, str] = {
-        pid: exe
-        for pid, exe in _mq_module_holders(folder_path).items()
-        if _has_module_under(pid, targets)
-    }
-
-    # (2) Any process whose own executable sits under a target dir.
-    for proc in psutil.process_iter(["pid", "exe"]):
+    spawned = spawned.lower()
+    procs: List[Tuple[int, str]] = []
+    for proc in psutil.process_iter(["pid", "name", "exe"]):
         try:
-            exe_path = proc.info.get("exe")
-            if exe_path and proc.pid not in colliding and _is_under_any(exe_path, targets):
-                colliding[proc.pid] = exe_path
+            name = proc.info.get("name")
+            if name and name.lower() == spawned:
+                procs.append((proc.info["pid"], proc.info.get("exe") or name))
         except _PROC_GONE:
             continue
+    return procs
 
-    return list(colliding.items())
+
+def macroquest_session_running(mq_folder: str, running: set[str] | None = None) -> bool:
+    """True when an MQ session runs from *mq_folder*."""
+    if running is None:
+        running = running_executable_paths()
+    folder = _norm(mq_folder)
+    for path in running:
+        if os.path.dirname(path) == folder and os.path.basename(path) != "eqbcs.exe":
+            return True
+    spawned = _spawned_loader_name(mq_folder)
+    if spawned:
+        spawned = spawned.lower()
+        return any(os.path.basename(path) == spawned for path in running)
+    return False
 
 
-def terminate_processes(
-    processes_to_close: Sequence[Tuple[int, str]], mq_folder: str | None = None
-) -> None:
-    """Close colliders; if MQ is involved, close the MQ folder and unload eqgame."""
-    if not IS_WINDOWS:
-        print("Terminating executables is only supported on Windows platforms.")
+_GRACEFUL_CLOSE_SEC = 3          # WM_CLOSE grace before forcing windowed apps (the loader)
+_RESTART_LEFTOVER_GRACE_SEC = 2  # slow exits: re-check once before declaring a restart stuck
+
+# A surviving EQBCS never trips MQ's "exit the alternate loader" dialog
+_LEFTOVER_IGNORE = frozenset({"eqbcs.exe"})
+
+
+def _post_wm_close(pids: set[int]) -> set[int]:
+    """Ask each pid's top-level windows to close cleanly; return the pids we reached."""
+    try:
+        import win32con
+        import win32gui
+        import win32process
+    except ImportError:
+        return set()
+
+    posted: set[int] = set()
+
+    def _visit(hwnd, _):
+        try:
+            _, wpid = win32process.GetWindowThreadProcessId(hwnd)
+            if wpid in pids:
+                win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                posted.add(wpid)
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(_visit, None)
+    except Exception:
+        pass
+    return posted
+
+
+def _terminate_processes(procs: List[Tuple[int, str]]) -> None:
+    """Terminate *procs* — WM_CLOSE first for a clean shutdown, then force; one shared wait."""
+    names: dict[int, str] = {}
+    targets = []
+    for pid, exe_path in procs:
+        try:
+            targets.append(psutil.Process(pid))
+            names[pid] = exe_path
+        except psutil.NoSuchProcess:
+            pass
+    if not targets:
         return
 
-    eqgame_pids = set(get_eqgame_process_pids())
-    mq_folder_exes = dict(are_executables_running_in_folder(mq_folder)) if mq_folder else {}
-    mq_involved = any(
-        pid in eqgame_pids or pid in mq_folder_exes for pid, _ in processes_to_close
-    )
-
-    to_close = dict(processes_to_close)
-    if mq_involved:
-        to_close.update(mq_folder_exes)
-
-    for pid, exe_path in to_close.items():
-        if pid in eqgame_pids:
-            continue  # unload MacroQuest from the game, but do not kill the game
+    graceful = _post_wm_close(set(names))
+    if graceful:
+        _, unclosed = psutil.wait_procs(
+            [p for p in targets if p.pid in graceful], timeout=_GRACEFUL_CLOSE_SEC
+        )
+        force = [p for p in targets if p.pid not in graceful] + list(unclosed)
+    else:
+        force = targets
+    for proc in force:
         try:
-            proc = psutil.Process(pid)
             proc.terminate()
-            proc.wait(timeout=5)
-            print(f"Terminated process '{exe_path}' (PID {pid}).")
         except psutil.NoSuchProcess:
             pass
         except (psutil.AccessDenied, psutil.ZombieProcess) as err:
             print(f"Could not terminate process: {err}")
 
-    if mq_involved:
-        try:
-            force_remote_unload()
-        except Exception as exc:
-            print(f"Error unloading MacroQuest: {exc}")
+    gone, alive = psutil.wait_procs(targets, timeout=5)
+    for proc in gone:
+        print(f"Terminated process '{names[proc.pid]}' (PID {proc.pid}).")
+    for proc in alive:  # the caller's re-scan decides what happens next
+        print(f"Process '{names[proc.pid]}' (PID {proc.pid}) is taking a while to exit.")
+
+
+def _excluding(procs: List[Tuple[int, str]], exclude: frozenset[str]) -> List[Tuple[int, str]]:
+    return [(pid, path) for pid, path in procs if os.path.basename(path).lower() not in exclude]
+
+
+def terminate_folder_processes(folder_path: str) -> None:
+    """Close everything running from *folder_path* but never eqgame; the user closes EQ."""
+    if not IS_WINDOWS:
+        print("Terminating executables is only supported on Windows platforms.")
+        return
+
+    _terminate_processes(are_executables_running_in_folder(folder_path))
+
+
+def _restart_leftovers(mq_folder: str) -> List[Tuple[int, str]]:
+    """Processes that would block a clean relaunch: an in-folder loader copy or the
+    RunFromTemp copy still alive."""
+    return (
+        _excluding(are_executables_running_in_folder(mq_folder), _LEFTOVER_IGNORE)
+        + _spawned_loader_processes(mq_folder)
+    )
+
+
+def restart_macroquest(mq_folder: str) -> None:
+    """Close the MQ folder's processes and relaunch. Caller has confirmed EQ is closed."""
+    if not IS_WINDOWS:
+        return
+    # TOCTOU backstop: if EQ came back after the caller's gate, abort before touching the loader.
+    if get_eqgame_process_pids():
+        raise RuntimeError("EverQuest is still running; close it and restart MacroQuest")
+
+    terminate_folder_processes(mq_folder)
+    _terminate_processes(_spawned_loader_processes(mq_folder))  # RunFromTemp copy lives outside the folder
+
+    leftovers = _restart_leftovers(mq_folder)
+    if leftovers:
+        time.sleep(_RESTART_LEFTOVER_GRACE_SEC)  # give slow exits one more chance
+        leftovers = _restart_leftovers(mq_folder)
+    if leftovers:
+        names = ", ".join(sorted({os.path.basename(path) for _, path in leftovers}))
+        raise RuntimeError(f"{names} could not be closed")
+    run_executable(mq_folder, "MacroQuest.exe")
 
 
 def run_executable(folder_path: str, executable_name: str, args: Sequence[str] | None = None) -> bool:
