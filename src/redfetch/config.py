@@ -8,6 +8,7 @@ import shutil
 # third-party
 import tomlkit
 from dynaconf import Dynaconf, Validator, ValidationError
+from dynaconf.loaders import env_loader
 from platformdirs import user_config_dir, user_data_dir
 
 # Parent Category to folder
@@ -459,25 +460,8 @@ def update_setting(setting_path, setting_value, env=None):
 
 
 def write_env_to_file(new_env):
-    """Update the environment setting in the .env file."""
+    """Persist the selected environment to the .env file; dynaconf reads it back via env_switcher."""
     if env_file_path is None:
         raise RuntimeError("Configuration has not been initialized. Call initialize_config() first.")
 
-    # Read the existing content of the .env file
-    with open(env_file_path, 'r') as file:
-        lines = file.readlines()
-
-    # Update the environment line
-    updated = False
-    for i, line in enumerate(lines):
-        if line.startswith('REDFETCH_ENV='):
-            lines[i] = f'REDFETCH_ENV={new_env}\n'
-            updated = True
-            break
-
-    # If the environment line was not found, add it
-    if not updated:
-        lines.append(f'REDFETCH_ENV={new_env}\n')
-
-    # Write the updated content back to the .env file
-    atomic_write_text(env_file_path, ''.join(lines))
+    env_loader.write(env_file_path, {"REDFETCH_ENV": new_env})

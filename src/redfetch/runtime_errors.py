@@ -47,9 +47,7 @@ def _show_windows_error_dialog(message: str) -> None:
 def _format_error_details(error: BaseException) -> str:
     """Summarize the exception with traceback and details."""
     summary = f"{error.__class__.__name__}: {normalize_error_message(error)}"
-    traceback_text = "".join(
-        traceback.format_exception(type(error), error, error.__traceback__)
-    ).strip()
+    traceback_text = "".join(traceback.format_exception(error)).strip()
     if not traceback_text:
         return summary
     return f"{summary}\n\n{traceback_text}"

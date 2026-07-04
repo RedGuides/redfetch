@@ -13,7 +13,6 @@ else:
     winreg = None
 
 # third-party
-import pyperclip
 from dynaconf import ValidationError
 from textual_fspicker import SelectDirectory
 from rich.console import detect_legacy_windows
@@ -1630,14 +1629,19 @@ class Redfetch(App):
     #
 
     def copy_to_clipboard_with_fallback(self, text: str) -> None:
-        """Copy text to the clipboard, with a pyperclip fallback on legacy Windows terminals."""
-        if detect_legacy_windows():
-            try:
-                pyperclip.copy(text)
-            except Exception as e:
-                self.notify(f"Failed to copy to clipboard: {e}", severity="error")
+        """Textual's native copy uses OSC 52, which the legacy Windows console ignores"""
+        if sys.platform != "win32":
+            self.copy_to_clipboard(text)
             return
-        self.copy_to_clipboard(text)
+        import win32clipboard  # pywin32; Windows-only
+        try:
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception as e:
+            self.notify(f"Failed to copy to clipboard: {e}", severity="error")
 
     def handle_copy_log(self) -> None:
         """Handler for copying log content."""

@@ -8,6 +8,8 @@ import asyncio
 from dataclasses import dataclass
 import httpx
 import aiosqlite
+from hishel import AsyncSqliteStorage
+from hishel.httpx import AsyncCacheClient
 
 from redfetch import config
 from redfetch.sync_types import SyncEventCallback
@@ -65,64 +67,20 @@ def get_protected_navmeshes() -> list[str]:
         return []
 
 
-async def fetch_manifest_cached(db_path: str, client: httpx.AsyncClient) -> tuple[dict, bool]:
-    """Fetch the navmesh manifest with HTTP caching."""
-    current_env = config.settings.ENV
+def _manifest_cache_path(db_path: str) -> str:
+    """Sibling SQLite file holding hishel's manifest HTTP cache."""
+    return os.path.join(os.path.dirname(db_path), "navmesh_http_cache.sqlite")
 
-    # Load cached headers from DB
-    cached_etag = None
-    cached_last_modified = None
-    cached_manifest_json = None
 
-    async with aiosqlite.connect(db_path, timeout=30.0) as conn:
-        async with conn.execute(
-            "SELECT etag, last_modified, manifest_json FROM navmesh_cache WHERE env = ?",
-            (current_env,)
-        ) as cur:
-            row = await cur.fetchone()
-            if row:
-                cached_etag, cached_last_modified, cached_manifest_json = row
-
-    # Build request headers for conditional GET
-    headers = {}
-    if cached_etag:
-        headers["If-None-Match"] = cached_etag
-    if cached_last_modified:
-        headers["If-Modified-Since"] = cached_last_modified
-
-    response = await client.get(NAVMESH_MANIFEST_URL, headers=headers)
-
-    if response.status_code == 304:
-        # Not Modified - use cached manifest
-        if cached_manifest_json:
-            return json.loads(cached_manifest_json), False
-        # Fallback: if we got 304 but have no cached manifest, fetch fresh
-        response = await client.get(NAVMESH_MANIFEST_URL)
-
-    response.raise_for_status()
-
-    # Parse new manifest
-    manifest = response.json()
-
-    # Save new caching headers and manifest to DB
-    new_etag = response.headers.get("ETag")
-    new_last_modified = response.headers.get("Last-Modified")
-
-    async with aiosqlite.connect(db_path, timeout=30.0) as conn:
-        await conn.execute(
-            """
-            INSERT INTO navmesh_cache (env, etag, last_modified, manifest_json)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(env) DO UPDATE SET
-                etag = excluded.etag,
-                last_modified = excluded.last_modified,
-                manifest_json = excluded.manifest_json
-            """,
-            (current_env, new_etag, new_last_modified, json.dumps(manifest))
+async def fetch_manifest(db_path: str) -> dict:
+    """Fetch and return the latest navmesh manifest from the server, bypassing any stale cache."""
+    storage = AsyncSqliteStorage(database_path=_manifest_cache_path(db_path))
+    async with AsyncCacheClient(timeout=30.0, storage=storage) as client:
+        response = await client.get(
+            NAVMESH_MANIFEST_URL, headers={"Cache-Control": "no-cache"}
         )
-        await conn.commit()
-
-    return manifest, True
+        response.raise_for_status()
+        return response.json()
 
 
 async def get_local_navmesh_state(db_path: str, navmesh_dir: str) -> dict[str, str]:
@@ -193,11 +151,9 @@ async def get_local_navmesh_state(db_path: str, navmesh_dir: str) -> dict[str, s
 def _hash_file(file_path: str) -> str | None:
     """Compute MD5 hash of a file."""
     try:
-        hasher = hashlib.md5()
         with open(file_path, "rb") as f:
-            while chunk := f.read(262_144):
-                hasher.update(chunk)
-        return hasher.hexdigest().lower()
+            digest = hashlib.file_digest(f, "md5")
+        return digest.hexdigest().lower()
     except OSError:
         return None
 
@@ -270,8 +226,8 @@ async def sync_navmeshes(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            # Tier 1: Fetch manifest (may be cached); always validate local state
-            manifest, _ = await fetch_manifest_cached(db_path, client)
+            # Tier 1: Fetch manifest (revalidated each run); always validate local state
+            manifest = await fetch_manifest(db_path)
 
             # Tier 2: Get local file state (using cached hashes where possible)
             local_state = await get_local_navmesh_state(db_path, navmesh_dir)
@@ -319,38 +275,25 @@ async def sync_navmeshes(
             if on_event:
                 on_event(("add_total", len(to_download), None))
 
-            # Download in parallel (batch size 5 to respect server limits)
-            BATCH_SIZE = 5
-            failed = 0
-            
-            for i in range(0, len(to_download), BATCH_SIZE):
-                batch = to_download[i : i + BATCH_SIZE]
-                tasks = []
-                for nm in batch:
+            # Download up to 5 files at once; show progress after each finishes.
+     
+            semaphore = asyncio.Semaphore(5)
+
+            async def _download_one(nm: NavMeshFile) -> bool:
+                async with semaphore:
                     print(f"navmesh: Downloading {nm.filename}...")
-                    tasks.append(download_navmesh_file(client, nm, navmesh_dir, db_path))
-                
-                results = await asyncio.gather(*tasks)
-                
-                # Process results
-                for nm, ok in zip(batch, results):
-                    if ok:
-                        if on_event:
-                            on_event(("done", nm.filename, "downloaded"))
-                    else:
-                        if on_event:
-                            on_event(("done", nm.filename, "error"))
-                        failed += 1
+                    ok = await download_navmesh_file(client, nm, navmesh_dir, db_path)
+                if on_event:
+                    on_event(("done", nm.filename, "downloaded" if ok else "error"))
+                return ok
+
+            results = await asyncio.gather(*(_download_one(nm) for nm in to_download))
+            failed = sum(1 for ok in results if not ok)
 
             if failed:
+                # No cache invalidation needed; files are rechecked next run.
+         
                 print(f"navmesh: {failed} meshes failed to download")
-                # Invalidate manifest cache so next run re-checks everything
-                async with aiosqlite.connect(db_path, timeout=30.0) as conn:
-                    await conn.execute(
-                        "DELETE FROM navmesh_cache WHERE env = ?",
-                        (config.settings.ENV,)
-                    )
-                    await conn.commit()
                 return False
 
             print("All navmesh files downloaded successfully")
@@ -358,14 +301,5 @@ async def sync_navmeshes(
 
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             print(f"navmesh sync warning: Error during navmesh sync: {e}")
-            try:
-                async with aiosqlite.connect(db_path, timeout=30.0) as conn:
-                    await conn.execute(
-                        "DELETE FROM navmesh_cache WHERE env = ?",
-                        (config.settings.ENV,),
-                    )
-                    await conn.commit()
-            except Exception as cache_err:
-                print(f"Warning: Failed to clear navmesh manifest cache after error: {cache_err}")
             return False
 

@@ -38,21 +38,27 @@ def get_db_path(db_name: str) -> str:
     return os.path.join(_get_cache_dir(), db_name)
 
 
-def get_db_connection(db_name: str):
-    db_path = get_db_path(db_name)
-    conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False, isolation_level=None)
+def _apply_connection_pragmas(conn) -> None:
+    # Set SQLite to WAL mode, 5s busy timeout, and NORMAL sync. WAL persists for all connections.
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA synchronous=NORMAL")
     except Exception:
         pass
+
+
+def get_db_connection(db_name: str):
+    db_path = get_db_path(db_name)
+    conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False, isolation_level=None)
+    _apply_connection_pragmas(conn)
     return conn
 
 
 def initialize_db(db_name: str):
     db_path = get_db_path(db_name)
     with sqlite3.connect(db_path, timeout=30.0) as conn:
+        _apply_connection_pragmas(conn)
         cursor = conn.cursor()
         initialize_schema(cursor)
         conn.commit()
@@ -125,16 +131,8 @@ def _ensure_navmesh_tables(cursor) -> None:
         )
         """
     )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS navmesh_cache (
-            env TEXT PRIMARY KEY,
-            etag TEXT,
-            last_modified TEXT,
-            manifest_json TEXT
-        )
-        """
-    )
+    # drop the legacy table
+    cursor.execute("DROP TABLE IF EXISTS navmesh_cache")
 
 
 def _reset_sync_schema(cursor) -> None:
@@ -432,7 +430,6 @@ async def record_installed_state(
 def reset_download_dates(cursor) -> None:
     reset_all_versions(cursor)
     cursor.execute("DELETE FROM navmesh_files")
-    cursor.execute("DELETE FROM navmesh_cache")
     try:
         meta.clear_pypi_cache()
     except Exception:
@@ -457,7 +454,6 @@ async def reset_download_dates_async(db_path: str) -> None:
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
         await conn.execute("UPDATE downloads SET version_local = 0")
         await conn.execute("DELETE FROM navmesh_files")
-        await conn.execute("DELETE FROM navmesh_cache")
         await conn.commit()
     try:
         meta.clear_pypi_cache()

@@ -1,12 +1,12 @@
 # standard
 import os
-import glob
 import shutil
 import hashlib
 import stat
 import sys
 import time
 import zlib
+from pathlib import Path
 from zipfile import ZipFile, is_zipfile
 import asyncio
 
@@ -426,15 +426,16 @@ _STALE_DEBRIS_AGE = 3600  # seconds
 def sweep_stale_swap_files(directory: str) -> None:
     """Recursively remove .rfnew/.rfold debris left by prior runs."""
     cutoff = time.time() - _STALE_DEBRIS_AGE
-    base = glob.escape(directory)
+    root = Path(directory)
+    # rglob does not interpret glob wildcards within directory names, e.g. "Very[Vanilla]MQ" is matched literally
     for pattern in ("*.rfnew", "*.rfold*"):
-        for path in glob.glob(os.path.join(base, "**", pattern), recursive=True):
+        for path in root.rglob(pattern):
             try:
                 if os.path.getmtime(path) >= cutoff:
                     continue
             except OSError:
                 continue
-            _remove_if_exists(path)
+            _remove_if_exists(str(path))
 
 
 def _report_locked_target(target_path: str) -> None:

@@ -9,7 +9,6 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
-from cachetools import TTLCache
 from diskcache import Cache
 from redfetch import config
 
@@ -19,7 +18,6 @@ MANIFEST_URL = f"{BASE_URL}/resources-manifest"
 
 # Manifest cache: 60 seconds TTL
 _MANIFEST_TTL_SECONDS = 60
-_manifest_cache: TTLCache = TTLCache(maxsize=1, ttl=_MANIFEST_TTL_SECONDS)  # In-memory
 _manifest_disk_cache: Optional[Cache] = None  # Lazy-loaded disk cache
 
 
@@ -36,9 +34,8 @@ def _get_manifest_disk_cache() -> Cache:
 
 
 def clear_manifest_cache() -> None:
-    """Clear and close both in-memory and disk manifest caches."""
+    """Clear and close the disk manifest cache."""
     global _manifest_disk_cache
-    _manifest_cache.clear()
     if _manifest_disk_cache is not None:
         try:
             _manifest_disk_cache.clear()
@@ -65,18 +62,12 @@ async def get_json(client: httpx.AsyncClient, url: str, params: Optional[Dict[st
 
 async def fetch_manifest_cached(client: httpx.AsyncClient) -> dict:
     """Fetch manifest with a 60-second cache."""
-    manifest = _manifest_cache.get("manifest")
-    if manifest:
-        return manifest
-
     disk_cache = _get_manifest_disk_cache()
     manifest = disk_cache.get("manifest")
     if manifest:
-        _manifest_cache["manifest"] = manifest
         return manifest
 
     manifest = await get_json(client, MANIFEST_URL)
-    _manifest_cache["manifest"] = manifest
     disk_cache.set("manifest", manifest, expire=_MANIFEST_TTL_SECONDS)
     return manifest
 
