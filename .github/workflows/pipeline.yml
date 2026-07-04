@@ -60,6 +60,13 @@ jobs:
         run: |
           hatch build
 
+      - name: Upload Python distribution
+        if: github.ref == 'refs/heads/develop'
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-dist
+          path: dist/
+
       - name: Get Version
         id: get_version
         run: |
@@ -89,22 +96,26 @@ jobs:
         with:
           fetch-depth: 0  # Ensure full Git history is available for versioning
 
+      - name: Download Python distribution
+        if: github.ref == 'refs/heads/develop'
+        uses: actions/download-artifact@v8
+        with:
+          name: python-dist
+          path: dist
+
       - name: Set Environment Variables
         id: set_env_vars
         shell: pwsh
         run: |
-          # Set static environment variables
-          "PYAPP_PROJECT_NAME=redfetch" >> $env:GITHUB_ENV
           "PYAPP_EXEC_MODULE=redfetch.main" >> $env:GITHUB_ENV
           "PYAPP_PASS_LOCATION=1" >> $env:GITHUB_ENV
 
-          # Conditionally set PYAPP_PIP_EXTRA_ARGS based on the branch or tag
           if ($env:GITHUB_REF -eq 'refs/heads/develop') {
-            $pipArgs = "--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/"
+            "PYAPP_EMBED_WHEEL=1" >> $env:GITHUB_ENV
           } else {
-            $pipArgs = ""
+            "PYAPP_PROJECT_NAME=redfetch" >> $env:GITHUB_ENV
           }
-          "PYAPP_PIP_EXTRA_ARGS=$pipArgs" >> $env:GITHUB_ENV
+          "PYAPP_PIP_EXTRA_ARGS=" >> $env:GITHUB_ENV
 
           # Output the values for verification
           Get-Content $env:GITHUB_ENV
@@ -145,18 +156,23 @@ jobs:
 
       - name: Build PyApp Executable
         run: |
-          $env:PYAPP_PROJECT_NAME = "${{ env.PYAPP_PROJECT_NAME }}"
+          if ($env:PYAPP_EMBED_WHEEL -eq '1') {
+            # Develop embeds the built wheel so its deps resolve from PyPI rather than TestPyPI
+            $wheel = Get-ChildItem -Path "$env:GITHUB_WORKSPACE\dist\*.whl" | Select-Object -First 1
+            if (-not $wheel) { throw "No redfetch wheel found in dist/" }
+            $env:PYAPP_PROJECT_PATH = $wheel.FullName
+            Remove-Item Env:PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
+            Remove-Item Env:PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
+          }
+
           $env:PYAPP_EXEC_MODULE = "${{ env.PYAPP_EXEC_MODULE }}"
           $env:PYAPP_PASS_LOCATION = "${{ env.PYAPP_PASS_LOCATION }}"
           $env:PYAPP_PIP_EXTRA_ARGS = "${{ env.PYAPP_PIP_EXTRA_ARGS }}"
-          $env:PYAPP_PROJECT_VERSION = "${{ env.PYAPP_PROJECT_VERSION }}"
-          
-          Write-Host "PYAPP_PROJECT_NAME: $env:PYAPP_PROJECT_NAME"
+
           Write-Host "PYAPP_EXEC_MODULE: $env:PYAPP_EXEC_MODULE"
           Write-Host "PYAPP_PASS_LOCATION: $env:PYAPP_PASS_LOCATION"
           Write-Host "PYAPP_PIP_EXTRA_ARGS: $env:PYAPP_PIP_EXTRA_ARGS"
-          Write-Host "PYAPP_PROJECT_VERSION: $env:PYAPP_PROJECT_VERSION"
-          
+
           cargo build --release
         working-directory: .\pyapp-latest
         shell: pwsh
