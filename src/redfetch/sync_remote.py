@@ -4,18 +4,14 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-import httpx
-
-from redfetch import api
-from redfetch import net
 from redfetch.sync_discovery import payload_category_id, payload_title, payload_version_id
 from redfetch.sync_types import (
-    DesiredInstallTarget,
     DesiredSet,
-    LocalSnapshot,
     RemoteArtifact,
     RemoteResourceState,
     RemoteSnapshot,
+    RemoteStatus,
+    SyncInfo,
 )
 
 
@@ -30,11 +26,14 @@ def _normalize_hash(raw_hash: str | None) -> str | None:
 
 
 class _PayloadDetails(NamedTuple):
-    """Bundle of fields extracted from the API for building a RemoteResourceState."""
+    """Manifest data needed to describe a remote resource and choose its status."""
     title: str | None
     category_id: int | None
     version_id: int | None
     artifact: RemoteArtifact | None
+    access_tier: str | None
+    requires_license: bool
+    files_count: int
 
 
 def _extract_artifact(payload: dict) -> RemoteArtifact | None:
@@ -53,130 +52,84 @@ def _extract_artifact(payload: dict) -> RemoteArtifact | None:
     )
 
 
-def _payload_details(payload: dict | None) -> _PayloadDetails:
-    """Bundle all fields extracted from a raw API payload."""
-    if not payload:
-        return _PayloadDetails(None, None, None, None)
+def _payload_details(payload: dict) -> _PayloadDetails:
+    """Read the manifest fields used to build a remote resource state."""
+    current_files = payload.get("current_files")
+    files_count = len(current_files) if isinstance(current_files, list) else 0
     return _PayloadDetails(
         title=payload_title(payload),
         category_id=payload_category_id(payload),
         version_id=payload_version_id(payload),
         artifact=_extract_artifact(payload),
+        access_tier=payload.get("access_tier"),
+        requires_license=bool(payload.get("requires_license", False)),
+        files_count=files_count,
     )
 
 
-def _needs_live_check(
+def resolve_status(
     *,
-    desired_targets: list[DesiredInstallTarget],
-    local_snapshot: LocalSnapshot,
-    manifest_details: _PayloadDetails | None,
-) -> bool:
-    """Return True if the resource needs an update, or data is incomplete, or config has changed."""
-    if manifest_details is None or manifest_details.version_id is None or manifest_details.artifact is None:
-        return True
-
-    for target in desired_targets:
-        local_state = local_snapshot.install_targets.get(target.target_key)
-        if local_state is None:
-            return True
-        if local_state.version_local is None:
-            return True
-        if local_state.version_local != manifest_details.version_id:
-            return True
-        if (
-            local_state.resolved_path != target.resolved_path
-            or local_state.subfolder != target.subfolder
-            or local_state.flatten != target.flatten
-            or local_state.protected_files != target.protected_files
-        ):
-            return True
-
-    return False
-
-
-def _blocked_state(
     resource_id: str,
-    *,
-    status: str,
-    manifest_details: _PayloadDetails | None,
-    live_title: str | None = None,
-    live_category_id: int | None = None,
-) -> RemoteResourceState:
-    """Build a RemoteResourceState for a resource that is blocked."""
-    return RemoteResourceState(
-        resource_id=resource_id,
-        title=(manifest_details.title if manifest_details else None) or live_title,
-        category_id=(manifest_details.category_id if manifest_details and manifest_details.category_id is not None else live_category_id),
-        version_id=manifest_details.version_id if manifest_details else None,
-        status=status,
-        artifact=None,
-        source_note="manifest" if manifest_details else "live_access_only",
-    )
+    access_tier: str | None,
+    requires_license: bool,
+    files_count: int,
+    is_level_2: bool,
+    is_moderator: bool,
+    licensed: set[str],
+) -> RemoteStatus:
+    """Return the download status implied by the manifest access fields."""
+    if not is_moderator:
+        if access_tier == "restricted":
+            return "access_denied"
+        if access_tier == "level2" and not is_level_2:
+            return "needs_level_2"
+        if requires_license and resource_id not in licensed:
+            return "needs_license"
+    if files_count == 0:
+        return "no_files"
+    if files_count > 1:
+        return "multiple_files"
+    return "downloadable"
 
 
-async def fetch_remote_snapshot(
+def fetch_remote_snapshot(
     *,
-    client: httpx.AsyncClient,
     desired_set: DesiredSet,
-    local_snapshot: LocalSnapshot,
+    manifest: dict,
+    sync_info: SyncInfo,
 ) -> RemoteSnapshot:
-    """Assemble the remote half of the sync picture: version, status, and download info per resource."""
-    manifest = await net.fetch_manifest_cached(client)
+    """Build the remote sync state from the manifest and account permissions."""
     manifest_resources = manifest.get("resources", {}) or {}
-
     remote_resources: dict[str, RemoteResourceState] = {}
-    ids_needing_live_check: list[str] = []
-    manifest_cache: dict[str, _PayloadDetails | None] = {}
 
     for resource_id in desired_set.resource_ids:
         manifest_entry = manifest_resources.get(resource_id)
-        manifest_details = _payload_details(manifest_entry) if manifest_entry else None
-        manifest_cache[resource_id] = manifest_details
-        desired_targets = desired_set.resource_targets(resource_id)
-        if _needs_live_check(
-            desired_targets=desired_targets,
-            local_snapshot=local_snapshot,
-            manifest_details=manifest_details,
-        ):
-            ids_needing_live_check.append(resource_id)
-            continue
-
-        remote_resources[resource_id] = RemoteResourceState(
-            resource_id=resource_id,
-            title=manifest_details.title,
-            category_id=manifest_details.category_id,
-            version_id=manifest_details.version_id,
-            status="manifest_current",
-            artifact=manifest_details.artifact,
-            source_note="manifest_only",
-        )
-
-    if ids_needing_live_check:
-        live_records = await api.fetch_resource_records_batch(client, ids_needing_live_check)
-        for record in live_records:
-            resource_id = record.resource_id
-            manifest_details = manifest_cache.get(resource_id)
-            live_title = payload_title(record.resource)
-            live_category_id = payload_category_id(record.resource)
-
-            if record.status != "downloadable":
-                remote_resources[resource_id] = _blocked_state(
-                    resource_id,
-                    status=record.status,
-                    manifest_details=manifest_details,
-                    live_title=live_title,
-                    live_category_id=live_category_id,
-                )
-                continue
-
+        if manifest_entry is None:
             remote_resources[resource_id] = RemoteResourceState(
                 resource_id=resource_id,
-                title=(manifest_details.title if manifest_details else None) or live_title,
-                category_id=(manifest_details.category_id if manifest_details and manifest_details.category_id is not None else live_category_id),
-                version_id=manifest_details.version_id if manifest_details else None,
-                status="downloadable",
-                artifact=manifest_details.artifact if manifest_details else None,
-                source_note="manifest_plus_access_check" if manifest_details else "live_access_only",
+                status="not_found",
+                source_note="manifest_absent",
             )
+            continue
+
+        details = _payload_details(manifest_entry)
+        status = resolve_status(
+            resource_id=resource_id,
+            access_tier=details.access_tier,
+            requires_license=details.requires_license,
+            files_count=details.files_count,
+            is_level_2=sync_info.is_level_2,
+            is_moderator=sync_info.is_moderator,
+            licensed=sync_info.licensed_ids,
+        )
+        remote_resources[resource_id] = RemoteResourceState(
+            resource_id=resource_id,
+            title=details.title,
+            category_id=details.category_id,
+            version_id=details.version_id,
+            status=status,
+            artifact=details.artifact if status == "downloadable" else None,
+            source_note="manifest",
+        )
 
     return RemoteSnapshot(resources=remote_resources)

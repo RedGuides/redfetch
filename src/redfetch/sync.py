@@ -7,7 +7,9 @@ import httpx
 from filelock import FileLock, Timeout
 from platformdirs import user_data_dir
 
+from redfetch import api
 from redfetch import config
+from redfetch import net
 from redfetch import store
 from redfetch import sync_discovery
 from redfetch import sync_executor
@@ -151,16 +153,20 @@ async def prepare_sync(
         timeout=30.0,
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
     ) as client:
-        desired_set = await sync_discovery.discover_desired_set(
-            client=client,
-            resource_ids=resource_ids,
-            settings_env=settings_env,
-        )
-        remote_snapshot = await sync_remote.fetch_remote_snapshot(
-            client=client,
-            desired_set=desired_set,
-            local_snapshot=local_snapshot,
-        )
+        manifest = await net.fetch_manifest_cached(client)
+        sync_info = await api.fetch_sync_info(client)
+
+    desired_set = sync_discovery.discover_desired_set(
+        resource_ids=resource_ids,
+        sync_info=sync_info,
+        manifest=manifest,
+        settings_env=settings_env,
+    )
+    remote_snapshot = sync_remote.fetch_remote_snapshot(
+        desired_set=desired_set,
+        manifest=manifest,
+        sync_info=sync_info,
+    )
 
     execution_plan = sync_planner.build_execution_plan(
         desired_set=desired_set,
@@ -174,6 +180,7 @@ async def prepare_sync(
         remote_snapshot=remote_snapshot,
         local_snapshot=local_snapshot,
         execution_plan=execution_plan,
+        sync_info=sync_info,
     )
 
 

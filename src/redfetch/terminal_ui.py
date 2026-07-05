@@ -41,6 +41,7 @@ from redfetch import processes
 from redfetch import utils
 from redfetch import meta
 from redfetch import sync
+from redfetch import update_status
 from redfetch import desktop_shortcut
 from redfetch.sync_types import SyncEvent, SyncOutcome
 from redfetch.runtime_errors import display_fatal_error
@@ -1271,7 +1272,7 @@ class Redfetch(App):
         await self.switch_mode("main")
 
         # Start background tasks after the UI is ready
-        self.load_user_level()
+        self.load_startup_status()
         self.check_mq_status_worker()
 
     def on_unmount(self) -> None:
@@ -2101,13 +2102,43 @@ class Redfetch(App):
         return True
     
     @work
-    async def load_user_level(self):
+    async def load_startup_status(self):
+        """Set the account level and print an update summary at startup."""
         username = await auth.get_username()
-        headers = await auth.get_api_headers()
-        level_2 = await api.is_kiss_downloadable(headers)
-        # AccountTab + FetchTab watch these and render their own label/button/welcome
-        self.is_level_2 = level_2
-        self.username = username  # set last so the recomputes see the resolved level
+
+        try:
+            headers = await auth.get_api_headers()
+        except RuntimeError:
+            # Token expired mid-session — unknown, not "level 1": keep identity, leave is_level_2.
+            self.username = username
+            return
+
+        try:
+            db_name = f"{self.current_env}_resources.db"
+            await asyncio.to_thread(store.initialize_db, db_name)
+            prepared = await sync.prepare_sync(store.get_db_path(db_name), headers)
+        except Exception:
+            self.username = username
+            print("Couldn't check for updates right now.")
+            return
+
+        # is_level_2 first so the username-triggered recompute sees the resolved level.
+        self.is_level_2 = prepared.sync_info.is_level_2
+        self.username = username
+
+        outdated = len(update_status.build_items_from_plan(prepared.execution_plan))
+        not_installed = sum(
+            1 for action in prepared.execution_plan.actions.values()
+            if action.action == "download" and action.reason == "not_installed"
+        )
+        if outdated:
+            s = "" if outdated == 1 else "s"
+            print(f"{outdated} resource{s} to update — press Update to fetch.")
+        elif not_installed:
+            s = "" if not_installed == 1 else "s"
+            print(f"{not_installed} resource{s} to download — press Update to fetch.")
+        else:
+            print("Watched resources are up to date.")
 
     def handle_ding_check(self) -> None:
         """Check if user has upgraded to level 2 and update UI accordingly."""
@@ -2122,8 +2153,8 @@ class Redfetch(App):
             raise RuntimeError("Intentional crash test from _check_ding_level_worker.")
 
         headers = await auth.get_api_headers()
-        # Force a fresh check, bypassing cache
-        if await api.is_kiss_downloadable(headers, force_refresh=True):
+        sync_info = await api.get_sync_info(headers)
+        if sync_info.is_level_2:
             # User is now level 2! AccountTab + FetchTab react to the reactives below.
             self.username = self.username or await auth.get_username()
             self.is_level_2 = True

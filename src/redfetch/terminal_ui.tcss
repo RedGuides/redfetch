@@ -211,9 +211,10 @@ Label {
 }
 #settings_grid {
     layout: grid;
-    grid-size: 4;  
-    grid-rows: auto;   
-    border: round $secondary-background;  
+    grid-size: 4;
+    grid-rows: auto;
+    grid-gutter: 1 0;
+    border: round $secondary-background;
     margin-bottom: 1;
     min-width: 50;
 }

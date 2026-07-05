@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
-from redfetch import api
 from redfetch import config
 from redfetch import utils
 from redfetch.sync_types import (
     DesiredInstallTarget,
     DesiredSet,
+    SyncInfo,
     make_child_target_key,
     make_root_target_key,
     parse_target_key,
@@ -100,10 +96,9 @@ def _get_flatten(resource_id: str, parent_id: str | None, settings_env: str) -> 
 
 @dataclass
 class _RootSpec:
-    """Tracks why a resource was selected for sync and its raw API payload."""
+    """Tracks why a resource was selected for sync and its manifest payload."""
     sources: set[str] = field(default_factory=set)
     payload: dict | None = None
-    discovery_block: str | None = None
 
 
 def payload_title(payload: dict | None) -> str | None:
@@ -124,7 +119,6 @@ def payload_category_id(payload: dict | None) -> int | None:
 
 
 def payload_version_id(payload: dict | None) -> int | None:
-    """Only the manifest endpoint provides this; the live XenForo API does not."""
     if not payload:
         return None
     raw = payload.get("version_id")
@@ -143,48 +137,22 @@ def _category_allowed_in_env(category_id: int | None, settings_env: str) -> bool
 
 
 def _root_sources_for_full_sync(
-    watched_resources: list[dict],
-    licenses: list[dict],
+    sync_info: SyncInfo,
+    manifest_resources: dict[str, dict],
     settings_env: str,
 ) -> dict[str, _RootSpec]:
-    """Collect every resource that qualifies for a full sync and record how each one qualified."""
+    """Collect every resource that qualifies for a full sync and how each one qualified."""
     specs: dict[str, _RootSpec] = {}
 
-    for payload in watched_resources:
-        category_id = payload_category_id(payload)
-        if not _category_allowed_in_env(category_id, settings_env):
+    tagged_ids = [(rid, "watching") for rid in sync_info.watched]
+    tagged_ids += [(rid, "licensed") for rid in sync_info.licensed_ids]
+    for resource_id, source in tagged_ids:
+        manifest_entry = manifest_resources.get(resource_id)
+        if not _category_allowed_in_env(payload_category_id(manifest_entry), settings_env):
             continue
-        resource_id = str(payload["resource_id"])
         spec = specs.setdefault(resource_id, _RootSpec())
-        spec.sources.add("watching")
-        spec.payload = payload
-
-    licenses_by_resource: dict[str, list[tuple[dict, bool]]] = {}
-    for license_info in licenses:
-        if not license_info.get("active", False):
-            continue
-        end_date = license_info.get("end_date", 0)
-        is_expired = end_date != 0 and end_date < time.time()
-        payload = license_info.get("resource") or {}
-        category_id = payload_category_id(payload)
-        if not _category_allowed_in_env(category_id, settings_env):
-            continue
-        resource_id = str(payload["resource_id"])
-        licenses_by_resource.setdefault(resource_id, []).append((payload, is_expired))
-
-    for resource_id, resource_licenses in licenses_by_resource.items():
-        spec = specs.setdefault(resource_id, _RootSpec())
-        spec.sources.add("licensed")
-        valid_license = next(
-            (lic_payload for lic_payload, is_expired in resource_licenses if not is_expired),
-            None,
-        )
-        if valid_license is None:
-            spec.discovery_block = "license_expired"
-            spec.payload = resource_licenses[0][0]
-        else:
-            spec.discovery_block = None
-            spec.payload = valid_license
+        spec.sources.add(source)
+        spec.payload = manifest_entry
 
     settings_for_env = config.settings.from_env(settings_env)
     for resource_id, resource_info in settings_for_env.SPECIAL_RESOURCES.items():
@@ -311,19 +279,17 @@ def _expand_dependencies(
         )
 
 
-async def discover_desired_set(
+def discover_desired_set(
     *,
-    client: httpx.AsyncClient,
     resource_ids: list[str] | None,
+    sync_info: SyncInfo,
+    manifest: dict,
     settings_env: str,
 ) -> DesiredSet:
     """Main entry point for discovery: figure out everything that needs to be installed and where it goes."""
     if resource_ids is None:
-        watched_resources, licenses = await asyncio.gather(
-            api.fetch_watched_resources(client),
-            api.fetch_licenses(client),
-        )
-        root_specs = _root_sources_for_full_sync(watched_resources, licenses, settings_env)
+        manifest_resources = manifest.get("resources", {}) or {}
+        root_specs = _root_sources_for_full_sync(sync_info, manifest_resources, settings_env)
         desired_set = DesiredSet(mode="full")
     else:
         normalized_ids = [str(resource_id) for resource_id in resource_ids]
@@ -341,8 +307,6 @@ async def discover_desired_set(
             payload=spec.payload,
             settings_env=settings_env,
         )
-        if spec.discovery_block:
-            root_target.discovery_block = spec.discovery_block
         _expand_dependencies(
             desired_set,
             parent_target=root_target,

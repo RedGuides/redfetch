@@ -16,6 +16,8 @@ RemoteStatus = Literal[
     "manifest_current",
     "downloadable",
     "access_denied",
+    "needs_level_2",
+    "needs_license",
     "no_files",
     "multiple_files",
     "not_found",
@@ -29,6 +31,8 @@ PlanReason = Literal[
     "install_context_changed",
     "not_desired",
     "access_denied",
+    "needs_level_2",
+    "needs_license",
     "no_files",
     "multiple_files",
     "not_found",
@@ -37,7 +41,6 @@ PlanReason = Literal[
     "parent_failed",
     "dependency_cycle",
     "unknown_category",
-    "license_expired",
 ]
 ResultOutcome = Literal["downloaded", "skipped", "blocked", "untracked", "error"]
 
@@ -52,6 +55,8 @@ class ReasonInfo:
 
 PLAN_REASON_META: dict[PlanReason, ReasonInfo] = {
     "access_denied":           ReasonInfo("You don't have permission to download this resource."),
+    "needs_level_2":           ReasonInfo("Requires Level 2 membership at redguides.com."),
+    "needs_license":           ReasonInfo("You don't hold a license for this resource."),
     "no_files":                ReasonInfo("This resource has no downloadable files.", quiet=True, summary_label="Resources with no files"),
     "multiple_files":          ReasonInfo("This resource has multiple files and cannot be auto-synced. Ask the author to release it as a .zip file."),
     "not_found":               ReasonInfo("This resource was not found."),
@@ -65,7 +70,6 @@ PLAN_REASON_META: dict[PlanReason, ReasonInfo] = {
     "not_installed":           ReasonInfo("Not yet installed locally."),
     "already_current":         ReasonInfo("Already up to date."),
     "install_context_changed": ReasonInfo("Install location or settings changed; re-downloading."),
-    "license_expired":         ReasonInfo("Your license for this resource has expired.", quiet=True, summary_label="Licenses expired"),
 }
 
 
@@ -131,7 +135,6 @@ class DesiredInstallTarget(TargetIdentity):
     flatten: bool = False
     protected_files: list[str] = Field(default_factory=list)
     explicit_root: bool = False
-    discovery_block: PlanReason | None = None
 
 
 class DesiredSet(SyncModel):
@@ -158,7 +161,6 @@ class DesiredSet(SyncModel):
         existing.flatten = existing.flatten or target.flatten
         existing.protected_files = existing.protected_files or target.protected_files
         existing.explicit_root = existing.explicit_root or target.explicit_root
-        existing.discovery_block = existing.discovery_block or target.discovery_block
         return existing
 
     def resource_targets(self, resource_id: str) -> list[DesiredInstallTarget]:
@@ -198,6 +200,16 @@ class RemoteSnapshot(SyncModel):
     """All remote resource states collected for this run."""
 
     resources: dict[str, RemoteResourceState] = Field(default_factory=dict)
+
+
+class SyncInfo(SyncModel):
+    """Per-user sync state from ``/api/rgsync``."""
+
+    is_level_2: bool = False
+    is_moderator: bool = False
+    watched: set[str] = Field(default_factory=set)          # resource_ids
+    licensed_ids: set[str] = Field(default_factory=set)     # resource_ids with a currently-valid license
+    licenses: list[dict] = Field(default_factory=list)      # raw {resource_id, end_date, subscription} for UX
 
 
 class LocalInstallState(TargetIdentity):
@@ -346,6 +358,7 @@ class PreparedSync:
     remote_snapshot: RemoteSnapshot
     local_snapshot: LocalSnapshot
     execution_plan: ExecutionPlan
+    sync_info: SyncInfo
 
 
 @dataclass(frozen=True, slots=True)

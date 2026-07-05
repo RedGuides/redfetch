@@ -182,8 +182,7 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
 async def update_command_async(db_name: str, db_path: str, force: bool) -> None:
     await asyncio.to_thread(utils.sweep_stale_update_debris)
     headers = await auth.get_api_headers()
-    # Only check KISS access for bulk operations (not single resource downloads)
-    if not await api.is_kiss_downloadable(headers):
+    if not (await api.get_sync_info(headers)).is_level_2:
         console.print(
             "[bold yellow]Warning:[/bold yellow] You're not level 2 on RedGuides, so some resources will not be downloadable."
         )
