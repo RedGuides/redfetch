@@ -2,15 +2,10 @@
 import asyncio
 import os
 import sys
-import subprocess
 import traceback
 import webbrowser
 from pathlib import Path
 from itertools import cycle
-if sys.platform == 'win32':
-    import winreg
-else:
-    winreg = None
 
 # third-party
 from dynaconf import ValidationError
@@ -41,6 +36,7 @@ from redfetch import processes
 from redfetch import utils
 from redfetch import meta
 from redfetch import sync
+from redfetch import shortcuts
 from redfetch import desktop_shortcut
 from redfetch.sync_types import ExecutionPlan, SyncEvent, SyncOutcome
 from redfetch.runtime_errors import display_fatal_error
@@ -103,7 +99,7 @@ def _startup_update_summary(execution_plan: ExecutionPlan) -> tuple[int, str]:
         for action in execution_plan.actions.values()
     ) else "download"
     s = "" if count == 1 else "s"
-    return count, f"{count} resource{s} to {verb} — press Update to fetch."
+    return count, f"{count} resource{s} will {verb} if you press the big button."
 
 
 def make_launch_toggles(selected: set[str]) -> Horizontal:
@@ -805,96 +801,31 @@ class ShortcutsTab(ScrollableContainer):
 
     def compose(self) -> ComposeResult:
         with ItemGrid(id="executables_grid"):
-            yield Button(
-                "Very Vanilla MQ 🍦",
-                id="run_macroquest",
-                classes="executable",
-                tooltip="Run MacroQuest, the legendary add-on platform for EverQuest.",
-            )
-            yield Button(
-                "MeshUpdater 🌐",
-                id="run_meshupdater",
-                classes="executable",
-                tooltip="Update EQ zone meshes, needed for MQNav.",
-            )
-            yield Button(
-                "EQBCS 💬",
-                id="run_eqbcs",
-                classes="executable",
-                tooltip="run EQBCs.exe, the server for EQ Box Chat (MQ2EQBC).",
-            )
-            yield Button(
-                "EQ LaunchPad 🐲",
-                id="launch_everquest",
-                classes="executable",
-                tooltip="The official launcher and updater for EverQuest.",
-            )
-            yield Button(
-                "EQGame 🐲🩹",
-                id="launch_everquest_client",
-                classes="executable",
-                tooltip="The EverQuest client *WITHOUT* updating.",
-            )
-            yield Button(
-                "MySEQ 📍",
-                id="run_myseq",
-                classes="executable",
-                tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.",
-            )
-
+            for runnable in shortcuts.RUNNABLES:
+                yield Button(
+                    runnable.label,
+                    id=f"run_{runnable.key}",
+                    classes="executable",
+                    tooltip=runnable.tooltip,
+                )
         with ItemGrid(id="folders_grid"):
-            yield Button(
-                "Downloads 📦",
-                id="open_dl_folder",
-                classes="folder",
-                tooltip="Open redfetch downloads folder",
-            )
-            yield Button(
-                "Very Vanilla MQ 🍦",
-                id="open_vvmq_folder",
-                classes="folder",
-                tooltip="Open MacroQuest folder",
-            )
-            yield Button(
-                "EverQuest 🐲",
-                id="open_eq_folder",
-                classes="folder",
-                tooltip="Open EverQuest game folder",
-            )
-            yield Button(
-                "MySEQ 📍",
-                id="open_myseq_folder",
-                classes="folder",
-                tooltip="Open MySEQ folder",
-            )
-
+            for openable in shortcuts.OPENABLES:
+                if openable.css == "folder":
+                    yield Button(
+                        openable.label,
+                        id=f"open_{openable.key}",
+                        classes="folder",
+                        tooltip=openable.tooltip,
+                    )
         with ItemGrid(id="files_grid"):
-            yield Button(
-                "settings.local.toml 📦",
-                id="open_redfetch_config",
-                classes="file",
-                tooltip="Open the redfetch config file.",
-            )
-            yield Button(
-                "MacroQuest.ini 🍦",
-                id="open_mq_config",
-                classes="file",
-                tooltip="Open VV MQ's config file.",
-            )
-            yield Button(
-                "eqclient.ini 🐲",
-                id="open_eq_config",
-                classes="file",
-                tooltip="Open EverQuest's config file.",
-            )
-            yield Button(
-                "eqhost.txt 🐲",
-                id="open_eq_host",
-                classes="file",
-                tooltip=(
-                    "Open EverQuest's eqhost.txt, which is useful for emulators."
-                ),
-            )
+            for openable in shortcuts.OPENABLES:
+                if openable.css == "file":
+                    yield Button(
+                        openable.label,
+                        id=f"open_{openable.key}",
+                        classes="file",
+                        tooltip=openable.tooltip,
+                    )
 
     def on_mount(self) -> None:
         for attr in ("is_updating", "download_folder", "eq_path", "current_env"):
@@ -904,106 +835,32 @@ class ShortcutsTab(ScrollableContainer):
         self._recompute()  # external installs/deletes fire no reactive; re-probe fs on show
 
     def _recompute(self) -> None:
-        """Derive button enabled/disabled state from app state + filesystem probes."""
-        app: "Redfetch" = self.app  # type: ignore[assignment]
-
-        # Disable entire tab while busy.
-        self.disabled = app.is_updating
-
-        # VVMQ-related executables
-        vvmq_path = utils.get_vvmq_path()
-        self.query_one("#run_macroquest", Button).disabled = (
-            not utils.validate_file_in_path(vvmq_path, "MacroQuest.exe")
-        )
-        self.query_one("#run_meshupdater", Button).disabled = (
-            not utils.validate_file_in_path(vvmq_path, "MeshUpdater.exe")
-        )
-        self.query_one("#run_eqbcs", Button).disabled = (
-            not utils.validate_file_in_path(vvmq_path, "EQBCS.exe")
-        )
-
-        # EQ-related executables and folders
-        eq_path = app.eq_path
-        eq_path_exists = bool(eq_path) and os.path.exists(eq_path)
-        self.query_one("#launch_everquest", Button).disabled = (
-            not utils.validate_file_in_path(eq_path, "LaunchPad.exe")
-        )
-        self.query_one("#launch_everquest_client", Button).disabled = (
-            not utils.validate_file_in_path(eq_path, "eqgame.exe")
-        )
-        self.query_one("#open_eq_folder", Button).disabled = not eq_path_exists
-
-        # MySEQ
-        myseq_path = utils.get_myseq_path()
-        self.query_one("#run_myseq", Button).disabled = (
-            not utils.validate_file_in_path(myseq_path, "MySEQ.exe")
-        )
-        self.query_one("#open_myseq_folder", Button).disabled = not bool(myseq_path)
-
-        # Folder shortcuts
-        self.query_one("#open_dl_folder", Button).disabled = not bool(app.download_folder)
-        self.query_one("#open_vvmq_folder", Button).disabled = not bool(vvmq_path)
+        """Enable each shortcut only when its target resolves on disk."""
+        self.disabled = self.app.is_updating
+        for runnable in shortcuts.RUNNABLES:
+            self.query_one(f"#run_{runnable.key}", Button).disabled = (
+                not shortcuts.runnable_available(runnable)
+            )
+        for openable in shortcuts.OPENABLES:
+            self.query_one(f"#open_{openable.key}", Button).disabled = (
+                not shortcuts.openable_available(openable)
+            )
 
     #
     # Event handlers for widgets on this tab
     #
 
-    @on(Button.Pressed, "#open_dl_folder")
-    def handle_open_dl_folder_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_folder(utils.get_current_download_folder())
+    @on(Button.Pressed, ".executable")
+    def handle_run_pressed(self, event: Button.Pressed) -> None:
+        runnable = shortcuts.find_runnable(event.button.id.removeprefix("run_"))
+        if runnable:
+            self.app.run_target(runnable)
 
-    @on(Button.Pressed, "#open_eq_folder")
-    def handle_open_eq_folder_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_folder(self.app.eq_path)
-
-    @on(Button.Pressed, "#open_vvmq_folder")
-    def handle_open_vvmq_folder_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_folder(utils.get_vvmq_path())
-
-    @on(Button.Pressed, "#run_macroquest")
-    def handle_run_macroquest_pressed(self, event: Button.Pressed) -> None:
-        self.app.run_executable(utils.get_vvmq_path(), "MacroQuest.exe")
-
-    @on(Button.Pressed, "#launch_everquest")
-    def handle_launch_everquest_pressed(self, event: Button.Pressed) -> None:
-        self.app.run_executable(self.app.eq_path, "LaunchPad.exe")
-
-    @on(Button.Pressed, "#launch_everquest_client")
-    def handle_launch_everquest_client_pressed(self, event: Button.Pressed) -> None:
-        self.app.run_executable(self.app.eq_path, "eqgame.exe", ["patchme"])
-
-    @on(Button.Pressed, "#run_myseq")
-    def handle_run_myseq_pressed(self, event: Button.Pressed) -> None:
-        self.app.run_myseq_executable()
-
-    @on(Button.Pressed, "#open_myseq_folder")
-    def handle_open_myseq_folder_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_myseq_folder()
-
-
-    @on(Button.Pressed, "#run_meshupdater")
-    def handle_run_meshupdater_pressed(self, event: Button.Pressed) -> None:
-        self.app.run_executable(utils.get_vvmq_path(), "MeshUpdater.exe")
-
-    @on(Button.Pressed, "#run_eqbcs")
-    def handle_run_eqbcs_pressed(self, event: Button.Pressed) -> None:
-        self.app.run_executable(utils.get_vvmq_path(), "EQBCS.exe")
-
-    @on(Button.Pressed, "#open_redfetch_config")
-    def handle_open_redfetch_config_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_redfetch_config()
-
-    @on(Button.Pressed, "#open_mq_config")
-    def handle_open_mq_config_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_mq_config()
-
-    @on(Button.Pressed, "#open_eq_config")
-    def handle_open_eq_config_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_eq_config()
-
-    @on(Button.Pressed, "#open_eq_host")
-    def handle_open_eq_host_pressed(self, event: Button.Pressed) -> None:
-        self.app.open_eq_host()
+    @on(Button.Pressed, ".folder, .file")
+    def handle_open_pressed(self, event: Button.Pressed) -> None:
+        openable = shortcuts.find_openable(event.button.id.removeprefix("open_"))
+        if openable:
+            self.app.open_target(openable)
 
 
 class AccountTab(ScrollableContainer):
@@ -1702,90 +1559,25 @@ class Redfetch(App):
         clear_button.variant = "success"
         self.set_timer(3, lambda: setattr(clear_button, "variant", "default"))
 
-    def open_folder(self, path: str) -> None:
-        """Open a folder in the default file explorer."""
-        if os.path.isdir(path):
-            try:
-                if sys.platform == 'win32':
-                    os.startfile(path)
-                elif sys.platform == 'darwin':
-                    subprocess.Popen(['open', path])
-                else:
-                    subprocess.Popen(['xdg-open', path])
-            except Exception as e:
-                self.notify(f"Failed to open folder: {e}", severity="error")
-        else:
-            self.notify(f"Directory does not exist: {path}", severity="error")
-
-    def open_file(self, file_path: str, file_name: str) -> None:
-        """Open a file using the default program."""
-        full_path = os.path.join(file_path, file_name)
-        if not os.path.isfile(full_path):
-            self.notify(f"File not found: {full_path}", severity="error")
-            return
-
-        if sys.platform == 'win32':
-            file_ext = os.path.splitext(file_name)[1].lower()
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, file_ext) as key:
-                    winreg.QueryValue(key, "")
-                    os.startfile(full_path)
-                    self.notify(f"{file_name} opened with default program.")
-            except OSError:
-                subprocess.Popen(['notepad.exe', full_path])
-                self.notify(f"{file_name} opened with Notepad.")
-        else:
-            try:
-                if sys.platform == 'darwin':
-                    subprocess.Popen(['open', full_path])
-                else:
-                    subprocess.Popen(['xdg-open', full_path])
-                self.notify(f"{file_name} opened.")
-            except Exception:
-                file_uri = Path(full_path).as_uri()
-                webbrowser.open(file_uri)
-                self.notify(f"{file_name} opened in browser.")
-
-    def open_redfetch_config(self) -> None:
-        config_file_path = os.path.join(config.config_dir, 'settings.local.toml')
-        config.ensure_config_file_exists(config_file_path)
-        self.open_file(config.config_dir, 'settings.local.toml')
-
-    def open_mq_config(self) -> None:
-        vvmq_path = utils.get_vvmq_path()
-        if vvmq_path:
-            self.open_file(os.path.join(vvmq_path, 'config'), 'MacroQuest.ini')
-        else:
-            self.notify("VVMQ path not found.", severity="error")
-
-    def open_eq_config(self) -> None:
-        if self.eq_path:
-            self.open_file(self.eq_path, "eqclient.ini")
-        else:
-            self.notify("EverQuest path not set.", severity="error")
-
-    def open_eq_host(self) -> None:
-        if self.eq_path:
-            self.open_file(self.eq_path, "eqhost.txt")
-        else:
-            self.notify("EverQuest path not set.", severity="error")
-
-    def open_myseq_folder(self) -> None:
-        myseq_path = utils.get_myseq_path()
-        if myseq_path and os.path.exists(myseq_path):
-            self.open_folder(myseq_path)
-        else:
-            self.notify("MySEQ path not found.", severity="error")
-
-    def run_executable(self, folder_path: str, executable_name: str, args=None) -> None:
-        """Run an executable and show appropriate notifications."""
+    def run_target(self, runnable) -> None:
+        """Launch a shortcuts runnable, notifying on success/failure."""
         try:
-            processes.run_executable(folder_path, executable_name, args)
-            self.notify(f"{executable_name} started successfully.")
+            shortcuts.run(runnable)
+            self.notify(f"{runnable.executable} started successfully.")
         except Exception as exc:
-            message = f"Failed to start {executable_name}: {exc}"
+            message = f"Failed to start {runnable.executable}: {exc}"
             print(message)
             self.notify(message, severity="error")
+
+    def open_target(self, openable) -> None:
+        """Open a shortcuts folder/file. Folders open visibly; files get a toast."""
+        try:
+            detail = shortcuts.open_target(openable)
+        except Exception as exc:
+            self.notify(f"Couldn't open {openable.label}: {exc}", severity="error")
+            return
+        if openable.filename is not None:
+            self.notify(f"{openable.filename} opened{(' ' + detail) if detail else ''}.")
 
     def run_command(self, command, cwd=None) -> None:
         """Run a command and notify on success or failure."""
@@ -1797,17 +1589,6 @@ class Redfetch(App):
             message = f"Failed to start {label}: {exc}"
             print(message)
             self.notify(message, severity="error")
-
-    def run_myseq_executable(self) -> None:
-        myseq_path = utils.get_myseq_path()
-        if myseq_path:
-            myseq_executable = os.path.join(myseq_path, "MySEQ.exe")
-            if os.path.exists(myseq_executable):
-                self.run_executable(myseq_path, "MySEQ.exe")
-            else:
-                self.notify("MySEQ executable not found.", severity="error")
-        else:
-            self.notify("MySEQ path not found.", severity="error")
 
     def handle_uninstall(self) -> None:
         """Handle the uninstall button press."""

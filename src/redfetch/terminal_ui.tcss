@@ -266,7 +266,7 @@ Label {
     content-align: center middle;
     grid-size: 3; 
     grid-rows: auto;        
-    grid-gutter: 1;   
+    grid-gutter: 1 2;  /* row-gap col-gap: wider column gap so it looks equal to the row gap (cells are ~2x taller than wide) */
     max-width: 120;
     min-width: 60;
     border: round $error-darken-3;
@@ -279,7 +279,7 @@ Label {
     content-align: center middle;
     grid-size: 3; 
     grid-rows: auto;        
-    grid-gutter: 1;   
+    grid-gutter: 1 2;  /* row-gap col-gap: wider column gap so it looks equal to the row gap (cells are ~2x taller than wide) */
     max-width: 120;
     min-width: 60;
     border: round $warning-darken-3;
@@ -292,7 +292,7 @@ Label {
     content-align: center middle;
     grid-size: 3; 
     grid-rows: auto;        
-    grid-gutter: 1;   
+    grid-gutter: 1 2;  /* row-gap col-gap: wider column gap so it looks equal to the row gap (cells are ~2x taller than wide) */
     max-width: 120;
     min-width: 60;
     border: round $primary-background-lighten-1;
@@ -309,7 +309,7 @@ Label {
     border: round $primary-background-lighten-1;     /* Adds a border with the accent color */
 }
 #shortcuts_scroll Button {
-    width: 35;
+    width: 1fr;      /* fill the column so the inter-button gap is always just the gutter */
     min-width: 20;
     height: 3;
 }
@@ -325,14 +325,12 @@ Label {
     border-top: tall $error 35%;
 }
 #shortcuts_scroll Button.folder {
-    width: 35;
     background: $warning-darken-3; /* Use a theme variable for folders */
     border-top: tall $warning 55%;
     border-bottom: tall $warning-darken-3 35%;
     color: $text;
 }
 #shortcuts_scroll Button.folder:hover {
-    width: 35;
     background: $warning-darken-3 55%;
     border-top: tall $warning 35%;
 }

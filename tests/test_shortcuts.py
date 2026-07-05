@@ -1,8 +1,18 @@
 """Tests for the shared shortcuts registry (redfetch run / open)."""
 
 import pytest
+from typer.testing import CliRunner
 
-from redfetch import shortcuts, processes
+from redfetch import shortcuts, processes, config, main
+
+runner = CliRunner()
+
+
+@pytest.fixture
+def stub_init(monkeypatch):
+    """Skip real config loading so CLI tests are hermetic (also runs on CI/linux)."""
+    monkeypatch.setattr(config, "initialize_config", lambda: None)
+    return monkeypatch
 
 
 # --- registry integrity -----------------------------------------------------
@@ -39,7 +49,8 @@ def test_unknown_name_returns_none():
 def test_known_static_attributes():
     assert shortcuts.find_runnable("mq").executable == "MacroQuest.exe"
     assert shortcuts.find_runnable("eqgame").args == ("patchme",)
-    assert shortcuts.find_runnable("meshupdater").executable == "MeshUpdater.exe"
+    assert shortcuts.find_runnable("meshgenerator").executable == "MeshGenerator.exe"
+    assert shortcuts.find_runnable("mesh").executable == "MeshGenerator.exe"  # alias preserved
     assert shortcuts.find_openable("settings").filename == "settings.local.toml"
     assert shortcuts.find_openable("mq-config").css == "file"
     assert shortcuts.find_openable("downloads").filename is None  # a folder
@@ -117,3 +128,57 @@ def test_openable_available_file(tmp_path):
     assert shortcuts.openable_available(present) is True
     absent = shortcuts.Openable("t", "L", lambda: str(tmp_path), "missing.ini")
     assert shortcuts.openable_available(absent) is False
+
+
+# --- CLI: `redfetch run` / `redfetch open` ----------------------------------
+
+def test_cli_run_launches(stub_init):
+    launched = []
+    stub_init.setattr(shortcuts, "run", lambda r, extra=None: launched.append(r))
+    result = runner.invoke(main.app, ["run", "vvmq"])
+    assert result.exit_code == 0, result.output
+    assert launched and launched[0].key == "vvmq"
+    assert "MacroQuest.exe" in result.output
+
+
+def test_cli_run_unknown_target_errors(stub_init):
+    result = runner.invoke(main.app, ["run", "bogus"])
+    assert result.exit_code == 2
+    assert "Unknown shortcut" in result.output
+
+
+def test_cli_run_launch_failure_exits_1(stub_init):
+    def boom(r, extra=None):
+        raise FileNotFoundError("MacroQuest.exe not found in the specified folder.")
+    stub_init.setattr(shortcuts, "run", boom)
+    result = runner.invoke(main.app, ["run", "vvmq"])
+    assert result.exit_code == 1
+    assert "Couldn't run vvmq" in result.output
+
+
+def test_cli_run_bare_lists(stub_init):
+    stub_init.setattr(shortcuts, "runnable_available", lambda r: True)
+    result = runner.invoke(main.app, ["run"])
+    assert result.exit_code == 0, result.output
+    assert "vvmq" in result.output and "eqgame" in result.output
+
+
+def test_cli_server_override_is_applied(stub_init):
+    from types import SimpleNamespace
+    envs = []
+    stub_init.setattr(config, "settings", SimpleNamespace(ENV="LIVE"))
+    stub_init.setattr(config, "select_environment_in_memory", lambda env: envs.append(env))
+    stub_init.setattr(shortcuts, "run", lambda r, extra=None: None)
+    result = runner.invoke(main.app, ["run", "vvmq", "-s", "emu"])
+    assert result.exit_code == 0, result.output
+    assert envs == ["EMU"]
+
+
+def test_cli_open_dispatch(stub_init):
+    opened = []
+    stub_init.setattr(shortcuts, "open_target",
+                      lambda o: opened.append(o) or "with Notepad")
+    result = runner.invoke(main.app, ["open", "config"])
+    assert result.exit_code == 0, result.output
+    assert opened and opened[0].key == "config"
+    assert "Opened config with Notepad" in result.output

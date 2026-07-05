@@ -55,9 +55,9 @@ RUNNABLES: tuple[Runnable, ...] = (
         tooltip="Run MacroQuest, the legendary add-on platform for EverQuest.",
     ),
     Runnable(
-        "meshupdater", "MeshUpdater 🌐", "MeshUpdater.exe", utils.get_vvmq_path,
-        aliases=("mesh",),
-        tooltip="Update EQ zone meshes, needed for MQNav.",
+        "meshgenerator", "MeshGenerator 🌐", "MeshGenerator.exe", utils.get_vvmq_path,
+        aliases=("mesh", "meshgen"),
+        tooltip="Generate your own EQ zone navmeshes for MQNav.",
     ),
     Runnable(
         "eqbcs", "EQBCS 💬", "EQBCS.exe", utils.get_vvmq_path,

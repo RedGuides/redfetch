@@ -23,6 +23,7 @@ from redfetch import utils
 from redfetch import push
 from redfetch import sync
 from redfetch import store
+from redfetch import shortcuts
 from redfetch.runtime_errors import exit_with_fatal_error
 
 
@@ -327,6 +328,74 @@ def run_tui():
     utils.sweep_stale_update_debris()
     from redfetch.terminal_ui import run_textual_ui
     run_textual_ui()
+
+
+def _print_shortcut_table(entries, available) -> None:
+    """List shortcuts (key, aliases, availability) for the bare `run`/`open` verb."""
+    from rich.table import Table
+
+    # ASCII-only content for legacy Windows consoles
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("shortcut")
+    table.add_column("aliases", style="dim")
+    table.add_column("available", justify="center")
+    table.add_column("description", style="dim")
+    for entry in entries:
+        mark = "[green]yes[/green]" if available(entry) else "[dim]no[/dim]"
+        table.add_row(entry.key, ", ".join(entry.aliases) or "-", mark, entry.tooltip)
+    console.print(table)
+
+
+@app.command(
+    "run",
+    help="Run a configured shortcut (e.g. [bold]vvmq[/bold], [bold]eqbcs[/bold], [bold]myseq[/bold]) for the current server.",
+    rich_help_panel="🔧 System & Utilities",
+)
+def run_shortcut_command(
+    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Shortcut to run: vvmq/mq, meshgenerator, eqbcs, launchpad/eq, eqgame, myseq. Omit to list."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Run for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+):
+    config.initialize_config()
+    _apply_server_override(server)
+    if target is None:
+        _print_shortcut_table(shortcuts.RUNNABLES, shortcuts.runnable_available)
+        return
+    runnable = shortcuts.find_runnable(target)
+    if runnable is None:
+        valid = ", ".join(r.key for r in shortcuts.RUNNABLES)
+        raise typer.BadParameter(f"Unknown shortcut '{target}'. Try: {valid}")
+    try:
+        shortcuts.run(runnable)
+        console.print(f"Started [bold]{runnable.executable}[/bold].")
+    except (ValueError, RuntimeError, OSError) as exc:
+        console.print(f"[red]Couldn't run {runnable.key}:[/red] {exc}")
+        raise typer.Exit(1)
+
+
+@app.command(
+    "open",
+    help="Open a configured folder or file (e.g. [bold]downloads[/bold], [bold]eqhost[/bold], [bold]mq-config[/bold]) for the current server.",
+    rich_help_panel="🔧 System & Utilities",
+)
+def open_shortcut_command(
+    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Folder/file to open: downloads, vvmq, eq, myseq, config, mq-config, eq-config, eqhost. Omit to list."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Resolve paths for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+):
+    config.initialize_config()
+    _apply_server_override(server)
+    if target is None:
+        _print_shortcut_table(shortcuts.OPENABLES, shortcuts.openable_available)
+        return
+    openable = shortcuts.find_openable(target)
+    if openable is None:
+        valid = ", ".join(o.key for o in shortcuts.OPENABLES)
+        raise typer.BadParameter(f"Unknown shortcut '{target}'. Try: {valid}")
+    try:
+        detail = shortcuts.open_target(openable)
+        console.print(f"Opened [bold]{openable.key}[/bold]{(' ' + detail) if detail else ''}.")
+    except (ValueError, OSError) as exc:
+        console.print(f"[red]Couldn't open {openable.key}:[/red] {exc}")
+        raise typer.Exit(1)
 
 
 @app.command(
