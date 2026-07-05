@@ -1,4 +1,4 @@
-"""Post-update policy: does a staged update need a restart to go live?"""
+"""Post-update launch/restart policy for completed sync runs."""
 
 from __future__ import annotations
 
@@ -25,19 +25,19 @@ ColdStartChoice = Literal["yes", "no", "always", "never"]
 
 
 class PostUpdateSurface(Protocol):
-    """This is what the UIs implement."""
+    """UI callbacks used by the post-update workflow."""
     def notify(self, message: str, *, error: bool = False) -> None: ...
     async def confirm_restart(self) -> bool: ...
     async def ask_cold_start(self) -> ColdStartChoice: ...
-    def auto_run_persisted(self, value: bool) -> None: ...  # UI sync only; the write already happened
+    def auto_run_persisted(self, value: bool) -> None: ...  # Refresh UI state; the write already happened.
     async def wait_for_eq_close(self) -> bool: ...
 
 
 def decide(outcome: SyncOutcome, *, mq_running: bool) -> Decision:
-    """Only a VVMQ/loader update gets an offer, anything else needs a manual restart."""
-    if not outcome.vvmq_updated:
-        return Decision.NONE
-    return Decision.RESTART if mq_running else Decision.COLD_START
+    """Return the restart, cold-start, or no-op decision."""
+    if mq_running:
+        return Decision.RESTART if outcome.vvmq_updated else Decision.NONE
+    return Decision.COLD_START if (outcome.success or outcome.vvmq_updated) else Decision.NONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,12 +48,12 @@ class PendingOffer:
 
 
 async def prepare(outcome: SyncOutcome) -> PendingOffer:
-    """Scan and decide — call while the caller still has the UI gated (env, re-clicks)."""
+    """Scan process state and build the pending post-update offer."""
     if (
         sys.platform != "win32"
         or os.environ.get("CI") == "true"
-        # decide()'s NONE clause, duplicated so the common no-offer run skips the scan
-        or not outcome.vvmq_updated
+        # Avoid process scans when the run failed before writing anything useful.
+        or not (outcome.success or outcome.vvmq_updated)
     ):
         return PendingOffer(Decision.NONE, None, None)
     running = await asyncio.to_thread(processes.running_executable_paths)
@@ -67,20 +67,22 @@ async def offer(outcome, surface: PostUpdateSurface) -> None:
 
 
 async def execute(pending: PendingOffer, surface: PostUpdateSurface) -> None:
-    # prepare() is the only producer; platform/CI gating already happened there
+    # prepare() already handled platform and CI gating.
     if pending.decision is Decision.NONE:
         return
     mq_folder = pending.mq_folder
     if not mq_folder:
-        surface.notify("MacroQuest path not found. Please check your configuration.", error=True)
+        # Cold starts without a folder have nothing to launch.
+        if pending.decision is Decision.RESTART:
+            surface.notify("MacroQuest path not found. Please check your configuration.", error=True)
         return
 
     if pending.decision is Decision.RESTART:
-        # a restart always asks; AUTO_RUN_VVMQ governs cold starts only
+        # Restarts always ask; AUTO_RUN_VVMQ only applies to cold starts.
         if not await surface.confirm_restart():
             surface.notify("The update will apply next time MacroQuest starts.")
             return
-        # never touch the live game: the user closes EQ or the restart is skipped
+        # Do not restart MQ while EverQuest is running.
         if await asyncio.to_thread(processes.get_eqgame_process_pids):
             if not await surface.wait_for_eq_close():
                 surface.notify("Restart skipped; the update will apply next time MacroQuest starts.")
@@ -94,12 +96,12 @@ async def execute(pending: PendingOffer, surface: PostUpdateSurface) -> None:
                 error=True,
             )
             return
-        # rescan: the restart closed the folder's processes; the old snapshot would skip them
+        # Rescan so loadout filtering sees the current process list.
         running = await asyncio.to_thread(processes.running_executable_paths)
     else:
         if not await _cold_start_consent(surface):
             return
-        # rescan: the user may have started MQ while the prompt sat open
+        # Rescan in case MQ was started while the prompt was open.
         running = await asyncio.to_thread(processes.running_executable_paths)
         if not utils.should_offer_mq_start(running):
             surface.notify("MacroQuest is already running; skipping the start.")
@@ -121,7 +123,7 @@ def _launch_loadout(surface: PostUpdateSurface, running: set[str] | None) -> Non
         try:
             processes.run_command(command, cwd)
         except Exception as exc:
-            # a typo'd custom command must not kill the rest of the batch (or the CLI)
+            # A bad custom command should not stop the remaining launch commands.
             label = os.path.basename(utils._command_program(command)) or "post-update program"
             surface.notify(f"Failed to start {label}: {exc}", error=True)
 
@@ -134,7 +136,7 @@ async def _cold_start_consent(surface: PostUpdateSurface) -> bool:
     if choice in ("always", "never"):
         value = choice == "always"
         config.update_setting(["AUTO_RUN_VVMQ"], value)
-        surface.notify(f"Updated settings to {'always' if value else 'never'} start MacroQuest after updates.")
+        surface.notify(f"Updated settings to {'always' if value else 'never'} start MacroQuest after an update run.")
         surface.auto_run_persisted(value)
     elif choice == "no":
         surface.notify("Not starting MacroQuest.")

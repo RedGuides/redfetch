@@ -83,8 +83,8 @@ def test_restart_aborts_when_eq_running(fake_windows):
 
 @windows_paths
 def test_restart_ignores_surviving_eqbcs(fake_windows):
-    # A hung/elevated EQBCS that won't die must not abort the relaunch — it can't trip
-    # MQ's loader dialog.
+    # A hung or elevated EQBCS process must not abort the relaunch because it
+    # cannot trip MQ's loader dialog.
     killed = []
     fake_windows.setattr(processes, "get_eqgame_process_pids", lambda: [])
     fake_windows.setattr(processes, "_post_wm_close", lambda pids: set())
@@ -389,16 +389,16 @@ def test_sync_outcome_status_defaults_from_success():
 @pytest.mark.parametrize(
     "success, vvmq_updated, mq_running, expected",
     [
-        # a VVMQ/loader write offers to apply it; decide ignores success, so a
-        # partial-failure run that still wrote VVMQ must offer (rows 3-4)
+        # MQ is running: restart only when there is a VVMQ/loader write.
         (True, True, True, post_update.Decision.RESTART),
-        (True, True, False, post_update.Decision.COLD_START),
         (False, True, True, post_update.Decision.RESTART),
-        (False, True, False, post_update.Decision.COLD_START),
-        # no VVMQ write -> no offer, regardless of success or mq_running
         (True, False, True, post_update.Decision.NONE),
-        (True, False, False, post_update.Decision.NONE),
         (False, False, True, post_update.Decision.NONE),
+        # MQ is down: a successful run can also act as a launcher.
+        (True, True, False, post_update.Decision.COLD_START),
+        (False, True, False, post_update.Decision.COLD_START),
+        (True, False, False, post_update.Decision.COLD_START),
+        # Fully failed runs with no VVMQ write stay silent.
         (False, False, False, post_update.Decision.NONE),
     ],
 )
@@ -503,6 +503,14 @@ def test_execute_missing_folder_notifies_and_stops(exec_env):
     _execute(surface, post_update.Decision.RESTART, mq_folder=None)
     assert any("path not found" in msg and error for msg, error in surface.notices)
     assert surface.asked_restart == 0
+
+
+def test_execute_cold_start_missing_folder_is_silent(exec_env):
+    # A cold start without a configured VVMQ folder has nothing to launch.
+    monkeypatch, calls = exec_env
+    surface = FakeSurface()
+    _execute(surface, post_update.Decision.COLD_START, mq_folder=None)
+    assert surface.notices == [] and surface.asked_cold == 0 and calls["loadouts"] == []
 
 
 def test_execute_restart_uses_fresh_rescan_for_loadout(exec_env):
@@ -703,19 +711,24 @@ def test_prepare_ci_short_circuits(exec_env):
     assert pending.decision is post_update.Decision.NONE
 
 
-@pytest.mark.parametrize(
-    "outcome",
-    [
-        SyncOutcome(success=True, vvmq_updated=False),   # the common no-op sync
-        SyncOutcome(success=False),                      # fully failed run
-    ],
-)
-def test_prepare_skips_scan_when_no_vvmq_write(exec_env, outcome):
+def test_prepare_skips_scan_on_fully_failed_run(exec_env):
+    """A failed run with no VVMQ write has nothing to offer, so it skips scanning."""
     monkeypatch, calls = exec_env
     monkeypatch.setattr(post_update.processes, "running_executable_paths", _scan_boom)
-    pending = asyncio.run(post_update.prepare(outcome))
+    pending = asyncio.run(post_update.prepare(SyncOutcome(success=False)))
     assert pending.decision is post_update.Decision.NONE
     assert pending.running is None and pending.mq_folder is None
+
+
+def test_prepare_offers_cold_start_on_successful_noop_when_mq_down(exec_env):
+    """A successful no-op can still offer to launch MQ when MQ is down."""
+    monkeypatch, calls = exec_env
+    monkeypatch.setattr(post_update.processes, "running_executable_paths", lambda: SNAPSHOT)
+    monkeypatch.setattr(post_update.utils, "macroquest_running", lambda running=None: False)
+    monkeypatch.setattr(post_update.utils, "get_vvmq_path", lambda: "C:\\VanillaMQ")
+    pending = asyncio.run(post_update.prepare(SyncOutcome(success=True, vvmq_updated=False)))
+    assert pending.decision is post_update.Decision.COLD_START
+    assert pending.running is SNAPSHOT and pending.mq_folder == "C:\\VanillaMQ"
 
 
 # --- CLI wiring: handle_download_watched_async hands off to post_update.offer ----------
