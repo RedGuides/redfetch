@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -18,7 +18,10 @@ from redfetch.sync_types import (
     RemoteArtifact,
     RemoteResourceState,
     RemoteSnapshot,
+    SyncInfo,
 )
+
+_EMPTY_MANIFEST = {"resources": {}}
 
 
 def root_target(resource_id: str, *, title: str = "Resource", category_id: int = 8) -> DesiredInstallTarget:
@@ -160,8 +163,14 @@ def test_sync_aborts_before_execution_when_discovery_fails(tmp_path):
         "redfetch.sync.store.load_local_snapshot",
         new=AsyncMock(return_value=LocalSnapshot()),
     ), patch(
+        "redfetch.sync.net.fetch_manifest_cached",
+        new=AsyncMock(return_value=_EMPTY_MANIFEST),
+    ), patch(
+        "redfetch.sync.api.fetch_sync_info",
+        new=AsyncMock(return_value=SyncInfo()),
+    ), patch(
         "redfetch.sync.sync_discovery.discover_desired_set",
-        new=AsyncMock(side_effect=RuntimeError("metadata exploded")),
+        new=MagicMock(side_effect=RuntimeError("metadata exploded")),
     ), patch(
         "redfetch.sync.sync_executor.execute_plan",
         new=AsyncMock(),
@@ -263,11 +272,17 @@ def test_targeted_sync_returns_false_when_dependency_in_requested_closure_is_blo
         "redfetch.sync.store.load_local_snapshot",
         new=AsyncMock(return_value=LocalSnapshot()),
     ), patch(
+        "redfetch.sync.net.fetch_manifest_cached",
+        new=AsyncMock(return_value=_EMPTY_MANIFEST),
+    ), patch(
+        "redfetch.sync.api.fetch_sync_info",
+        new=AsyncMock(return_value=SyncInfo()),
+    ), patch(
         "redfetch.sync.sync_discovery.discover_desired_set",
-        new=AsyncMock(return_value=desired_set),
+        new=MagicMock(return_value=desired_set),
     ), patch(
         "redfetch.sync.sync_remote.fetch_remote_snapshot",
-        new=AsyncMock(return_value=remote_snapshot),
+        new=MagicMock(return_value=remote_snapshot),
     ), patch(
         "redfetch.sync.sync_executor.execute_plan",
         new=AsyncMock(return_value=execution_result),
@@ -327,11 +342,17 @@ def test_targeted_sync_returns_true_when_requested_closure_only_untracks_stale_d
         "redfetch.sync.store.load_local_snapshot",
         new=AsyncMock(return_value=local_snapshot),
     ), patch(
+        "redfetch.sync.net.fetch_manifest_cached",
+        new=AsyncMock(return_value=_EMPTY_MANIFEST),
+    ), patch(
+        "redfetch.sync.api.fetch_sync_info",
+        new=AsyncMock(return_value=SyncInfo()),
+    ), patch(
         "redfetch.sync.sync_discovery.discover_desired_set",
-        new=AsyncMock(return_value=desired_set),
+        new=MagicMock(return_value=desired_set),
     ), patch(
         "redfetch.sync.sync_remote.fetch_remote_snapshot",
-        new=AsyncMock(return_value=remote_snapshot),
+        new=MagicMock(return_value=remote_snapshot),
     ), patch(
         "redfetch.sync.sync_executor.execute_plan",
         new=AsyncMock(return_value=execution_result),

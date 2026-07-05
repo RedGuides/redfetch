@@ -52,8 +52,8 @@ def test_build_items_includes_only_outdated_downloads():
         _action("10", action="skip", reason="already_current", title="Current", remote_version=7),
         # Excluded: opted out / no longer desired.
         _action("11", action="untrack", reason="not_desired", title="Dropped"),
-        # Excluded: blocked (e.g. expired license / access denied).
-        _action("12", action="block", reason="license_expired", title="Lapsed"),
+        # Excluded: blocked (e.g. needs a license / access denied).
+        _action("12", action="block", reason="needs_license", title="Lapsed"),
     )
 
     items = update_status.build_items_from_plan(plan)

@@ -1,64 +1,30 @@
-"""Discovery-stage tests for licensed resource filtering."""
+"""Discovery-stage tests: watched/licensed roots sourced from rgsync, hydrated from the manifest."""
 
-import asyncio
-import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 
 from redfetch import sync_discovery as discovery
-from redfetch import sync_planner as planner
-from redfetch.sync_types import (
-    DesiredInstallTarget,
-    DesiredSet,
-    LocalSnapshot,
-    RemoteArtifact,
-    RemoteResourceState,
-    RemoteSnapshot,
-)
+from redfetch.sync_types import SyncInfo
 
-FAR_FUTURE = int(time.time()) + 86400 * 365 * 10
-PAST = int(time.time()) - 86400 * 30
+HASH = "d41d8cd98f00b204e9800998ecf8427e"
 
 
-def make_license(
-    resource_id: int,
-    parent_category_id: int,
-    title: str = "Licensed Resource",
-    *,
-    version_id: int = 101,
-    file_id: int = 1001,
-    end_date: int = FAR_FUTURE,
-) -> dict:
+def _manifest_entry(parent_category_id, *, title="Licensed Resource", version_id=101):
     return {
-        "active": True,
-        "start_date": 1711170000,
-        "end_date": end_date,
-        "license_id": 12345,
-        "resource": {
-            "resource_id": resource_id,
-            "title": title,
-            "Category": {"parent_category_id": parent_category_id},
-            "current_files": [
-                {
-                    "id": file_id,
-                    "filename": "package.zip",
-                    "download_url": "https://example.com/file.zip",
-                    "hash": "d41d8cd98f00b204e9800998ecf8427e",
-                }
-            ],
-            "current_version": {"version_id": version_id},
-        },
+        "version_id": version_id,
+        "title": title,
+        "parent_category_id": parent_category_id,
+        "access_tier": "public",
+        "requires_license": False,
+        "current_files": [
+            {"id": 1001, "filename": "package.zip", "download_url": "https://example.com/file.zip", "hash": HASH}
+        ],
     }
 
 
-async def _discover_from_licenses(
-    licenses: list[dict],
-    env: str,
-    watched_resources: list[dict] | None = None,
-):
+def _discover(sync_info: SyncInfo, manifest_entries: dict, env: str):
     mock_settings = MagicMock()
     mock_settings.ENV = env
     mock_settings.from_env.return_value = SimpleNamespace(
@@ -67,254 +33,51 @@ async def _discover_from_licenses(
         SPECIAL_RESOURCES={},
         PROTECTED_FILES_BY_RESOURCE={},
     )
-
-    with patch(
-        "redfetch.sync_discovery.api.fetch_watched_resources",
-        new=AsyncMock(return_value=watched_resources or []),
-    ), patch(
-        "redfetch.sync_discovery.api.fetch_licenses",
-        new=AsyncMock(return_value=licenses),
-    ), patch(
-        "redfetch.sync_discovery.config.settings",
-        mock_settings,
-    ), patch(
-        "redfetch.sync_discovery.config.CATEGORY_MAP",
-        {8: "macros", 11: "plugins", 25: "lua"},
-    ):
-        async with httpx.AsyncClient() as client:
-            return await discovery.discover_desired_set(
-                client=client,
-                resource_ids=None,
-                settings_env=env,
-            )
+    with patch("redfetch.sync_discovery.config.settings", mock_settings), \
+         patch("redfetch.sync_discovery.config.CATEGORY_MAP", {8: "macros", 11: "plugins", 25: "lua"}):
+        return discovery.discover_desired_set(
+            resource_ids=None,
+            sync_info=sync_info,
+            manifest={"resources": manifest_entries},
+            settings_env=env,
+        )
 
 
 @pytest.mark.parametrize(
-    "env,expected_target",
+    "env,category_id,in_scope",
     [
-        ("TEST", False),
-        ("EMU", False),
-        ("LIVE", True),
+        # plugins (cat 11) are gated out of TEST/EMU; other mapped categories stay in scope everywhere.
+        ("LIVE", 11, True), ("TEST", 11, False), ("EMU", 11, False),
+        ("LIVE", 8, True), ("TEST", 8, True), ("EMU", 8, True),
     ],
 )
-def test_licensed_plugins_only_live(env, expected_target):
-    desired_set = asyncio.run(_discover_from_licenses([make_license(9999, 11)], env))
-    target_key = "/9999/"
-    assert (target_key in desired_set.install_targets) is expected_target
-    if expected_target:
-        assert desired_set.install_targets[target_key].sources == {"licensed"}
+def test_category_env_gating(env, category_id, in_scope):
+    desired_set = _discover(SyncInfo(licensed_ids={"9999"}), {"9999": _manifest_entry(category_id)}, env)
+    assert ("/9999/" in desired_set.install_targets) is in_scope
+    if in_scope:
+        assert desired_set.install_targets["/9999/"].sources == {"licensed"}
 
 
-@pytest.mark.parametrize(
-    "env,category_id,resource_id",
-    [
-        ("LIVE", 8, 9998),
-        ("TEST", 8, 9998),
-        ("EMU", 8, 9998),
-        ("LIVE", 25, 9997),
-        ("TEST", 25, 9997),
-        ("EMU", 25, 9997),
-    ],
-)
-def test_cross_compatible_licensed_resources_remain_in_scope(env, category_id, resource_id):
-    desired_set = asyncio.run(
-        _discover_from_licenses(
-            [make_license(resource_id, category_id, "Cross Compatible")],
-            env,
-        )
-    )
-
-    target_key = f"/{resource_id}/"
-    assert target_key in desired_set.install_targets
-    assert desired_set.install_targets[target_key].sources == {"licensed"}
+def test_watched_resource_hydrates_title_and_category_from_manifest():
+    desired_set = _discover(SyncInfo(watched={"2"}), {"2": _manifest_entry(8, title="Guidestone.mac")}, "LIVE")
+    target = desired_set.install_targets["/2/"]
+    assert target.sources == {"watching"}
+    assert target.title == "Guidestone.mac"
+    assert target.category_id == 8
 
 
-# --- expired license discovery tests ---
-
-
-def test_expired_license_gets_discovery_block():
-    desired_set = asyncio.run(
-        _discover_from_licenses([make_license(9998, 8, end_date=PAST)], "LIVE")
-    )
-    target = desired_set.install_targets["/9998/"]
-    assert target.sources == {"licensed"}
-    assert target.discovery_block == "license_expired"
-
-
-def test_valid_license_has_no_discovery_block():
-    desired_set = asyncio.run(
-        _discover_from_licenses([make_license(9998, 8, end_date=FAR_FUTURE)], "LIVE")
-    )
-    target = desired_set.install_targets["/9998/"]
-    assert target.sources == {"licensed"}
-    assert target.discovery_block is None
-
-
-def test_unlimited_license_has_no_discovery_block():
-    desired_set = asyncio.run(
-        _discover_from_licenses([make_license(9998, 8, end_date=0)], "LIVE")
-    )
-    target = desired_set.install_targets["/9998/"]
-    assert target.sources == {"licensed"}
-    assert target.discovery_block is None
-
-
-def test_current_license_overrides_expired_duplicate_for_same_resource():
-    desired_set = asyncio.run(
-        _discover_from_licenses(
-            [
-                make_license(9998, 8, title="Expired Copy", end_date=PAST),
-                make_license(9998, 8, title="Current Copy", end_date=FAR_FUTURE),
-            ],
-            "LIVE",
-        )
-    )
-    target = desired_set.install_targets["/9998/"]
-    assert target.sources == {"licensed"}
-    assert target.discovery_block is None
-    assert target.title == "Current Copy"
-
-
-def test_current_first_expired_second_no_block():
-    desired_set = asyncio.run(
-        _discover_from_licenses(
-            [
-                make_license(9998, 8, title="Current Copy", end_date=FAR_FUTURE),
-                make_license(9998, 8, title="Expired Copy", end_date=PAST),
-            ],
-            "LIVE",
-        )
-    )
-    target = desired_set.install_targets["/9998/"]
-    assert target.discovery_block is None
-    assert target.title == "Current Copy"
-
-
-def test_all_duplicate_licenses_expired_gets_block():
-    desired_set = asyncio.run(
-        _discover_from_licenses(
-            [
-                make_license(9998, 8, title="Expired A", end_date=PAST),
-                make_license(9998, 8, title="Expired B", end_date=PAST - 1),
-            ],
-            "LIVE",
-        )
-    )
-    target = desired_set.install_targets["/9998/"]
-    assert target.discovery_block == "license_expired"
-
-
-def test_unlimited_license_overrides_expired_duplicate():
-    desired_set = asyncio.run(
-        _discover_from_licenses(
-            [
-                make_license(9998, 8, title="Expired Copy", end_date=PAST),
-                make_license(9998, 8, title="Unlimited Copy", end_date=0),
-            ],
-            "LIVE",
-        )
-    )
-    target = desired_set.install_targets["/9998/"]
-    assert target.discovery_block is None
-    assert target.title == "Unlimited Copy"
-
-
-def test_watched_resource_with_valid_duplicate_license_is_not_blocked():
-    watched_resource = make_license(9998, 8, title="Watched Copy")["resource"]
-    desired_set = asyncio.run(
-        _discover_from_licenses(
-            [
-                make_license(9998, 8, title="Expired Copy", end_date=PAST),
-                make_license(9998, 8, title="Current Copy", end_date=FAR_FUTURE),
-            ],
-            "LIVE",
-            watched_resources=[watched_resource],
-        )
+def test_watched_and_licensed_merge_into_one_target():
+    desired_set = _discover(
+        SyncInfo(watched={"9998"}, licensed_ids={"9998"}),
+        {"9998": _manifest_entry(8, title="Both")},
+        "LIVE",
     )
     target = desired_set.install_targets["/9998/"]
     assert target.sources == {"watching", "licensed"}
-    assert target.discovery_block is None
-    assert target.title == "Current Copy"
+    assert target.title == "Both"
 
 
-# --- expired license planner tests ---
-
-
-def _downloadable_state(resource_id: str, *, category_id: int = 8) -> RemoteResourceState:
-    return RemoteResourceState(
-        resource_id=resource_id,
-        title=f"Resource {resource_id}",
-        category_id=category_id,
-        version_id=1234,
-        status="downloadable",
-        artifact=RemoteArtifact(
-            file_id=9876,
-            filename=f"{resource_id}.zip",
-            download_url=f"https://example.com/{resource_id}.zip",
-            file_hash="d41d8cd98f00b204e9800998ecf8427e",
-        ),
-        source_note="manifest_plus_access_check",
-    )
-
-
-def _build_plan_for_target(target, remote_state):
-    mock_settings = MagicMock()
-    mock_settings.ENV = "LIVE"
-    mock_settings.from_env.return_value = SimpleNamespace(
-        DOWNLOAD_FOLDER="C:/downloads",
-        SPECIAL_RESOURCES={},
-        PROTECTED_FILES_BY_RESOURCE={},
-    )
-    desired_set = DesiredSet(
-        mode="full",
-        resource_ids={target.resource_id},
-        install_targets={target.target_key: target},
-    )
-    with patch("redfetch.sync_planner.config.settings", mock_settings), \
-         patch("redfetch.sync_planner.config.CATEGORY_MAP", {8: "macros", 11: "plugins", 25: "lua"}):
-        return planner.build_execution_plan(
-            desired_set=desired_set,
-            remote_snapshot=RemoteSnapshot(resources={target.resource_id: remote_state}),
-            local_snapshot=LocalSnapshot(),
-            settings_env="LIVE",
-        )
-
-
-def test_planner_blocks_on_discovery_block():
-    target = DesiredInstallTarget(
-        target_key="/9998/",
-        resource_id="9998",
-        parent_id=None,
-        parent_target_key=None,
-        root_resource_id="9998",
-        target_kind="root",
-        sources={"licensed"},
-        title="Expired Resource",
-        category_id=8,
-        resolved_path="C:/downloads/9998",
-        discovery_block="license_expired",
-    )
-    plan = _build_plan_for_target(target, _downloadable_state("9998"))
-    action = plan.actions["/9998/"]
-    assert action.action == "block"
-    assert action.reason == "license_expired"
-
-
-def test_planner_blocks_discovery_block_even_when_watching():
-    target = DesiredInstallTarget(
-        target_key="/9998/",
-        resource_id="9998",
-        parent_id=None,
-        parent_target_key=None,
-        root_resource_id="9998",
-        target_kind="root",
-        sources={"watching", "licensed"},
-        title="Watched + Expired Resource",
-        category_id=8,
-        resolved_path="C:/downloads/9998",
-        discovery_block="license_expired",
-    )
-    plan = _build_plan_for_target(target, _downloadable_state("9998"))
-    action = plan.actions["/9998/"]
-    assert action.action == "block"
-    assert action.reason == "license_expired"
+def test_resource_absent_from_manifest_is_skipped():
+    """rgsync sends ids only; an id with no manifest entry has no resolvable category, so it's dropped."""
+    desired_set = _discover(SyncInfo(watched={"404404"}), {}, "LIVE")
+    assert desired_set.install_targets == {}
