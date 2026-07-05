@@ -296,7 +296,7 @@ class FetchTab(ScrollableContainer):
 
     def on_mount(self) -> None:
         for attr in ("mq_down", "is_updating", "progress_visible", "interface_running",
-                     "download_folder", "current_env", "_offer_active"):
+                     "download_folder", "current_env", "_offer_active", "update_count", "watched_flash"):
             self.watch(self.app, attr, self._recompute)
         self.watch(self.app, "username", self._refresh_welcome)
         self.watch(self.app, "is_level_2", self._refresh_welcome)
@@ -344,13 +344,22 @@ class FetchTab(ScrollableContainer):
                     update_watched_button.tooltip = "Update in progress. Click to cancel."
                     update_watched_button.disabled = False
             else:
-                update_watched_button.label = "Easy Update Button 🍦"
-                update_watched_button.tooltip = (
+                base_tooltip = (
                     "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ and other staff picks. "
                     "(Manage watched resources on the website, and opt-in or out of any 'special' resources in settings.local.toml)"
                 )
-                if update_watched_button.variant not in ["success", "error"]:
-                    update_watched_button.variant = "primary"
+                count = app.update_count
+                if count:  # known and > 0: badge it
+                    update_watched_button.label = f"Easy Update Button 🍦 ({count})"
+                    s = "" if count == 1 else "s"
+                    update_watched_button.tooltip = f"{count} resource{s} ready to fetch. {base_tooltip}"
+                    resting_variant = "primary"
+                else:  # 0 = up to date (calm)
+                    update_watched_button.label = "Easy Update Button 🍦"
+                    update_watched_button.tooltip = base_tooltip
+                    resting_variant = "default" if count == 0 else "primary"
+                # a post-sync flash ("success"/"error") wins briefly; otherwise the count-derived resting variant
+                update_watched_button.variant = app.watched_flash or resting_variant
                 update_watched_button.disabled = busy or not bool(download_folder)
             update_watched_button.refresh(layout=True)
 
@@ -1114,9 +1123,6 @@ class MainScreen(Screen):
     def reset_button(self, button_id: str, variant: str = "default") -> None:
         button = self.query_one(f"#{button_id}", Button)
         button.variant = variant
-        if button_id == "update_watched":
-            vvmq_button = self.query_one("#run_macroquest", Button)
-            vvmq_button.styles.border = None
 
     #
     # Log search proxies (used by key bindings)
@@ -1148,6 +1154,10 @@ class Redfetch(App):
     # User account identity and permissions: set reactively by background workers, observed by AccountTab for live updates
     username: reactive[str] = reactive("")
     is_level_2: reactive[bool] = reactive(False)
+    # Startup update check: None = unknown, int = resources to be fetched
+    update_count: reactive[int | None] = reactive(None)
+    # Transient post-sync flash on the Easy Update button
+    watched_flash: reactive[str | None] = reactive(None)
 
     # Post-update offer handoff between the update worker and the offer worker
     _pending_offer: post_update.PendingOffer | None = None
@@ -1303,6 +1313,9 @@ class Redfetch(App):
         # Apply theme for new environment
         new_theme = settings_for_env.get('THEME', 'textual-dark')
         self.theme = new_theme
+
+        # The badge count is per-env and we don't re-run the full startup check here
+        self.update_count = None
 
         self.check_mq_status_worker()
         self.notify(f"Server type changed to: {new}")
@@ -1821,8 +1834,8 @@ class Redfetch(App):
                 if pending is not None and pending.decision is not post_update.Decision.NONE:
                     self._offer_active = True  # holds is_updating until the offer worker finishes
                     self._post_update_worker(pending)
-                elif worker.result and main_screen:
-                    self.set_timer(6, lambda: main_screen.reset_button("update_watched", "primary"))
+                elif worker.result:
+                    self.set_timer(6, self._clear_watched_flash)
             elif worker.name == "_update_single_resource_worker" and main_screen:
                 self.update_complete(worker.result, main_screen.query_one("#update_resource_id", Button))
             elif worker.name == "_redguides_interface_worker":
@@ -1833,11 +1846,10 @@ class Redfetch(App):
             self.notify(error_message, severity="error")
             print(error_message)
 
-            if main_screen:
-                if worker.name == "_update_watched_worker":
-                    main_screen.query_one("#update_watched", Button).variant = "error"
-                elif worker.name == "_update_single_resource_worker":
-                    main_screen.query_one("#update_resource_id", Button).variant = "error"
+            if worker.name == "_update_watched_worker":
+                self.watched_flash = "error"
+            elif worker.name == "_update_single_resource_worker" and main_screen:
+                main_screen.query_one("#update_resource_id", Button).variant = "error"
 
         elif state == WorkerState.CANCELLED:
             self.notify(f"Worker {worker.name} was cancelled.", severity="warning")
@@ -1976,37 +1988,46 @@ class Redfetch(App):
 
     @work(group="post_update_group", exclusive=True)
     async def _post_update_worker(self, pending: post_update.PendingOffer) -> None:
-        # capture now: another screen may be current by the time the offer resolves
-        main_screen = self._get_main_screen()
         try:
             await post_update.execute(pending, _TuiPostUpdate(self))
         finally:
-            # Tab state is recalculated based on is_updating/_offer_active, which are updated in on_worker_state_changed
-     
-            screen = main_screen or self._get_main_screen()
-            if screen:
-                self.set_timer(6, lambda: screen.reset_button("update_watched", "primary"))
+            self.set_timer(6, self._clear_watched_flash)
+
+    def _clear_watched_flash(self) -> None:
+        """Drop the post-sync flash."""
+        self.watched_flash = None
 
     def update_complete(self, result, button: Button) -> None:
         # bar/input visibility follows progress_visible, cleared on worker completion below
         main_screen = self._get_main_screen()
         status = getattr(result, "status", "ok" if result else "failed")
+        is_watched = button.id == "update_watched"
         if result:
-            button.variant = "success"
             self.notify("All resources updated successfully.")
+            if is_watched:
+                self.update_count = 0  # everything watched is now fetched — clear the badge
+                self.watched_flash = "success"
+            else:
+                button.variant = "success"
             if button.id == "update_resource_id" and main_screen:
                 input_widget = main_screen.query_one("#resource_id_input", Input)
                 input_widget.value = ""
                 self.set_timer(6, lambda: main_screen.reset_button("update_resource_id", "default"))
         elif status in ("busy", "cancelled"):
             # not a failure: a peer holds the update lock, or the user stopped it.
-            button.variant = "primary"
+            if is_watched:
+                self.watched_flash = None  # settle to the count-derived resting variant
+            else:
+                button.variant = "primary"
             if status == "busy":
                 self.notify("Another update is already in progress; try again shortly.", severity="warning")
             if button.id == "update_resource_id" and main_screen:
                 main_screen.query_one("#resource_id_input", Input).value = ""
         else:
-            button.variant = "error"
+            if is_watched:
+                self.watched_flash = "error"
+            else:
+                button.variant = "error"
             print("Some resources failed to update.")
             self.notify("Failed to update some resources.", severity="error")
 
@@ -2103,7 +2124,7 @@ class Redfetch(App):
     
     @work
     async def load_startup_status(self):
-        """Set the account level and print an update summary at startup."""
+        """Set the account level, the update badge, and print an update summary at startup."""
         username = await auth.get_username()
 
         try:
@@ -2131,6 +2152,7 @@ class Redfetch(App):
             1 for action in prepared.execution_plan.actions.values()
             if action.action == "download" and action.reason == "not_installed"
         )
+        self.update_count = outdated + not_installed
         if outdated:
             s = "" if outdated == 1 else "s"
             print(f"{outdated} resource{s} to update — press Update to fetch.")
