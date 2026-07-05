@@ -41,9 +41,8 @@ from redfetch import processes
 from redfetch import utils
 from redfetch import meta
 from redfetch import sync
-from redfetch import update_status
 from redfetch import desktop_shortcut
-from redfetch.sync_types import SyncEvent, SyncOutcome
+from redfetch.sync_types import ExecutionPlan, SyncEvent, SyncOutcome
 from redfetch.runtime_errors import display_fatal_error
 
 # for dev mode, from root dir:
@@ -91,6 +90,20 @@ def set_tristate(radio_set: RadioSet, value) -> None:
     target = list(radio_set.query(RadioButton))[tristate_index(value)]
     if not target.value:
         target.value = True
+
+
+def _startup_update_summary(execution_plan: ExecutionPlan) -> tuple[int, str]:
+    """Badge count and startup line from the full download total, so both match what pressing Update fetches — a per-reason subset silently omitted install_context_changed re-downloads."""
+    count = execution_plan.action_counts().get("download", 0)
+    if not count:
+        return 0, "Watched resources are up to date."
+    # "download" on a first run (nothing held yet); "update" once anything already installed is outdated
+    verb = "update" if any(
+        action.action == "download" and action.reason == "outdated"
+        for action in execution_plan.actions.values()
+    ) else "download"
+    s = "" if count == 1 else "s"
+    return count, f"{count} resource{s} to {verb} — press Update to fetch."
 
 
 def make_launch_toggles(selected: set[str]) -> Horizontal:
@@ -2147,20 +2160,8 @@ class Redfetch(App):
         self.is_level_2 = prepared.sync_info.is_level_2
         self.username = username
 
-        outdated = len(update_status.build_items_from_plan(prepared.execution_plan))
-        not_installed = sum(
-            1 for action in prepared.execution_plan.actions.values()
-            if action.action == "download" and action.reason == "not_installed"
-        )
-        self.update_count = outdated + not_installed
-        if outdated:
-            s = "" if outdated == 1 else "s"
-            print(f"{outdated} resource{s} to update — press Update to fetch.")
-        elif not_installed:
-            s = "" if not_installed == 1 else "s"
-            print(f"{not_installed} resource{s} to download — press Update to fetch.")
-        else:
-            print("Watched resources are up to date.")
+        self.update_count, summary = _startup_update_summary(prepared.execution_plan)
+        print(summary)
 
     def handle_ding_check(self) -> None:
         """Check if user has upgraded to level 2 and update UI accordingly."""

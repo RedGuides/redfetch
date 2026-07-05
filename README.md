@@ -66,10 +66,10 @@ To run redfetch from the command line:
 > ### 📦 Resource Management
 > - `update` - Update all watched and special resources
 >   - `--force` / `-f` - Force re-download of all watched resources
->   - `--server` / `-s` - Switch to this server before updating (`LIVE`, `TEST`, `EMU`)
+>   - `--server` / `-s` - Update this server for this run only, (`LIVE`, `TEST`, `EMU`). (Use the `server` command to switch servers permanently.)
 > - `download <ID_OR_URL>` - Download a specific resource by ID or URL
 >   - `--force` / `-f` - Force re-download by resetting this resource's download date
->   - `--server` / `-s` - Switch to this server before downloading (`LIVE`, `TEST`, `EMU`)
+>   - `--server` / `-s` - Download from this server for this run only (`LIVE`, `TEST`, `EMU`)
 > - `list` - List resources and dependencies in the cache database
 > - `reset` - Reset download dates for watched resources
 > 
@@ -175,14 +175,6 @@ command = ["C:\\Users\\Public\\Python\\python.exe", "C:\\Users\\Public\\redfetch
 ```
 
 You can set these per-server, e.g. `[TEST.POST_UPDATE_LAUNCH]`, or global `[DEFAULT.POST_UPDATE_LAUNCH]`.
-
-
-## Trailmap
-- Add custom buttons for "fetch" tab.
-- Option: Close after update
-- Indicate when updated VV is available
-- Run from MQ
-- Deeper integration with the forums
 
 ![Watchers on RedGuides](https://www.redguides.com/community/resources/redfetch.3177/watchers-sparkline?months=12&w=500&h=180)
 

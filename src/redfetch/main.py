@@ -53,7 +53,7 @@ def parse_resource_id_or_fail(value: str) -> str:
 
 def _apply_server_override(server: "Optional[Env]" = None) -> None:
     if server is not None and server.value != config.settings.ENV:
-        config.switch_environment(server.value)
+        config.select_environment_in_memory(server.value)
 
 
 def _initialize_auth():
@@ -214,7 +214,7 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
 )
 def update_command(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download of all watched resources."),
-    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Switch to this server before updating ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Update this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     db_name, db_path = initialize_db_only(server=server)
     asyncio.run(update_command_async(db_name=db_name, db_path=db_path, force=force))
@@ -228,7 +228,7 @@ def update_command(
 def download(
     id_or_url: str = typer.Argument(..., metavar="ID_OR_URL", help="RedGuides resource ID or URL"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download by resetting this resource's download date."),
-    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Switch to this server type before downloading ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Download from this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     db_name, db_path = initialize_db_only(server=server)
     asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))

@@ -11,40 +11,44 @@ from redfetch import config, main, update_status
 
 @pytest.fixture
 def fake_config(monkeypatch):
-    """Patch config.settings with a fake and capture switch_environment calls."""
+    """Patch config.settings with a fake, capture ephemeral selections, fail on any persist."""
     fake = SimpleNamespace(ENV="LIVE")
     monkeypatch.setattr(config, "settings", fake)
-    switched = []
+    selected = []
 
-    def fake_switch(new_env):
+    def fake_select(new_env):
         fake.ENV = new_env
-        switched.append(new_env)
+        selected.append(new_env)
 
-    monkeypatch.setattr(config, "switch_environment", fake_switch)
-    return fake, switched
+    monkeypatch.setattr(config, "select_environment_in_memory", fake_select)
+    monkeypatch.setattr(
+        config, "switch_environment",
+        lambda *a, **k: pytest.fail("--server must not persist the environment"),
+    )
+    return fake, selected
 
 
-def test_server_flag_switches_environment(fake_config):
-    """--server EMU while on LIVE must trigger a persistent switch to EMU (update/download path)."""
-    settings, switched = fake_config
+def test_server_flag_selects_environment_in_memory(fake_config):
+    """--server EMU while on LIVE selects EMU for this run only, without persisting."""
+    settings, selected = fake_config
     _apply_server_override(server=Env.EMU)
-    assert switched == ["EMU"]
+    assert selected == ["EMU"]
     assert settings.ENV == "EMU"
 
 
 def test_server_flag_noop_when_already_on_env(fake_config):
-    """--server LIVE while already on LIVE must not trigger a (persistent) switch."""
-    settings, switched = fake_config
+    """--server LIVE while already on LIVE must be a no-op."""
+    settings, selected = fake_config
     _apply_server_override(server=Env.LIVE)
-    assert switched == []
+    assert selected == []
     assert settings.ENV == "LIVE"
 
 
 def test_server_flag_noop_when_omitted(fake_config):
     """No --server at all must leave the environment untouched."""
-    settings, switched = fake_config
+    settings, selected = fake_config
     _apply_server_override(server=None)
-    assert switched == []
+    assert selected == []
     assert settings.ENV == "LIVE"
 
 
