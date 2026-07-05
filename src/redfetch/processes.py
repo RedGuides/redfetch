@@ -5,11 +5,18 @@ import os
 import subprocess
 import sys
 import time
+import webbrowser
+from pathlib import Path
 from typing import List, Sequence, Tuple
 
 import psutil
 
 IS_WINDOWS = sys.platform == "win32"
+
+if IS_WINDOWS:
+    import winreg
+else:
+    winreg = None
 
 _PROC_GONE = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
 
@@ -287,4 +294,43 @@ def run_command(command: "str | Sequence[str]", cwd: str | None = None) -> bool:
     subprocess.Popen(popen_arg, cwd=cwd)
     print(f"Started: {display}")
     return True
+
+
+def open_folder(path: str) -> None:
+    if not os.path.isdir(path):
+        raise FileNotFoundError(f"Directory does not exist: {path}")
+    if IS_WINDOWS:
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
+def open_file(folder: str, filename: str) -> str:
+    """Open a file and return a short descriptor for fallback handlers."""
+    full_path = os.path.join(folder, filename)
+    if not os.path.isfile(full_path):
+        raise FileNotFoundError(f"File not found: {full_path}")
+
+    if IS_WINDOWS:
+        file_ext = os.path.splitext(filename)[1].lower()
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, file_ext) as key:
+                winreg.QueryValue(key, "")
+                os.startfile(full_path)  # type: ignore[attr-defined]
+            return "with its default program"
+        except OSError:
+            subprocess.Popen(["notepad.exe", full_path])
+            return "with Notepad"
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", full_path])
+        else:
+            subprocess.Popen(["xdg-open", full_path])
+        return ""
+    except Exception:
+        webbrowser.open(Path(full_path).as_uri())
+        return "in your browser"
 
