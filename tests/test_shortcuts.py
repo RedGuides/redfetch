@@ -1,9 +1,13 @@
 """Tests for the shared shortcuts registry (redfetch run / open)."""
 
+import os
+
 import pytest
 from typer.testing import CliRunner
 
 from redfetch import shortcuts, processes, config, main
+
+windows_only = pytest.mark.skipif(os.name != "nt", reason="uses the Win32 profile API")
 
 runner = CliRunner()
 
@@ -51,6 +55,7 @@ def test_known_static_attributes():
     assert shortcuts.find_runnable("eqgame").args == ("patchme",)
     assert shortcuts.find_runnable("meshgenerator").executable == "MeshGenerator.exe"
     assert shortcuts.find_runnable("mesh").executable == "MeshGenerator.exe"  # alias preserved
+    assert shortcuts.find_runnable("meshgen").prepare is shortcuts._seed_meshgen_ini
     assert shortcuts.find_openable("settings").filename == "settings.local.toml"
     assert shortcuts.find_openable("mq-config").css == "file"
     assert shortcuts.find_openable("downloads").filename is None  # a folder
@@ -74,6 +79,67 @@ def test_run_without_extra_args(monkeypatch):
     r = shortcuts.Runnable("t", "L", "Foo.exe", lambda: "C:/x")
     shortcuts.run(r)
     assert calls == [("C:/x", "Foo.exe", [])]
+
+
+def test_run_invokes_prepare_hook_before_launch(monkeypatch):
+    events = []
+    monkeypatch.setattr(processes, "run_executable",
+                        lambda folder, exe, args: events.append("run"))
+    r = shortcuts.Runnable("t", "L", "Foo.exe", lambda: "C:/x",
+                           prepare=lambda: events.append("prepare"))
+    shortcuts.run(r)
+    assert events == ["prepare", "run"]
+
+
+# --- meshgen INI seeding (Windows-only: exercises the real Win32 profile API) ----
+
+@windows_only
+def test_seed_meshgen_ini_writes_missing_keys(tmp_path, monkeypatch):
+    monkeypatch.setattr(shortcuts.utils, "get_vvmq_path", lambda: str(tmp_path))
+    monkeypatch.setattr(shortcuts, "_eq_dir", lambda: r"C:\Games\EverQuest")
+    (tmp_path / "config").mkdir()
+
+    shortcuts._seed_meshgen_ini()
+
+    ini = (tmp_path / "config" / "MeshGenerator.ini").read_text()
+    assert f"Output Path={tmp_path}" in ini
+    assert r"EverQuest Path=C:\Games\EverQuest" in ini
+
+
+@windows_only
+def test_seed_meshgen_ini_preserves_existing(tmp_path, monkeypatch):
+    monkeypatch.setattr(shortcuts.utils, "get_vvmq_path", lambda: str(tmp_path))
+    monkeypatch.setattr(shortcuts, "_eq_dir", lambda: r"C:\NEW")
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "MeshGenerator.ini").write_text(
+        "[General]\nEverQuest Path=C:\\OLD\nZoneMaxExtents=1\n"
+    )
+
+    shortcuts._seed_meshgen_ini()
+
+    ini = (cfg / "MeshGenerator.ini").read_text()
+    assert "C:\\OLD" in ini and "C:\\NEW" not in ini   # existing EQ path untouched
+    assert "ZoneMaxExtents=1" in ini                   # unrelated key untouched
+    assert f"Output Path={tmp_path}" in ini            # still seeds the missing key
+
+
+@windows_only
+def test_seed_meshgen_ini_skips_when_eq_path_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(shortcuts.utils, "get_vvmq_path", lambda: str(tmp_path))
+    monkeypatch.setattr(shortcuts, "_eq_dir", lambda: None)
+    (tmp_path / "config").mkdir()
+
+    shortcuts._seed_meshgen_ini()
+
+    ini = (tmp_path / "config" / "MeshGenerator.ini").read_text()
+    assert f"Output Path={tmp_path}" in ini
+    assert "EverQuest Path" not in ini
+
+
+def test_seed_meshgen_ini_noop_without_vvmq(monkeypatch):
+    monkeypatch.setattr(shortcuts.utils, "get_vvmq_path", lambda: None)
+    shortcuts._seed_meshgen_ini()  # must not raise when the MQ folder is unknown
 
 
 # --- open_target() dispatch -------------------------------------------------

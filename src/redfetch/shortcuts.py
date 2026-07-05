@@ -35,6 +35,44 @@ def _ensure_redfetch_config() -> None:
     )
 
 
+def _seed_meshgen_ini() -> None:
+    """Seed MeshGenerator's first-run paths if needed and possible."""
+    if os.name != "nt":
+        return
+    vvmq = utils.get_vvmq_path()  # also the folder MeshGenerator.exe launches from
+    if not vvmq or not os.path.isdir(vvmq):
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        ini = os.path.join(vvmq, "config", "MeshGenerator.ini")
+        os.makedirs(os.path.dirname(ini), exist_ok=True)
+
+        k32 = ctypes.windll.kernel32
+        k32.GetPrivateProfileStringW.argtypes = [
+            wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
+            wintypes.LPWSTR, wintypes.DWORD, wintypes.LPCWSTR,
+        ]
+        k32.GetPrivateProfileStringW.restype = wintypes.DWORD
+        k32.WritePrivateProfileStringW.argtypes = [wintypes.LPCWSTR] * 4
+        k32.WritePrivateProfileStringW.restype = wintypes.BOOL
+
+        def _seed_if_empty(key: str, value: str | None) -> None:
+            if not value:
+                return
+            buf = ctypes.create_unicode_buffer(512)
+            k32.GetPrivateProfileStringW("General", key, "", buf, len(buf), ini)
+            if not buf.value:
+                k32.WritePrivateProfileStringW("General", key, value, ini)
+
+        _seed_if_empty("Output Path", vvmq)         # MQ folder = mesh output root
+        _seed_if_empty("EverQuest Path", _eq_dir())
+    except OSError:
+        pass  # unwritable config dir, etc. — MeshGenerator will just prompt as before
+
+
 # ---- executables: `redfetch run <key>` -------------------------------------
 
 @dataclass(frozen=True)
@@ -46,6 +84,7 @@ class Runnable:
     args: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     tooltip: str = ""
+    prepare: Callable[[], None] | None = None   # optional pre-launch hook
 
 
 RUNNABLES: tuple[Runnable, ...] = (
@@ -58,6 +97,7 @@ RUNNABLES: tuple[Runnable, ...] = (
         "meshgenerator", "MeshGenerator 🌐", "MeshGenerator.exe", utils.get_vvmq_path,
         aliases=("mesh", "meshgen"),
         tooltip="Generate your own EQ zone navmeshes for MQNav.",
+        prepare=_seed_meshgen_ini,
     ),
     Runnable(
         "eqbcs", "EQBCS 💬", "EQBCS.exe", utils.get_vvmq_path,
@@ -172,6 +212,8 @@ def openable_available(o: Openable) -> bool:
 
 def run(r: Runnable, extra: Sequence[str] | None = None) -> None:
     """Launch a registered executable."""
+    if r.prepare:
+        r.prepare()
     processes.run_executable(r.resolve_dir(), r.executable, [*r.args, *(extra or [])])
 
 
