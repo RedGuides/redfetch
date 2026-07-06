@@ -250,8 +250,7 @@ def _has_auth_credentials() -> bool:
 @app.command(
     "check",
     help=(
-        "Non-interactive update check. Writes [bold]update_status.json[/bold] for the env "
-        "(exit 0=wrote a verdict, 1=transient failure)."
+        "Non-interactive update check (for automation.)"
     ),
     rich_help_panel="📦 Resource Management",
 )
@@ -348,11 +347,11 @@ def _print_shortcut_table(entries, available) -> None:
 
 @app.command(
     "run",
-    help="Run a configured shortcut (e.g. [bold]vvmq[/bold], [bold]eqbcs[/bold], [bold]myseq[/bold]) for the current server.",
+    help="Run a shortcut (e.g. [bold]vvmq[/bold], [bold]eqbcs[/bold], [bold]myseq[/bold]). [bold]run[/bold] by itself will show a full list.",
     rich_help_panel="🔧 System & Utilities",
 )
 def run_shortcut_command(
-    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Shortcut to run: vvmq/mq, meshgenerator, eqbcs, launchpad/eq, eqgame, myseq. Omit to list."),
+    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Shortcut to run: vvmq, eqbcs, eq, eqgame, etc."),
     server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Run for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     config.initialize_config()
@@ -374,11 +373,11 @@ def run_shortcut_command(
 
 @app.command(
     "open",
-    help="Open a configured folder or file (e.g. [bold]downloads[/bold], [bold]eqhost[/bold], [bold]mq-config[/bold]) for the current server.",
+    help="Open a folder or file (e.g. [bold]downloads[/bold], [bold]eqhost[/bold]). [bold]open[/bold] by itself will show a full list.",
     rich_help_panel="🔧 System & Utilities",
 )
 def open_shortcut_command(
-    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Folder/file to open: downloads, vvmq, eq, myseq, config, mq-config, eq-config, eqhost. Omit to list."),
+    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Folder/file to open: downloads, vvmq, eq, etc."),
     server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Resolve paths for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     config.initialize_config()
@@ -421,7 +420,7 @@ async def web_command_async(db_name: str) -> None:
 
 @app.command(
     "list",
-    help="List resources and dependencies currently in the cache database.",
+    help="List resources and dependencies in your local cache.",
     rich_help_panel="📦 Resource Management"
 )
 def resources_list_command():
@@ -697,6 +696,9 @@ def main():
         if len(sys.argv) == 1:
             run_tui()
             return
+        # `redfetch help` → show top-level help 
+        if len(sys.argv) == 2 and sys.argv[1] == "help":
+            sys.argv[1] = "--help"
         app()
     except typer.Exit:
         raise

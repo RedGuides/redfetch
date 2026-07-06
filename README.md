@@ -61,42 +61,56 @@ To run redfetch from the command line:
 
 ## Command Line Reference
 
-> Run `redfetch --help` or `.\redfetch.exe --help` to see something like this in your terminal:
-> 
+<!-- BEGIN GENERATED CLI REFERENCE -->
+> Run `redfetch --help` for the current list, or `redfetch <COMMAND> --help` for a command's options. It looks like:
+>
 > ### 📦 Resource Management
-> - `update` - Update all watched and special resources
->   - `--force` / `-f` - Force re-download of all watched resources
->   - `--server` / `-s` - Update this server for this run only, (`LIVE`, `TEST`, `EMU`). (Use the `server` command to switch servers permanently.)
-> - `download <ID_OR_URL>` - Download a specific resource by ID or URL
->   - `--force` / `-f` - Force re-download by resetting this resource's download date
->   - `--server` / `-s` - Download from this server for this run only (`LIVE`, `TEST`, `EMU`)
-> - `list` - List resources and dependencies in the cache database
-> - `reset` - Reset download dates for watched resources
-> 
-> ### 🍔 Configuration
-> - `server <SERVER>` - Switch the current server/environment to `LIVE`, `TEST`, or `EMU`
-> - `config <SETTING_PATH> <VALUE>` - Update a setting by path and value
->   - `SETTING_PATH` - Dot-separated setting path (e.g., `SPECIAL_RESOURCES.1974.opt_in`)
->   - `VALUE` - New value for the setting
->   - `--server` / `-s` - Server to apply the change in (`LIVE`, `TEST`, `EMU`)
-> - `status` - Show the configuration for the current or specified server
->   - `--server` / `-s` - Server to show (defaults to current)
-> 
+> - `update` - Update all *watched* and special resources.
+>   - `--force` / `-f` - Force re-download of all watched resources.
+>   - `--server` / `-s` - Update this server for this run only, without changing your current server (LIVE, TEST, EMU).
+> - `download <ID_OR_URL>` - Download a specific resource by ID or URL.
+>   - `ID_OR_URL` - RedGuides resource ID or URL
+>   - `--force` / `-f` - Force re-download by resetting this resource's download date.
+>   - `--server` / `-s` - Download from this server for this run only, without changing your current server (LIVE, TEST, EMU).
+> - `check` - Non-interactive update check (for automation.)
+>   - `--server` / `-s` - Check this server's env for this run only, without persisting it (LIVE, TEST, EMU).
+> - `list` - List resources and dependencies in your local cache.
+> - `reset` - Reset download dates for *watched resources* in the database.
+>
 > ### 🔧 System & Utilities
-> - `ui` - Launch the Terminal User Interface
-> - `web` - Launch the RedGuides.com web interface
-> - `version` - Show version and exit
-> - `logout` - Disconnect your account from redfetch
-> - `uninstall` - Uninstall redfetch and clean up data
-> 
+> - `ui` - Launch the *Terminal User Interface*.
+> - `run [SHORTCUT]` - Run a shortcut (e.g. **vvmq**, **eqbcs**, **myseq**). **run** by itself will show a full list.
+>   - `SHORTCUT` - Shortcut to run: vvmq, eqbcs, eq, eqgame, etc.
+>   - `--server` / `-s` - Run for this server this run only, without changing your current server (LIVE, TEST, EMU).
+> - `open [SHORTCUT]` - Open a folder or file (e.g. **downloads**, **eqhost**). **open** by itself will show a full list.
+>   - `SHORTCUT` - Folder/file to open: downloads, vvmq, eq, etc.
+>   - `--server` / `-s` - Resolve paths for this server this run only, without changing your current server (LIVE, TEST, EMU).
+> - `web` - Launch the **RedGuides.com** web interface.
+> - `version` - Show version and exit.
+> - `uninstall` - Uninstall **redfetch** and clean up data.
+> - `logout` - Log out and clear cached token and API cache.
+>
+> ### 🍔 Configuration
+> - `config <SETTING_PATH> <VALUE>` - Update a setting by path and value.
+>   - `SETTING_PATH` - Dot-separated setting path (e.g., SPECIAL_RESOURCES.1974.opt_in)
+>   - `VALUE` - New value for the setting
+>   - `--server` / `-s` - Server to apply the change in (LIVE, TEST, EMU)
+> - `server <SERVER>` - Switch the current server/environment to LIVE, TEST, or EMU.
+>   - `SERVER` - Server to use: LIVE, TEST, EMU
+> - `status` - Show the configuration for the current or specified server.
+>   - `--server` / `-s` - Server to show (defaults to current)
+>
 > ### 📤 Publishing
-> - `publish <resource_id>` - Publish an update to you or your team's resource. [There's also a github action for this.](https://github.com/marketplace/actions/redguides-publish)
->   - `resource_id` - Existing RedGuides resource ID
->   - `--description <README.md>` / `-d` - Path to a file (e.g. `README.md`) that will become the resource's overview description
->   - `--version <version_number>` / `-v` - New version string (e.g., `v1.0.1`)
->   - `--message <CHANGELOG.md | MESSAGE>` / `-m` - Version update message, a message file (e.g. `message.md` / `message.txt`), or a `CHANGELOG.md` (keep a changelog) file.
+> - `publish <RESOURCE_ID>` - Publish updates to a **RedGuides** resource.
+>   - `RESOURCE_ID` - Existing RedGuides resource ID
+>   - `--description <README.md>` / `-d` - Path to a description file (e.g. README.md) to become the overview description.
+>   - `--version` / `-v` - New version string (e.g., v1.0.1)
+>   - `--message <CHANGELOG.md | MESSAGE>` / `-m` - Path to *CHANGELOG.md* (keep a changelog), other message file, or a direct message string.
 >   - `--file <FILE.zip>` / `-f` - Path to your zipped release file
->   - `--domain <URL>` - Domain to prepend to relative URLs in README.md or CHANGELOG.md files. (mostly for images. e.g., `https://raw.githubusercontent.com/yourusername/yourrepo/main/`)
+>   - `--domain` - If description or message is a .md file with relative URLs, resolve them to this domain (e.g., https://raw.githubusercontent.com/your/repo/main/)
+<!-- END GENERATED CLI REFERENCE -->
+
+The `publish` command also has a [GitHub Action](https://github.com/marketplace/actions/redguides-publish).
 
 ## Settings
 
@@ -119,7 +133,7 @@ opt_in = true
 ```
 * Note the use of single quotes around the path, which are required for windows paths.
 
-The above will install Brewall's maps to the EQ maps directory the next time `--download-watched` is run for `LIVE` servers.
+The above will install Brewall's maps to the EQ maps directory the next time `redfetch update` is run for `LIVE` servers.
 
 ### Overwrite protection
 

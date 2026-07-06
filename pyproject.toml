@@ -78,3 +78,9 @@ dependencies = [
   "pip-tools",
   "pip-check"
 ]
+
+[tool.hatch.envs.dev.scripts]
+# Regenerate the README 'Command Line Reference' from the typer app.
+gen-docs = "python tests/cli_reference.py --write"
+# Verify it's current
+check-docs = "python tests/cli_reference.py --check"
