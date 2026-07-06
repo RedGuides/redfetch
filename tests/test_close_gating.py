@@ -194,10 +194,11 @@ def _norm_set(*paths):
     return {os.path.normcase(os.path.normpath(p)) for p in paths}
 
 
-def test_session_running_detects_loader_copy_in_folder(tmp_path, monkeypatch):
+def test_session_ignores_unrecorded_exe_in_folder(tmp_path, monkeypatch):
+    # With no loader recorded (fresh install), a stray exe in the folder is NOT a session.
     monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: None)
     running = _norm_set(str(tmp_path / "LV3XGukn.exe"))
-    assert processes.macroquest_session_running(str(tmp_path), running) is True
+    assert processes.macroquest_session_running(str(tmp_path), running) is False
 
 
 @windows_paths
@@ -222,12 +223,53 @@ def test_session_not_running_when_nothing_matches(tmp_path, monkeypatch):
     assert processes.macroquest_session_running(str(tmp_path), running) is False
 
 
+@windows_paths
+def test_session_ignores_renamed_eqbcs_copy_when_loader_not_running(tmp_path, monkeypatch):
+    # The reported bug: EQBCS runs as a random-named RunFromTemp copy next to MQ and survives it.
+    monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: "LV3XGukn.exe")
+    running = _norm_set(str(tmp_path / "wUUayFYjXM.exe"))  # an EQBCS copy; loader not running
+    assert processes.macroquest_session_running(str(tmp_path), running) is False
+
+
+@windows_paths
+def test_session_matches_recorded_loader_amid_other_folder_exes(tmp_path, monkeypatch):
+    # The recorded loader name is authoritative: MQ is up when that copy runs, whatever else
+    # (LootSort, MeshGenerator, an EQBCS copy...) happens to share the folder.
+    monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: "LV3XGukn.exe")
+    running = _norm_set(str(tmp_path / "LV3XGukn.exe"), str(tmp_path / "LootSort.exe"))
+    assert processes.macroquest_session_running(str(tmp_path), running) is True
+
+
+@windows_paths
+def test_session_ignores_folder_tools_when_loader_recorded(tmp_path, monkeypatch):
+    # A folder tool running is not a session when a loader name is recorded and its process is gone.
+    monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: "LV3XGukn.exe")
+    running = _norm_set(str(tmp_path / "LootSort.exe"))
+    assert processes.macroquest_session_running(str(tmp_path), running) is False
+
+
+@windows_paths
+def test_session_detects_macroquest_exe_direct(tmp_path, monkeypatch):
+    # RunFromTemp off: MacroQuest.exe runs directly from the folder -> unambiguously a session.
+    monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: None)
+    running = _norm_set(str(tmp_path / "MacroQuest.exe"))
+    assert processes.macroquest_session_running(str(tmp_path), running) is True
+
+
 def test_spawned_loader_name_parsed_from_ini(tmp_path):
     (tmp_path / "MacroQuest.ini").write_text(
         "[Other]\nSpawnedProcess=wrong.exe\n[Internal]\nSpawnedProcess=Ab12Cd34.exe\n"
     )
     assert processes._spawned_loader_name(str(tmp_path)) == "Ab12Cd34.exe"
     assert processes._spawned_loader_name(str(tmp_path / "missing")) is None
+
+
+def test_spawned_loader_name_prefers_config_subfolder(tmp_path):
+    # Current MQ writes its INI under config/; the reader must look there, and it wins over root.
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "MacroQuest.ini").write_text("[Internal]\nSpawnedProcess=fromconfig.exe\n")
+    (tmp_path / "MacroQuest.ini").write_text("[Internal]\nSpawnedProcess=fromroot.exe\n")
+    assert processes._spawned_loader_name(str(tmp_path)) == "fromconfig.exe"
 
 
 # --- terminate/restart hardening --------------------------------------------------------

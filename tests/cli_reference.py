@@ -5,7 +5,7 @@ changing a command or option, refresh the docs:
 
     hatch run dev:gen-docs          # or: python tests/cli_reference.py --write
 
-``test_readme_cli_reference.py`` fails if README.md drifts from this output.
+Run ``hatch run dev:check-docs`` in CI or before release to catch drift.
 """
 from __future__ import annotations
 

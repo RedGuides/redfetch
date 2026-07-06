@@ -1,9 +1,4 @@
-"""config.self_heal_eqpath fills a blank/stale EQPATH from MacroQuest autologin at startup.
-
-Covers the empty-or-invalid heal policy: heal when EQPATH is blank or its folder is gone,
-never clobber a valid deliberate value, and keep one env's failure from aborting the others.
-The @format linchpin test proves the payoff: a stored EQPATH makes maps resolve to <eq>/maps.
-"""
+"""config.self_heal_eqpath fills a blank/stale EQPATH from MacroQuest autologin at startup."""
 import os
 import sqlite3
 
@@ -138,7 +133,6 @@ def test_no_login_db_no_heal(tmp_path, spy, monkeypatch):
 
     assert spy == []
 
-
 def test_only_blank_env_heals(tmp_path, eq_dir, spy, monkeypatch):
     vvmq = _make_vvmq(tmp_path, "vvmq_live", "live", eq_dir)
     envs = {
@@ -169,11 +163,7 @@ def test_exception_in_one_env_does_not_abort_others(tmp_path, eq_dir, spy, monke
 # --- the @format linchpin ---------------------------------------------------
 
 def test_maps_resolve_under_stored_eqpath(tmp_path, monkeypatch):
-    """A stored EQPATH (where the heal writes it) makes maps resource 153 resolve to <eq>/maps.
-
-    This is the whole point of self-heal over the old read-through: fix the stored value once
-    and every `@format {this.eqpath}` consumer lights up for free.
-    """
+    """A stored EQPATH (where the heal writes it) makes maps resource 153 resolve to <eq>/maps."""
     from dynaconf import Dynaconf
     from redfetch import sync_discovery
 
@@ -196,3 +186,4 @@ def test_maps_resolve_under_stored_eqpath(tmp_path, monkeypatch):
 
     resolved = sync_discovery.resolve_root_path("153", None, "LIVE")
     assert resolved == os.path.normpath(str(eq / "maps"))
+
