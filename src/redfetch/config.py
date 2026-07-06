@@ -493,3 +493,9 @@ def write_env_to_file(new_env):
         raise RuntimeError("Configuration has not been initialized. Call initialize_config() first.")
 
     env_loader.write(env_file_path, {"REDFETCH_ENV": new_env})
+
+    # Env changed -> re-shows server/config banner.
+    try:
+        os.remove(os.path.join(os.path.dirname(env_file_path), ".banner_shown"))
+    except OSError:
+        pass

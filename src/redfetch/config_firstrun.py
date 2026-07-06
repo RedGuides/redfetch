@@ -4,6 +4,7 @@
 import os
 import platform
 import json
+import time
 
 # Third-party
 from platformdirs import user_config_dir
@@ -20,6 +21,25 @@ from redfetch.config import load_config, save_config
 from redfetch.detecteq import find_everquest_uninstall_location
 
 console = Console()
+
+# server type and config dir banner
+BANNER_COOLDOWN = 12 * 3600
+
+
+def _banner_due(config_dir):
+    """True unless the banner was shown within the cooldown window."""
+    marker = os.path.join(config_dir, ".banner_shown")
+    try:
+        return (time.time() - os.path.getmtime(marker)) > BANNER_COOLDOWN
+    except OSError:
+        return True
+
+
+def _mark_banner_shown(config_dir):
+    try:
+        open(os.path.join(config_dir, ".banner_shown"), "w").close()
+    except OSError:
+        pass
 
 
 # zork-like prompt
@@ -260,7 +280,11 @@ def first_run_setup():
             if pypi_url_override:
                 notice_lines.append(f"[bold yellow]REDFETCH_PYPI_URL:[/bold yellow] {pypi_url_override}")
 
-            console.print(Panel("\n".join(notice_lines), expand=False))
+            # Env overrides always spam the status/config banner.
+            has_overrides = len(notice_lines) > 2
+            if has_overrides or _banner_due(config_dir):
+                console.print(Panel("\n".join(notice_lines), expand=False))
+                _mark_banner_shown(config_dir)
             return config_dir
         else:
             console.print("[bold red]Environment file (.env) not found. Rerunning setup.[/bold red]")

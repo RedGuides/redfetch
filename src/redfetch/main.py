@@ -539,6 +539,9 @@ def config_show_command(server: Optional[Env] = typer.Option(None, "--server", "
     if not panel_lines:
         panel_lines.append("[dim]No paths are currently configured or opted in for this environment.[/dim]")
 
+    # Lead with the server type so users always know which env they're on.
+    panel_lines.insert(0, f"[bold yellow]Server type:[/bold yellow] {current_env}")
+
     console.print(Panel("\n".join(panel_lines), expand=False))
 
     # Optional: Show full settings dict with a label
