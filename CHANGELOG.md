@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-07-05
+
+### Changed
+- The update button once again doubles as a *launch MQ* button, even when no update occurs.
+
+### Added
+- `redfetch run` and `redfetch open` CLI commands act as shortcuts, for example `redfetch run eqgame` will start EQgame.exe, `redfetch open eqhost` will open the eqhost.txt file, etc. These mirror the TUI shortcuts.
+
 ## [1.4.0] - 2026-07-05
 
 ### Changed
