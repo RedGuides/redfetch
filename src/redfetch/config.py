@@ -163,10 +163,38 @@ def initialize_config():
         ]
     )
 
+    self_heal_eqpath()
     write_breadcrumb()
 
     # Return the settings object for potential use
     return settings
+
+
+def self_heal_eqpath() -> None:
+    """Fill a blank or broken EQ PATH from autologin's login.db, per env."""
+    from redfetch import utils, detecteq
+
+    for env in ("LIVE", "TEST", "EMU"):
+        try:
+            env_settings = settings.from_env(env)
+            stored = env_settings.get("EQPATH")
+            if stored and detecteq._is_valid_eq_dir(stored):
+                continue  # heal only when blank or broken
+
+            vvmq_id = utils.get_current_vvmq_id(env)
+            if not vvmq_id:
+                continue
+            vvmq = utils.resolve_special_destination(
+                env_settings.SPECIAL_RESOURCES.get(vvmq_id), env_settings.DOWNLOAD_FOLDER
+            )
+            if not vvmq:
+                continue
+
+            detected = detecteq.read_autologin_eq_path(os.path.join(vvmq, "config"), env)
+            if detected and detected != stored: 
+                update_setting(["EQPATH"], detected, env=env)
+        except Exception:
+            continue  # we're not stopping for this
 
 
 def _resolve_redfetch_executable():

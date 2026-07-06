@@ -1,5 +1,7 @@
 import os
+import sqlite3
 import sys
+from pathlib import Path
 
 # Only import winreg on Windows
 if sys.platform == 'win32':
@@ -110,6 +112,30 @@ def find_everquest_uninstall_location():
         pass
 
     return None
+
+
+def read_autologin_eq_path(mq_config_dir: str | None, server_type: str) -> str | None:
+    """from autologin's login.db."""
+    if not mq_config_dir:
+        return None
+    db_path = os.path.join(mq_config_dir, "login.db")
+    if not os.path.isfile(db_path):
+        return None  # autologin maybe hasn't run
+
+    con = None
+    try:
+        con = sqlite3.connect(Path(db_path).as_uri() + "?mode=ro", uri=True)
+        row = con.execute(
+            "SELECT eq_path FROM server_types WHERE type = LOWER(?)", (server_type,)
+        ).fetchone()
+    except (sqlite3.Error, ValueError):
+        return None  # locked or something
+    finally:
+        if con is not None:
+            con.close()
+
+    candidate = row[0] if row else None
+    return os.path.normpath(candidate) if _is_valid_eq_dir(candidate) else None
 
 
 if __name__ == "__main__":

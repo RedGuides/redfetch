@@ -14,7 +14,6 @@ from redfetch import utils
 # Resolve paths lazily so --server can switch environments before launch.
 
 def _eq_dir() -> str | None:
-    """Current EverQuest game folder."""
     return config.settings.from_env(config.settings.ENV).get("EQPATH") or None
 
 
