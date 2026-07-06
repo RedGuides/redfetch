@@ -107,7 +107,7 @@ jobs:
         id: set_env_vars
         shell: pwsh
         run: |
-          "PYAPP_EXEC_MODULE=redfetch.main" >> $env:GITHUB_ENV
+          "PYAPP_EXEC_SCRIPT=$env:GITHUB_WORKSPACE\pyapp_launcher.py" >> $env:GITHUB_ENV
           "PYAPP_PASS_LOCATION=1" >> $env:GITHUB_ENV
 
           if ($env:GITHUB_REF -eq 'refs/heads/develop') {
@@ -165,11 +165,11 @@ jobs:
             Remove-Item Env:PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
           }
 
-          $env:PYAPP_EXEC_MODULE = "${{ env.PYAPP_EXEC_MODULE }}"
+          $env:PYAPP_EXEC_SCRIPT = "${{ env.PYAPP_EXEC_SCRIPT }}"
           $env:PYAPP_PASS_LOCATION = "${{ env.PYAPP_PASS_LOCATION }}"
           $env:PYAPP_PIP_EXTRA_ARGS = "${{ env.PYAPP_PIP_EXTRA_ARGS }}"
 
-          Write-Host "PYAPP_EXEC_MODULE: $env:PYAPP_EXEC_MODULE"
+          Write-Host "PYAPP_EXEC_SCRIPT: $env:PYAPP_EXEC_SCRIPT"
           Write-Host "PYAPP_PASS_LOCATION: $env:PYAPP_PASS_LOCATION"
           Write-Host "PYAPP_PIP_EXTRA_ARGS: $env:PYAPP_PIP_EXTRA_ARGS"
 
