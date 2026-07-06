@@ -1,6 +1,7 @@
 """Helpers for managing external processes."""
 from __future__ import annotations
 
+import configparser
 import os
 import subprocess
 import sys
@@ -95,22 +96,20 @@ def is_executable_running(exe_path: str, running: set[str] | None = None) -> boo
 
 
 def _spawned_loader_name(mq_folder: str) -> str | None:
-    """Loader-copy filename from MacroQuest.ini [Internal] SpawnedProcess."""
-    ini_path = os.path.join(mq_folder, "MacroQuest.ini")
-    try:
-        with open(ini_path, encoding="utf-8", errors="ignore") as fh:
-            in_internal = False
-            for line in fh:
-                stripped = line.strip()
-                if stripped.startswith("["):
-                    in_internal = stripped.lower() == "[internal]"
-                    continue
-                if in_internal and "=" in stripped:
-                    key, _, value = stripped.partition("=")
-                    if key.strip().lower() == "spawnedprocess":
-                        return value.strip() or None
-    except OSError:
-        pass
+    """Loader-copy filename from MacroQuest.ini."""
+    for ini_path in (
+        os.path.join(mq_folder, "config", "MacroQuest.ini"),
+        os.path.join(mq_folder, "MacroQuest.ini"),
+    ):
+
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        try:
+            parser.read(ini_path, encoding="utf-8")
+            name = parser.get("Internal", "SpawnedProcess", fallback="").strip()
+        except (configparser.Error, OSError):
+            continue
+        if name:
+            return name
     return None
 
 
@@ -136,13 +135,12 @@ def macroquest_session_running(mq_folder: str, running: set[str] | None = None) 
     if running is None:
         running = running_executable_paths()
     folder = _norm(mq_folder)
+    alias = _spawned_loader_name(mq_folder)
+    alias = alias.lower() if alias else None
     for path in running:
-        if os.path.dirname(path) == folder and os.path.basename(path) != "eqbcs.exe":
+        base = os.path.basename(path)
+        if base == alias or (base == "macroquest.exe" and os.path.dirname(path) == folder):
             return True
-    spawned = _spawned_loader_name(mq_folder)
-    if spawned:
-        spawned = spawned.lower()
-        return any(os.path.basename(path) == spawned for path in running)
     return False
 
 
