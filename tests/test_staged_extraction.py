@@ -1,5 +1,6 @@
 """Tests for two-phase staged extraction: stage every member, then swap all in."""
 
+import asyncio
 import os
 import stat
 import sys
@@ -182,6 +183,54 @@ def test_readonly_target_updated_in_place(tmp_path, monkeypatch):
 
     assert target.read_bytes() == b"new"
     assert not list(dest.rglob("*.rfold*"))
+
+
+def test_readonly_target_single_file_download(tmp_path, monkeypatch):
+    # non-zip downloads must share the staged-swap read-only handling
+    # simulate Windows semantics (replace onto RO dst fails) so posix CI pins this too
+    target = tmp_path / "zones.navmesh"
+    target.write_bytes(b"old")
+    os.chmod(target, stat.S_IREAD)
+
+    real_replace = os.replace
+
+    def readonly_replace(src, dst):
+        if os.path.exists(dst) and not os.access(dst, os.W_OK):
+            raise PermissionError("read-only destination")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(download.os, "replace", readonly_replace)
+
+    async def fake_stream(resp, file_path, hasher):
+        tmp = file_path + ".dl"
+        with open(tmp, "wb") as f:
+            f.write(b"new")
+        return tmp
+
+    monkeypatch.setattr(download, "_stream_to_tempfile", fake_stream)
+
+    class FakeResp:
+        headers = {}
+
+        def raise_for_status(self):
+            pass
+
+    class FakeStream:
+        async def __aenter__(self):
+            return FakeResp()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class FakeClient:
+        def stream(self, *args, **kwargs):
+            return FakeStream()
+
+    ok = asyncio.run(download.download_file_async(FakeClient(), "http://x", str(target)))
+
+    assert ok is True
+    assert target.read_bytes() == b"new"
+    assert not list(tmp_path.rglob("*.rfold*"))
 
 
 def test_remove_if_exists_clears_readonly(tmp_path, monkeypatch):

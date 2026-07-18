@@ -104,7 +104,17 @@ async def download_file_async(
         if tmp_path is None:
             return False
 
-        os.replace(tmp_path, file_path)
+        try:
+            displaced = _swap_into_place(tmp_path, file_path)
+        except PermissionError:
+            _report_locked_target(file_path)
+            return False
+        except OSError as e:
+            print(f"Could not update {os.path.basename(file_path)}: {e}")
+            _remove_if_exists(tmp_path)
+            return False
+        if displaced:
+            print(f"Staged update for {os.path.basename(file_path)}; applies on next launch.")
         print(f"Downloaded file {file_path}")
         return True
     finally:
