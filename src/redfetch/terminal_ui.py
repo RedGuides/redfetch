@@ -8,6 +8,7 @@ from pathlib import Path
 from itertools import cycle
 
 # third-party
+import httpx
 from dynaconf import ValidationError
 from textual_fspicker import SelectDirectory
 from rich.console import detect_legacy_windows
@@ -314,10 +315,12 @@ class FetchTab(ScrollableContainer):
         app: "Redfetch" = self.app  # type: ignore[assignment]
         if not app.username:
             return  # keep the compose default until identity resolves
-        if app.is_level_2:
+        if app.is_level_2 is True:
             greeting = f"[italic]Hail, [bold]{app.username}![/bold][/italic]"
-        else:
+        elif app.is_level_2 is False:
             greeting = f"Hey {app.username}, you're level 1 😞"
+        else:
+            greeting = f"Hey [bold]{app.username}[/bold]!"
         self.query_one("#welcome_label", Label).update(greeting)
 
     def _recompute(self) -> None:
@@ -911,13 +914,15 @@ class AccountTab(ScrollableContainer):
 
     def _refresh_account_state(self) -> None:
         app: "Redfetch" = self.app  # type: ignore[assignment]
-        self.query_one("#btn_ding", Button).display = not app.is_level_2
+        self.query_one("#btn_ding", Button).display = app.is_level_2 is not True
         if not app.username:
             return  # keep the "Loading..." compose default until the level check resolves
-        if app.is_level_2:
+        if app.is_level_2 is True:
             text = f"[italic][bold]{app.username}, thank you for being level 2[/bold][/italic] 💛"
-        else:
+        elif app.is_level_2 is False:
             text = f"Hey {app.username}, you're level 1 😞 some resources won't be downloaded."
+        else:
+            text = f"Hey {app.username}, we couldn't verify your account level."
         self.query_one("#account_label", Label).update(text)
 
     #
@@ -1023,7 +1028,7 @@ class Redfetch(App):
     current_env: reactive[str] = reactive(config.settings.ENV)
     # User account identity and permissions: set reactively by background workers, observed by AccountTab for live updates
     username: reactive[str] = reactive("")
-    is_level_2: reactive[bool] = reactive(False)
+    is_level_2: reactive[bool | None] = reactive(None)
     # Startup update check: None = unknown, int = resources to be fetched
     update_count: reactive[int | None] = reactive(None)
     # Transient post-sync flash on the Easy Update button
@@ -1919,7 +1924,11 @@ class Redfetch(App):
     @work
     async def load_startup_status(self):
         """Set the account level, the update badge, and print an update summary at startup."""
-        username = await auth.get_username()
+        try:
+            username = await auth.get_username()
+        except RuntimeError:
+            print("Couldn't verify your RedGuides account right now.")
+            return
 
         try:
             headers = await auth.get_api_headers()
@@ -1956,8 +1965,21 @@ class Redfetch(App):
         if os.environ.get("REDFETCH_CRASH_TEST") == "ding":
             raise RuntimeError("Intentional crash test from _check_ding_level_worker.")
 
-        headers = await auth.get_api_headers()
-        sync_info = await api.get_sync_info(headers)
+        try:
+            headers = await auth.get_api_headers()
+            sync_info = await api.get_sync_info(headers)
+        except RuntimeError as exc:
+            # Auth is unrecoverable this session (e.g. token refresh failed).
+            self.notify(str(exc), severity="error", timeout=10)
+            return
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            self.notify(
+                "Couldn't check your account level right now.",
+                severity="error",
+                timeout=10,
+            )
+            return
+
         if sync_info.is_level_2:
             # User is now level 2! AccountTab + FetchTab react to the reactives below.
             self.username = self.username or await auth.get_username()

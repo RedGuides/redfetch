@@ -499,7 +499,7 @@ async def get_api_headers():
                 if access_token:
                     return {"Authorization": f"Bearer {access_token}"}
 
-            raise RuntimeError("OAuth token refresh failed. Please run `redfetch logout` and authorize again.")
+            raise RuntimeError("OAuth token refresh failed. Restart redfetch to authorize again.")
 
         raise RuntimeError("OAuth access token is expired and no refresh token is available. Please authorize again.")
 

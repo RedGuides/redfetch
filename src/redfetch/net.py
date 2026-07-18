@@ -54,8 +54,17 @@ def clear_manifest_cache() -> None:
     reraise=True,
 )
 async def get_json(client: httpx.AsyncClient, url: str, params: Optional[Dict[str, Any]] = None) -> dict:
-    """GET JSON with retry on transient network errors."""
+    """GET JSON with retry on transient network errors and one rejected OAuth token."""
     response = await client.get(url, params=params, timeout=10.0)
+    if response.status_code == 401:
+        scheme, _, token = response.request.headers.get("Authorization", "").partition(" ")
+        if scheme.lower() == "bearer" and token:
+            # The server rejected a token our local expiry still trusts.
+            from redfetch import auth  # lazy: auth imports this module
+
+            auth.set_token_expiry("0")
+            client.headers.update(await auth.get_api_headers())
+            response = await client.get(url, params=params, timeout=10.0)
     response.raise_for_status()
     return response.json()
 
