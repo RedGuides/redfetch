@@ -3,6 +3,7 @@
 # Standard
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -134,38 +135,31 @@ def detect_installation_method():
 
 
 def get_update_command():
-    """Get the appropriate update command based on installation method."""
+    """Update command for the installation method, or None."""
+    if "test.pypi.org" in PYPI_URL:
+        return None
+
     method = detect_installation_method()
-
-    # Add TestPyPI index URL to commands if using TestPyPI
-    is_test_pypi = "test.pypi.org" in PYPI_URL
-
     commands = {
-        'pip': [
-            sys.executable, '-m', 'pip', 'install', '--upgrade',
-            '--index-url', 'https://test.pypi.org/simple/',
-            '--extra-index-url', 'https://pypi.org/simple/',
-            'redfetch'
-        ] if is_test_pypi else [
-            sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'
-        ],
-        'pipx': [
-            'pipx', 'upgrade', 'redfetch', '--pip-args',
-            '--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/'
-        ] if is_test_pypi else [
-            'pipx', 'upgrade', 'redfetch'
-        ],
-        'uv': [
-            'uv', 'tool', 'upgrade', 'redfetch',
-            '--index-url', 'https://test.pypi.org/simple/',
-            '--extra-index-url', 'https://pypi.org/simple/'
-        ] if is_test_pypi else [
-            'uv', 'tool', 'upgrade', 'redfetch'
-        ],
+        'pip': [sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'],
+        'pipx': ['pipx', 'upgrade', 'redfetch'],
+        'uv': ['uv', 'tool', 'upgrade', 'redfetch'],
         'pyapp': None  # Handle separately with self_update()
     }
-
     return commands.get(method)
+
+
+def _sweep_pip_stash_debris():
+    # leftover pip uninstall stashes (~edfetch, ~-dfetch, ...) from interrupted upgrades
+    site_packages = Path(__file__).resolve().parent.parent
+    if site_packages.name != 'site-packages':
+        return
+    for entry in site_packages.iterdir():
+        if not (entry.is_dir() and entry.name.startswith('~') and len(entry.name) == len('redfetch')):
+            continue
+        tail = entry.name.lstrip('-~.=%0123456789')
+        if tail and 'redfetch'.endswith(tail):
+            shutil.rmtree(entry, ignore_errors=True)
 
 
 def check_for_update():
@@ -199,11 +193,14 @@ def check_for_update():
             # Get the appropriate update command
             update_command = get_update_command()
             if not update_command:
-                console.print("[red]Could not determine update method.[/red]")
+                if "test.pypi.org" in PYPI_URL:
+                    console.print("[yellow]Dev builds don't auto-update: TestPyPI is only safe for redfetch itself. Install it with --index-url https://test.pypi.org/simple/ --no-deps, then install dependencies from PyPI.[/yellow]")
+                else:
+                    console.print("[red]Could not determine update method.[/red]")
                 return False
-                
+
             command_panel = Panel(
-                Text(" ".join(update_command), style="bold cyan"),
+                Text(subprocess.list2cmdline(update_command), style="bold cyan"),
                 title="Update Command",
                 expand=False
             )
@@ -219,22 +216,30 @@ def check_for_update():
 
 
 def pip_update_redfetch(update_command, latest_version):
+    manual_command = subprocess.list2cmdline(update_command)
     try:
         console.print(f"\n[bold]Updating redfetch to version {latest_version}...[/bold]\n")
-        
+
+        _sweep_pip_stash_debris()
+
         # Run the update command and let it print directly to console
-        result = subprocess.run(update_command)
-        returncode = result.returncode
-        
+        returncode = subprocess.run(update_command).returncode
+
         if returncode == 0:
             console.print("\n[bold green]redfetch has been successfully updated. 🫎[/bold green]")
             console.print("[yellow]Please run redfetch again to use the updated version.[/yellow]")
             sys.exit(0)
         else:
             console.print("\n[bold red]Update failed. See output above for details.[/bold red]")
+            console.print(f"[yellow]You can update manually by closing redfetch and running:[/yellow] {manual_command}")
             sys.exit(1)
+    except FileNotFoundError:
+        console.print(f"\n[bold red]Couldn't find {update_command[0]} on PATH.[/bold red]")
+        console.print(f"[yellow]You can update manually by closing redfetch and running:[/yellow] {manual_command}")
+        sys.exit(1)
     except Exception as e:
         console.print(f"[bold red]Error during update process:[/bold red] {e}")
+        console.print(f"[yellow]You can update manually by closing redfetch and running:[/yellow] {manual_command}")
         sys.exit(1)
 
 
@@ -456,7 +461,6 @@ def uninstall():
             except Exception as e:
                 console.print(f"[red]Failed to release cache handles: {e}[/red]")
             try:
-                import shutil
                 shutil.rmtree(cache_dir)
             except Exception as e:
                 console.print(f"[red]Failed to delete cache directory: {e}[/red]")
