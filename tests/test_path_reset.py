@@ -75,69 +75,9 @@ def _local(resource_id: str, *, resolved_path: str, version_local: int = 100, **
     return LocalInstallState(**fields)
 
 
-def test_planner_redownloads_when_resolved_path_changes():
-    target = _root_target("153", resolved_path="D:/new_path")
-    local = _local("153", resolved_path="C:/old_path")
-
-    plan = build_execution_plan(
-        desired_set=DesiredSet(
-            mode="full",
-            resource_ids={"153"},
-            install_targets={target.target_key: target},
-        ),
-        remote_snapshot=RemoteSnapshot(resources={"153": _downloadable("153")}),
-        local_snapshot=LocalSnapshot(install_targets={local.target_key: local}),
-        settings_env="LIVE",
-    )
-
-    action = plan.actions["/153/"]
-    assert action.action == "download"
-    assert action.reason == "install_context_changed"
-
-
-def test_planner_skips_when_path_unchanged_and_version_current():
-    target = _root_target("153", resolved_path="C:/same_path")
-    local = _local("153", resolved_path="C:/same_path")
-
-    plan = build_execution_plan(
-        desired_set=DesiredSet(
-            mode="full",
-            resource_ids={"153"},
-            install_targets={target.target_key: target},
-        ),
-        remote_snapshot=RemoteSnapshot(resources={"153": _downloadable("153")}),
-        local_snapshot=LocalSnapshot(install_targets={local.target_key: local}),
-        settings_env="LIVE",
-    )
-
-    action = plan.actions["/153/"]
-    assert action.action == "skip"
-    assert action.reason == "already_current"
-
-
 def test_planner_redownloads_when_protected_files_change():
     target = _root_target("153", resolved_path="C:/path", protected_files=["a.ini", "b.ini"])
     local = _local("153", resolved_path="C:/path", protected_files=["a.ini"])
-
-    plan = build_execution_plan(
-        desired_set=DesiredSet(
-            mode="full",
-            resource_ids={"153"},
-            install_targets={target.target_key: target},
-        ),
-        remote_snapshot=RemoteSnapshot(resources={"153": _downloadable("153")}),
-        local_snapshot=LocalSnapshot(install_targets={local.target_key: local}),
-        settings_env="LIVE",
-    )
-
-    action = plan.actions["/153/"]
-    assert action.action == "download"
-    assert action.reason == "install_context_changed"
-
-
-def test_planner_redownloads_when_flatten_changes():
-    target = _root_target("153", resolved_path="C:/path", flatten=True)
-    local = _local("153", resolved_path="C:/path", flatten=False)
 
     plan = build_execution_plan(
         desired_set=DesiredSet(

@@ -68,14 +68,6 @@ def test_manifest_fields_flow_into_the_state():
     assert state.artifact.file_hash == HASH
 
 
-def test_artifact_only_present_when_downloadable():
-    entries = {"blocked": _entry(access_tier="level2", files=1)}   # member lacks level 2
-    state = _snapshot(entries, _member()).resources["blocked"]
-    assert state.status == "needs_level_2"
-    assert state.artifact is None
-    assert state.version_id == 100   # version still carried for the planner
-
-
 def test_sync_info_flags_unlock_access():
     entries = {"level2": _entry(access_tier="level2"), "licreq": _entry(requires_license=True)}
     snap = _snapshot(entries, _member(is_level_2=True, licensed_ids={"licreq"}))

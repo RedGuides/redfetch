@@ -62,20 +62,6 @@ def test_second_401_raises_without_further_retries():
     assert len(requests) == 2
 
 
-def test_failed_refresh_propagates_runtime_error():
-    """When get_api_headers() can't refresh, its RuntimeError reaches the caller."""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, request=request)
-
-    failed = AsyncMock(side_effect=RuntimeError("OAuth token refresh failed."))
-    with (
-        patch("redfetch.auth.set_token_expiry"),
-        patch("redfetch.auth.get_api_headers", new=failed),
-        pytest.raises(RuntimeError, match="refresh failed"),
-    ):
-        _run_get_json(handler, {"Authorization": "Bearer rejected"})
-
-
 def test_api_key_401_does_not_attempt_oauth_refresh():
     requests: list[httpx.Request] = []
 

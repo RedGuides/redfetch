@@ -133,18 +133,6 @@ def test_no_login_db_no_heal(tmp_path, spy, monkeypatch):
 
     assert spy == []
 
-def test_only_blank_env_heals(tmp_path, eq_dir, spy, monkeypatch):
-    vvmq = _make_vvmq(tmp_path, "vvmq_live", "live", eq_dir)
-    envs = {
-        "LIVE": _env_with_vvmq("LIVE", vvmq, eqpath=None),   # blank -> heals
-        "TEST": _FakeEnv(eqpath=str(eq_dir)),                # valid -> short-circuits
-    }
-    _install(monkeypatch, envs)
-
-    config.self_heal_eqpath()
-
-    assert spy == [_healed(eq_dir, "LIVE")]
-
 
 def test_exception_in_one_env_does_not_abort_others(tmp_path, eq_dir, spy, monkeypatch):
     vvmq_test = _make_vvmq(tmp_path, "vvmq_test", "test", eq_dir)

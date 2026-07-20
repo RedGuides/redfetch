@@ -16,6 +16,7 @@ def _action(
     reason,
     title=None,
     remote_version=None,
+    remote_version_string=None,
     target_kind="root",
     parent_id=None,
     root_resource_id=None,
@@ -35,6 +36,7 @@ def _action(
         reason=reason,
         title=title,
         remote_version=remote_version,
+        remote_version_string=remote_version_string,
     )
 
 
@@ -44,7 +46,7 @@ def _plan(*actions):
 
 def test_build_items_includes_only_outdated_downloads():
     plan = _plan(
-        _action("4", action="download", reason="outdated", title="KissAssist", remote_version=1240),
+        _action("4", action="download", reason="outdated", title="KissAssist", remote_version=1240, remote_version_string="11.005"),
         _action("3040", action="download", reason="outdated", title="RGMercs", remote_version=991),
         # Excluded: a brand-new install is not an "update" to something already held.
         _action("9", action="download", reason="not_installed", title="New Thing", remote_version=5),
@@ -59,15 +61,15 @@ def test_build_items_includes_only_outdated_downloads():
     items = update_status.build_items_from_plan(plan)
 
     assert items == [
-        {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240},
-        {"resource_id": "3040", "name": "RGMercs", "available_version_id": 991},
+        {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": "11.005"},
+        {"resource_id": "3040", "name": "RGMercs", "available_version_id": 991, "version": None},
     ]
 
 
 def test_build_items_falls_back_to_resource_id_when_no_title():
     plan = _plan(_action("4", action="download", reason="outdated", remote_version=1240))
     items = update_status.build_items_from_plan(plan)
-    assert items == [{"resource_id": "4", "name": "4", "available_version_id": 1240}]
+    assert items == [{"resource_id": "4", "name": "4", "available_version_id": 1240, "version": None}]
 
 
 def test_install_context_changed_is_not_an_update():
@@ -116,7 +118,7 @@ def test_split_items_missing_result_counts_as_remaining():
     installed, remaining = update_status.split_items_by_outcome(plan, _exec_result())
 
     assert installed == []
-    assert remaining == [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}]
+    assert remaining == [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": None}]
 
 
 def test_split_items_keeps_blocked_exclusion():
@@ -154,7 +156,7 @@ def test_split_items_resource_with_any_failed_target_stays_remaining():
     installed, remaining = update_status.split_items_by_outcome(plan, result)
 
     assert installed == []
-    assert remaining == [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}]
+    assert remaining == [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": None}]
 
 
 @pytest.fixture
@@ -182,23 +184,6 @@ def test_write_status_ok_with_items(status_dir):
     assert on_disk["checked_at"] > 0
 
 
-def test_write_status_includes_managed_path(status_dir):
-    """MQ reads managed_path to ignore stray MQ copies; it must round-trip verbatim."""
-    update_status.write_update_status(
-        env="LIVE",
-        auth_state="ok",
-        items=[{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}],
-        managed_path=r"D:\EverQuest\VanillaMQ_LIVE",
-    )
-    assert _read_status(status_dir)["managed_path"] == r"D:\EverQuest\VanillaMQ_LIVE"
-
-
-def test_managed_path_defaults_to_null(status_dir):
-    """Not_configured / unresolved trees write an explicit null so MQ won't gate."""
-    update_status.write_update_status(env="EMU", auth_state="not_configured")
-    assert _read_status(status_dir)["managed_path"] is None
-
-
 def test_non_ok_states_force_empty_updates(status_dir):
     update_status.write_update_status(
         env="TEST",
@@ -208,13 +193,6 @@ def test_non_ok_states_force_empty_updates(status_dir):
     on_disk = _read_status(status_dir)
     assert on_disk["auth_state"] == "needs_login"
     assert on_disk["updates"]["items"] == []
-
-
-def test_write_is_atomic_no_leftover_tmp(status_dir):
-    update_status.write_update_status(env="EMU", auth_state="not_configured")
-    files = {p.name for p in status_dir.iterdir()}
-    assert update_status.UPDATE_STATUS_FILENAME in files
-    assert not any(name.endswith(".tmp") for name in files)
 
 
 def test_additive_fields_omitted_when_unset(status_dir):

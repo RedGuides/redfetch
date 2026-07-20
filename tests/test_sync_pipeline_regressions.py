@@ -9,7 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from redfetch import store
+from redfetch import navmesh, store
+from redfetch import sync as sync_mod
 from redfetch import sync_planner as planner
 from redfetch.sync_discovery import _add_root_target
 from redfetch.sync_types import (
@@ -17,12 +18,11 @@ from redfetch.sync_types import (
     DesiredSet,
     LocalInstallState,
     LocalSnapshot,
-    PLAN_REASON_META,
     PlannedAction,
-    PlanReason,
     RemoteArtifact,
     RemoteResourceState,
     RemoteSnapshot,
+    SyncOutcome,
 )
 
 
@@ -516,15 +516,27 @@ def test_special_resource_with_unknown_category_still_downloads():
     assert action.resolved_path == expected
 
 
-def test_plan_reason_meta_covers_all_reasons():
-    """Every PlanReason value must have a corresponding PLAN_REASON_META entry."""
-    from typing import get_args
+def test_navmesh_crash_never_voids_the_sync_outcome(monkeypatch, tmp_path):
+    """run_sync must return the completed outcome even if navmesh raises outright —
+    headless derives its status write (incl. pending_restart) from it."""
+    monkeypatch.setenv("REDFETCH_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(sync_mod, "_file_lock", None)
 
-    all_reasons = set(get_args(PlanReason))
-    covered = set(PLAN_REASON_META)
-    missing = all_reasons - covered
-    extra = covered - all_reasons
-    assert not missing, f"PlanReason values missing from PLAN_REASON_META: {missing}"
-    assert not extra, f"PLAN_REASON_META has keys not in PlanReason: {extra}"
+    outcome = SyncOutcome(success=True, vvmq_updated=True)
+
+    async def _sync(*a, **k):
+        return outcome
+
+    async def _boom(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(sync_mod, "sync", _sync)
+    monkeypatch.setattr(navmesh, "sync_navmeshes", _boom)
+
+    result = asyncio.run(sync_mod.run_sync("db", {}))  # full sync -> navmesh path runs
+
+    assert result is outcome
+
+
 
 

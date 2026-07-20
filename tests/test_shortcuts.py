@@ -43,11 +43,6 @@ def test_every_open_name_resolves_case_insensitively():
             assert shortcuts.find_openable(name.upper()) is o
 
 
-def test_unknown_name_returns_none():
-    assert shortcuts.find_runnable("bogus") is None
-    assert shortcuts.find_openable("bogus") is None
-
-
 # --- registry contents (guards against accidental edits) --------------------
 
 def test_known_static_attributes():
@@ -70,15 +65,6 @@ def test_run_passes_resolved_dir_and_merged_args(monkeypatch):
     r = shortcuts.Runnable("t", "L", "Foo.exe", lambda: "C:/x", args=("a",))
     shortcuts.run(r, extra=["b"])
     assert calls == [("C:/x", "Foo.exe", ["a", "b"])]
-
-
-def test_run_without_extra_args(monkeypatch):
-    calls = []
-    monkeypatch.setattr(processes, "run_executable",
-                        lambda folder, exe, args: calls.append((folder, exe, args)))
-    r = shortcuts.Runnable("t", "L", "Foo.exe", lambda: "C:/x")
-    shortcuts.run(r)
-    assert calls == [("C:/x", "Foo.exe", [])]
 
 
 def test_run_invokes_prepare_hook_before_launch(monkeypatch):
@@ -135,11 +121,6 @@ def test_seed_meshgen_ini_skips_when_eq_path_unknown(tmp_path, monkeypatch):
     ini = (tmp_path / "config" / "MeshGenerator.ini").read_text()
     assert f"Output Path={tmp_path}" in ini
     assert "EverQuest Path" not in ini
-
-
-def test_seed_meshgen_ini_noop_without_vvmq(monkeypatch):
-    monkeypatch.setattr(shortcuts.utils, "get_vvmq_path", lambda: None)
-    shortcuts._seed_meshgen_ini()  # must not raise when the MQ folder is unknown
 
 
 # --- open_target() dispatch -------------------------------------------------

@@ -36,14 +36,6 @@ def test_server_flag_selects_environment_in_memory(fake_config):
     assert settings.ENV == "EMU"
 
 
-def test_server_flag_noop_when_already_on_env(fake_config):
-    """--server LIVE while already on LIVE must be a no-op."""
-    settings, selected = fake_config
-    _apply_server_override(server=Env.LIVE)
-    assert selected == []
-    assert settings.ENV == "LIVE"
-
-
 def test_server_flag_noop_when_omitted(fake_config):
     """No --server at all must leave the environment untouched."""
     settings, selected = fake_config

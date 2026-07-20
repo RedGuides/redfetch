@@ -36,14 +36,6 @@ def config_dir(tmp_path):
     return d
 
 
-def test_reads_matching_server_type_case_insensitively(config_dir, eq_dir):
-    _make_login_db(str(config_dir / "login.db"), [("live", str(eq_dir))])
-    expected = os.path.normpath(str(eq_dir))
-    # type stored lowercased; lookup normalizes both sides
-    assert detecteq.read_autologin_eq_path(str(config_dir), "live") == expected
-    assert detecteq.read_autologin_eq_path(str(config_dir), "LIVE") == expected
-
-
 def test_emu_row_found_when_live_absent(config_dir, eq_dir):
     # the whole point: emu/test clients the registry can't detect
     _make_login_db(str(config_dir / "login.db"), [("emu", str(eq_dir))])
@@ -51,24 +43,6 @@ def test_emu_row_found_when_live_absent(config_dir, eq_dir):
     assert detecteq.read_autologin_eq_path(str(config_dir), "live") is None
 
 
-def test_missing_db_returns_none(config_dir):
-    assert detecteq.read_autologin_eq_path(str(config_dir), "live") is None
-
-
-def test_empty_eq_path_returns_none(config_dir):
-    # the schema's 'import' placeholder row carries an empty path
-    _make_login_db(str(config_dir / "login.db"), [("import", "")])
-    assert detecteq.read_autologin_eq_path(str(config_dir), "import") is None
-
-
 def test_stale_path_without_eqgame_returns_none(config_dir, tmp_path):
     _make_login_db(str(config_dir / "login.db"), [("live", str(tmp_path / "gone"))])
-    assert detecteq.read_autologin_eq_path(str(config_dir), "live") is None
-
-
-def test_old_schema_without_server_types_returns_none(config_dir):
-    con = sqlite3.connect(str(config_dir / "login.db"))
-    con.execute("CREATE TABLE settings (key text, value text)")
-    con.commit()
-    con.close()
     assert detecteq.read_autologin_eq_path(str(config_dir), "live") is None

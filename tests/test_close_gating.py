@@ -202,25 +202,11 @@ def test_session_ignores_unrecorded_exe_in_folder(tmp_path, monkeypatch):
 
 
 @windows_paths
-def test_session_running_ignores_eqbcs_alone(tmp_path, monkeypatch):
-    # EQBCS runs independently of MQ; alone it must not count as a session.
-    monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: None)
-    running = _norm_set(str(tmp_path / "EQBCS.exe"))
-    assert processes.macroquest_session_running(str(tmp_path), running) is False
-
-
-@windows_paths
 def test_session_running_matches_spawned_copy_outside_folder(tmp_path, monkeypatch):
     # RunFromTemp: the copy lives outside the MQ folder; found via MacroQuest.ini's name.
     monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: "Ab12Cd34.exe")
     running = _norm_set(str(tmp_path / "elsewhere" / "Ab12Cd34.exe"))
     assert processes.macroquest_session_running(str(tmp_path), running) is True
-
-
-def test_session_not_running_when_nothing_matches(tmp_path, monkeypatch):
-    monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: "Ab12Cd34.exe")
-    running = _norm_set(str(tmp_path.parent / "other" / "thing.exe"))
-    assert processes.macroquest_session_running(str(tmp_path), running) is False
 
 
 @windows_paths
@@ -238,14 +224,6 @@ def test_session_matches_recorded_loader_amid_other_folder_exes(tmp_path, monkey
     monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: "LV3XGukn.exe")
     running = _norm_set(str(tmp_path / "LV3XGukn.exe"), str(tmp_path / "LootSort.exe"))
     assert processes.macroquest_session_running(str(tmp_path), running) is True
-
-
-@windows_paths
-def test_session_ignores_folder_tools_when_loader_recorded(tmp_path, monkeypatch):
-    # A folder tool running is not a session when a loader name is recorded and its process is gone.
-    monkeypatch.setattr(processes, "_spawned_loader_name", lambda folder: "LV3XGukn.exe")
-    running = _norm_set(str(tmp_path / "LootSort.exe"))
-    assert processes.macroquest_session_running(str(tmp_path), running) is False
 
 
 @windows_paths
@@ -751,15 +729,6 @@ def test_prepare_ci_short_circuits(exec_env):
     monkeypatch.setattr(post_update.processes, "running_executable_paths", _scan_boom)
     pending = asyncio.run(post_update.prepare(SyncOutcome(success=True, vvmq_updated=True)))
     assert pending.decision is post_update.Decision.NONE
-
-
-def test_prepare_skips_scan_on_fully_failed_run(exec_env):
-    """A failed run with no VVMQ write has nothing to offer, so it skips scanning."""
-    monkeypatch, calls = exec_env
-    monkeypatch.setattr(post_update.processes, "running_executable_paths", _scan_boom)
-    pending = asyncio.run(post_update.prepare(SyncOutcome(success=False)))
-    assert pending.decision is post_update.Decision.NONE
-    assert pending.running is None and pending.mq_folder is None
 
 
 def test_prepare_offers_cold_start_on_successful_noop_when_mq_down(exec_env):

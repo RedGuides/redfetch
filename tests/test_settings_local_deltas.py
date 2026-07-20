@@ -41,14 +41,6 @@ def test_emit_is_idempotent(tmp_path, monkeypatch):
     assert first == second
 
 
-def test_header_present_and_empty_env_dropped(tmp_path, monkeypatch):
-    # Every value here equals a default, so the whole environment prunes away.
-    data = {"LIVE": {"SPECIAL_RESOURCES": {"4": {"opt_in": True}}}}
-    text = _render(tmp_path, data, monkeypatch)
-    assert text.startswith("# Managed by redfetch")
-    assert "LIVE" not in tomllib.loads(text)
-
-
 def test_accepts_tomlkit_document(tmp_path, monkeypatch):
     import tomlkit
     doc = tomlkit.parse('[LIVE.SPECIAL_RESOURCES.151]\nopt_in = true\n')

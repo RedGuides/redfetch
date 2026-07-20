@@ -19,7 +19,8 @@ from redfetch.sync_types import (
 )
 
 
-def _action(resource_id, *, reason="outdated", action="download", title=None, remote_version=None):
+def _action(resource_id, *, reason="outdated", action="download", title=None, remote_version=None,
+            remote_version_string=None):
     return PlannedAction(
         target_key=f"/{resource_id}/",
         resource_id=resource_id,
@@ -29,6 +30,7 @@ def _action(resource_id, *, reason="outdated", action="download", title=None, re
         reason=reason,
         title=title,
         remote_version=remote_version,
+        remote_version_string=remote_version_string,
     )
 
 
@@ -173,8 +175,8 @@ def test_midrun_refresh_failure_writes_needs_login(headless_env):
 def test_completion_write_derives_items_from_execution(headless_env):
     outcome = _outcome(
         [
-            _action("4", title="KissAssist", remote_version=1240),
-            _action("3040", title="RGMercs", remote_version=991),
+            _action("4", title="KissAssist", remote_version=1240, remote_version_string="11.005"),
+            _action("3040", title="RGMercs", remote_version=991, remote_version_string="20260715"),
             # A fresh install is not an "update": excluded from both lists.
             _action("9", reason="not_installed", title="New Thing", remote_version=5),
         ],
@@ -195,13 +197,33 @@ def test_completion_write_derives_items_from_execution(headless_env):
     assert on_disk["managed_path"] == r"D:\MQ\VanillaMQ_LIVE"
     assert on_disk["auto_update"] is True
     assert on_disk["pending_restart"] is True
+    # VVMQ itself isn't in installed, so there's no version to promote.
+    assert "pending_restart_version" not in on_disk
     # Remaining = the failed item only: not [] (hides failures), not the full
     # pre-execution plan (re-lists what just installed and feeds the spawn loop).
     assert on_disk["updates"]["items"] == [
-        {"resource_id": "3040", "name": "RGMercs", "available_version_id": 991}
+        {"resource_id": "3040", "name": "RGMercs", "available_version_id": 991, "version": "20260715"}
     ]
     assert on_disk["installed"] == [
-        {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}
+        {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": "11.005"}
+    ]
+
+
+def test_vvmq_install_promotes_its_version_for_the_restart_toast(headless_env):
+    outcome = _outcome(
+        [_action("1974", title="Very Vanilla MQ Live", remote_version=84213,
+                 remote_version_string="7-16-2026")],
+        [_result_item("1974", "downloaded")],
+        vvmq_updated=True,
+    )
+    _set_run_sync(headless_env, outcome)
+
+    assert _run_headless() == 0
+    on_disk = _read_status(headless_env.tmp_path)
+    assert on_disk["pending_restart"] is True
+    assert on_disk["pending_restart_version"] == "7-16-2026"
+    assert on_disk["installed"] == [
+        {"resource_id": "1974", "name": "Very Vanilla MQ Live", "available_version_id": 84213, "version": "7-16-2026"}
     ]
 
 

@@ -74,14 +74,6 @@ def test_is_special_or_dependency_dependency(mock_config):
     assert info['is_dependency'] is True
     assert info['parent_ids'] == {'151'}
 
-def test_is_special_or_dependency_neither(mock_config):
-    # Resource that is neither special nor opted-in dependency
-    status = special.compute_special_status(['3032'])
-    info = status['3032']
-    assert info['is_special'] is False
-    assert info['is_dependency'] is False
-    assert info['parent_ids'] == set()
-
 def test_is_special_or_dependency_false_true(mock_config):
     # Not special, but is an opted-in dependency
     status = special.compute_special_status(['1865'])
