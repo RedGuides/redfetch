@@ -42,20 +42,13 @@ def get_navmesh_directory() -> str | None:
     return os.path.join(vvmq_path, "resources", "MQ2Nav")
 
 
-def get_navmesh_opt_in() -> bool | None:
-    """Get the navmesh opt-in setting for the current environment."""
+def is_navmesh_enabled() -> bool:
+    """Navmesh downloads are opt-out."""
     try:
-        return config.settings.from_env(config.settings.ENV).get("NAVMESH_OPT_IN", None)
+        return bool(config.settings.from_env(config.settings.ENV).get("NAVMESH_OPT_IN", True))
     except Exception:
-        return None
-
-
-def is_navmesh_enabled(override: bool | None = None) -> bool:
-    """Check if navmesh sync is enabled for the current environment."""
-    if override is not None:
-        return override
-    opt_in = get_navmesh_opt_in()
-    return opt_in is True  # Only True if explicitly set to True
+        # unreadable config: fail closed rather than download into an unknown env
+        return False
 
 
 def get_protected_navmeshes() -> list[str]:
@@ -203,10 +196,9 @@ async def sync_navmeshes(
     db_path: str,
     headers: dict,
     on_event: SyncEventCallback | None = None,
-    override: bool | None = None,
 ) -> bool:
-    """ Main entry point for navmesh sync. """
-    if not is_navmesh_enabled(override):
+    """ Main entry point for navmesh sync."""
+    if not is_navmesh_enabled():
         return True  # Nothing to do, not an error
 
     print("Checking navmesh files...")
@@ -225,81 +217,74 @@ async def sync_navmeshes(
     protected_meshes = get_protected_navmeshes()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            # Tier 1: Fetch manifest (revalidated each run); always validate local state
-            manifest = await fetch_manifest(db_path)
+        # 1: Fetch manifest
+        manifest = await fetch_manifest(db_path)
 
-            # Tier 2: Get local file state (using cached hashes where possible)
-            local_state = await get_local_navmesh_state(db_path, navmesh_dir)
+        # 2: Get local file state
+        local_state = await get_local_navmesh_state(db_path, navmesh_dir)
 
-            # Build download list
-            to_download: list[NavMeshFile] = []
-            zones = manifest.get("zones", {})
+        # Build download list
+        to_download: list[NavMeshFile] = []
+        zones = manifest.get("zones", {})
 
-            for zone_name, zone_data in zones.items():
-                mesh_info = zone_data.get("files", {}).get("mesh", {})
-                if not mesh_info:
-                    continue
+        for zone_name, zone_data in zones.items():
+            mesh_info = zone_data.get("files", {}).get("mesh", {})
+            if not mesh_info:
+                continue
 
-                filename = f"{zone_name}.navmesh"
-                download_url = mesh_info.get("link", "")
-                remote_hash = mesh_info.get("hash", "").lower()
+            filename = f"{zone_name}.navmesh"
+            download_url = mesh_info.get("link", "")
+            remote_hash = mesh_info.get("hash", "").lower()
 
-                if not download_url or not remote_hash:
-                    continue
+            if not download_url or not remote_hash:
+                continue
 
-                # Check if file is protected (only skip if file already exists)
-                file_path = os.path.join(navmesh_dir, filename)
-                if filename.lower() in protected_meshes and os.path.exists(file_path):
-                    print(f"navmesh: Skipping protected mesh {filename}")
-                    continue
+            # Check if file is protected
+            file_path = os.path.join(navmesh_dir, filename)
+            if filename.lower() in protected_meshes and os.path.exists(file_path):
+                print(f"navmesh: Skipping protected mesh {filename}")
+                continue
 
-                nm = NavMeshFile(
-                    zone_name=zone_name,
-                    filename=filename,
-                    download_url=download_url,
-                    remote_hash=remote_hash,
-                    local_hash=local_state.get(filename),
-                )
+            nm = NavMeshFile(
+                zone_name=zone_name,
+                filename=filename,
+                download_url=download_url,
+                remote_hash=remote_hash,
+                local_hash=local_state.get(filename),
+            )
 
-                if nm.needs_download:
-                    to_download.append(nm)
+            if nm.needs_download:
+                to_download.append(nm)
 
-            if not to_download:
-                print(f"All {len(zones)} navmesh files up-to-date.")
-                return True
-
-            print(f"navmesh: {len(to_download)} files to download out of {len(zones)} total")
-
-            # Notify progress bar of additional items
-            if on_event:
-                on_event(("add_total", len(to_download), None))
-
-            # Download up to 5 files at once; show progress after each finishes.
-     
-            semaphore = asyncio.Semaphore(5)
-
-            async def _download_one(nm: NavMeshFile) -> bool:
-                async with semaphore:
-                    print(f"navmesh: Downloading {nm.filename}...")
-                    ok = await download_navmesh_file(client, nm, navmesh_dir, db_path)
-                if on_event:
-                    on_event(("done", nm.filename, "downloaded" if ok else "error"))
-                return ok
-
-            results = await asyncio.gather(*(_download_one(nm) for nm in to_download))
-            failed = sum(1 for ok in results if not ok)
-
-            if failed:
-                # No cache invalidation needed; files are rechecked next run.
-         
-                print(f"navmesh: {failed} meshes failed to download")
-                return False
-
-            print("All navmesh files downloaded successfully")
+        if not to_download:
+            print(f"All {len(zones)} navmesh files up-to-date.")
             return True
 
-        except (httpx.HTTPError, json.JSONDecodeError) as e:
-            print(f"navmesh sync warning: Error during navmesh sync: {e}")
+        print(f"navmesh: {len(to_download)} files to download out of {len(zones)} total")
+
+        # Notify progress bar of additional items
+        if on_event:
+            on_event(("add_total", len(to_download), None))
+
+        # Download up to 5 files at once
+        semaphore = asyncio.Semaphore(5)
+
+        async def _download_one(nm: NavMeshFile) -> bool:
+            async with semaphore:
+                print(f"navmesh: Downloading {nm.filename}...")
+                ok = await download_navmesh_file(client, nm, navmesh_dir, db_path)
+            if on_event:
+                on_event(("done", nm.filename, "downloaded" if ok else "error"))
+            return ok
+
+        results = await asyncio.gather(*(_download_one(nm) for nm in to_download))
+        failed = sum(1 for ok in results if not ok)
+
+        if failed:
+            # Files are rechecked next run.
+            print(f"navmesh: {failed} meshes failed to download")
             return False
+
+        print("All navmesh files downloaded successfully")
+        return True
 

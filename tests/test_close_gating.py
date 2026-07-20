@@ -775,11 +775,11 @@ def test_prepare_offers_cold_start_on_successful_noop_when_mq_down(exec_env):
 
 # --- CLI wiring: handle_download_watched_async hands off to post_update.offer ----------
 
-def _run_watched(monkeypatch, outcome):
+def _run_watched(monkeypatch, outcome, mq_down=False):
     offered = []
 
-    async def _no(*a, **k):
-        return False
+    async def _mq_down(*a, **k):
+        return mq_down
 
     async def _run_sync(*a, **k):
         return outcome
@@ -787,10 +787,14 @@ def _run_watched(monkeypatch, outcome):
     async def _offer(outcome_arg, surface):
         offered.append((outcome_arg, surface))
 
-    monkeypatch.setattr(main.net, "is_mq_down", _no)
-    monkeypatch.setattr(main, "prompt_navmesh_opt_in", lambda: None)
+    def _prompt_trap(*a, **k):
+        pytest.fail("the watched-update flow must not prompt")
+
+    monkeypatch.setattr(main.net, "is_mq_down", _mq_down)
     monkeypatch.setattr(main.sync, "run_sync", _run_sync)
     monkeypatch.setattr(main.post_update, "offer", _offer)
+    monkeypatch.setattr("rich.prompt.Prompt.ask", _prompt_trap)
+    monkeypatch.setattr("rich.prompt.Confirm.ask", _prompt_trap)
     result = asyncio.run(main.handle_download_watched_async("db", {}))
     return result, offered
 
@@ -800,6 +804,15 @@ def test_watched_flow_offers_post_update_on_success(monkeypatch):
     assert result is True
     assert len(offered) == 1
     assert isinstance(offered[0][1], main._CliPostUpdate)
+
+
+def test_watched_flow_proceeds_when_mq_down(monkeypatch):
+    """Patch day warns and proceeds — no confirm, no prompt (silent-update Phase 1)."""
+    result, offered = _run_watched(
+        monkeypatch, SyncOutcome(success=True, vvmq_updated=False), mq_down=True
+    )
+    assert result is True
+    assert len(offered) == 1
 
 
 def test_watched_flow_delegates_offer_on_partial_failure(monkeypatch):

@@ -199,21 +199,24 @@ Label {
     column-span: 4;
 }
 
+/* Settings boxes are label/control (or button/input) pairs */
 #inputs_grid {
     margin-top: 1;
     margin-bottom: 1;
     layout: grid;
-    grid-size: 4;  
-    grid-rows: auto;  
+    grid-size: 2;
+    grid-columns: auto 1fr;
+    grid-rows: auto;
     grid-gutter: 1;
     border: round $secondary-background;
     min-width: 50;
 }
 #settings_grid {
     layout: grid;
-    grid-size: 4;
+    grid-size: 2;
+    grid-columns: auto 1fr;
     grid-rows: auto;
-    grid-gutter: 1 0;
+    grid-gutter: 1 2;
     border: round $secondary-background;
     margin-bottom: 1;
     min-width: 50;
@@ -221,8 +224,9 @@ Label {
 #special_resources_grid {
     layout: grid;
     grid-size: 2;
+    grid-columns: auto 1fr;
     grid-rows: auto;
-    grid-gutter: 1 0;
+    grid-gutter: 1 2;
     border: round $secondary-background;
     margin-bottom: 1;
     min-width: 50;
@@ -234,9 +238,6 @@ Label {
 }
 #dropdowns_grid {
     min-width: 30;
-}
-#dl_path_input, #eq_path_input, #vvmq_path_input, #auto_run_vvmq, #post_update_launch, #desktop_shortcut {
-    column-span: 3;
 }
 #auto_run_vvmq, #post_update_launch {
     layout: horizontal;
@@ -393,15 +394,6 @@ RunVVMQScreen {
 }
 
 RunVVMQScreen Button {
-    width: 100%;
-}
-
-NavMeshPromptScreen {
-    align: center top;
-    background: $background-darken-2 70%; 
-}
-
-NavMeshPromptScreen Button {
     width: 100%;
 }
 

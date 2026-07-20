@@ -1,13 +1,14 @@
 # standard imports
 import sys
 import os
+from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 import asyncio
 
 # third-party imports
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Prompt
 from rich.console import Console
 import typer
 
@@ -25,6 +26,7 @@ from redfetch import sync
 from redfetch import store
 from redfetch import shortcuts
 from redfetch.runtime_errors import exit_with_fatal_error
+from redfetch.sync_types import SyncOutcome
 
 
 app = typer.Typer(
@@ -78,41 +80,6 @@ def initialize_db_only(server: "Optional[Env]" = None):
 
 # ===== CLI prompt helpers =====
 
-def prompt_navmesh_opt_in() -> bool | None:
-    """Prompt user about navmesh downloads if not configured."""
-    from redfetch import navmesh
-
-    # Check if VVMQ path exists (navmesh requires it)
-    vvmq_path = utils.get_vvmq_path()
-    if not vvmq_path:
-        return None  # Can't do navmesh without VVMQ
-
-    opt_in = navmesh.get_navmesh_opt_in()
-
-    if opt_in is not None:
-        return None  # Already configured, use existing setting
-
-    # Prompt user
-    user_choice = Prompt.ask(
-        "🧭 Download navigation meshes? (will overwrite, protect your custom meshes in settings.local.toml)",
-        choices=["yes", "no", "always", "never"],
-        default="yes",
-    )
-
-    if user_choice == "yes":
-        return True  # One-time yes
-    elif user_choice == "always":
-        config.update_setting(["NAVMESH_OPT_IN"], True)
-        console.print("Updated settings to always download navmeshes.")
-        return None  # Config is now set, use it
-    elif user_choice == "never":
-        config.update_setting(["NAVMESH_OPT_IN"], False)
-        console.print("Updated settings to never download navmeshes.")
-        return None  # Config is now set, use it
-    else:  # "no"
-        return False  # One-time no
-
-
 class _CliPostUpdate:
     """CLI adapter for post_update.execute: rich prompts, console output."""
 
@@ -162,19 +129,8 @@ async def handle_download_watched_async(db_path: str, headers: dict) -> bool:
         console.print(
             "[bold yellow]Warning:[/bold yellow] [blink bold red]MQ appears to be down[/blink bold red] for a patch, so it's not likely to work."
         )
-        continue_download = Confirm.ask(
-            "Do you want to continue with the download?", default=False
-        )
-        if not continue_download:
-            console.print("Download cancelled by user.")
-            return False
 
-    navmesh_override = prompt_navmesh_opt_in()
-
-    outcome = await sync.run_sync(
-        db_path, headers,
-        navmesh_override=navmesh_override,
-    )
+    outcome = await sync.run_sync(db_path, headers)
     # offer regardless of overall success:
     await post_update.offer(outcome, _CliPostUpdate())
     return outcome.success
@@ -216,9 +172,111 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
 def update_command(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download of all watched resources."),
     server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Update this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    headless: bool = typer.Option(False, "--headless", hidden=True, help="MQ silent update: no prompts, no browser, no dialogs. writes update_status.json."),
 ):
+    if headless:
+        _headless_update(server=server, force=force)
+        return
     db_name, db_path = initialize_db_only(server=server)
     asyncio.run(update_command_async(db_name=db_name, db_path=db_path, force=force))
+
+
+@contextmanager
+def _exit_silently_on_error():
+    """Anything unexpected for headless commands becomes a silent exit 1."""
+    try:
+        yield
+    except typer.Exit:
+        raise
+    except Exception:
+        raise typer.Exit(1)
+
+
+def _headless_update(server: "Optional[Env]", force: bool) -> None:
+    from redfetch.config_firstrun import is_configured
+    from redfetch import update_status
+
+    requested_env = server.value if server else None
+
+    with _exit_silently_on_error():
+        if not is_configured():
+            update_status.write_update_status(
+                env=requested_env or Env.LIVE.value,
+                auth_state="not_configured",
+            )
+            raise typer.Exit(0)
+
+        config.initialize_config()
+        if requested_env:
+            config.select_environment_in_memory(requested_env)
+        env = config.settings.ENV
+        auth.initialize_keyring()
+
+        auto_update = utils.is_auto_update_enabled()
+        if not auto_update:
+            raise typer.Exit(1)
+
+        managed_path = utils.get_vvmq_path()
+
+        if not _has_auth_credentials():
+            update_status.write_update_status(
+                env=env, auth_state="needs_login", managed_path=managed_path, auto_update=auto_update,
+            )
+            raise typer.Exit(0)
+
+        db_name = f"{env}_resources.db"
+        store.initialize_db(db_name)
+        db_path = store.get_db_path(db_name)
+
+        if force:
+            with store.get_db_connection(db_name) as conn:
+                store.reset_download_dates(conn.cursor())
+
+        outcome = asyncio.run(_headless_update_async(db_path))
+
+        if outcome is None:
+            # Mid-run silent-refresh failure handling
+            update_status.write_update_status(
+                env=env, auth_state="needs_login", managed_path=managed_path, auto_update=auto_update,
+            )
+            raise typer.Exit(0)
+
+        if outcome.execution_plan is None or outcome.execution_result is None:
+            raise typer.Exit(1)  # busy or cancelled: nothing ran, nothing fresh
+
+        installed, remaining = update_status.split_items_by_outcome(
+            outcome.execution_plan, outcome.execution_result
+        )
+        vvmq_version = None
+        if outcome.vvmq_updated:
+            vvmq_id = utils.get_current_vvmq_id(env)
+            vvmq_version = next(
+                (item["version"] for item in installed if item["resource_id"] == vvmq_id), None
+            )
+        update_status.write_update_status(
+            env=env,
+            auth_state="ok",
+            items=remaining,
+            managed_path=managed_path,
+            auto_update=auto_update,
+            installed=installed,
+            pending_restart=outcome.vvmq_updated,
+            pending_restart_version=vvmq_version,
+        )
+
+        # the swap starts only when this run has nothing left to do.
+        meta.spawn_silent_self_update()
+        raise typer.Exit(0)
+
+
+async def _headless_update_async(db_path: str) -> SyncOutcome | None:
+    """Returns the SyncOutcome or needs_login."""
+    await asyncio.to_thread(utils.sweep_stale_update_debris)
+    try:
+        headers = await auth.get_api_headers()
+    except RuntimeError:
+        return None
+    return await sync.run_sync(db_path, headers)
 
 
 @app.command(
@@ -265,15 +323,14 @@ def check_command(
 
     requested_env = server.value if server else None
 
-    # Pre-flight: not configured at all -> no init possible, but we can still record the verdict.
-    if not is_configured():
-        update_status.write_update_status(
-            env=requested_env or Env.LIVE.value,
-            auth_state="not_configured",
-        )
-        raise typer.Exit(0)
+    with _exit_silently_on_error():
+        if not is_configured():
+            update_status.write_update_status(
+                env=requested_env or Env.LIVE.value,
+                auth_state="not_configured",
+            )
+            raise typer.Exit(0)
 
-    try:
         config.initialize_config()
         # Honor --server for this run only; never persist (a "check" must not change the user's env).
         if requested_env:
@@ -284,8 +341,12 @@ def check_command(
         # MQ matches this against its own root to ignore stray copies.
         managed_path = utils.get_vvmq_path()
 
+        auto_update = utils.is_auto_update_enabled()
+
         if not _has_auth_credentials():
-            update_status.write_update_status(env=env, auth_state="needs_login", managed_path=managed_path)
+            update_status.write_update_status(
+                env=env, auth_state="needs_login", managed_path=managed_path, auto_update=auto_update,
+            )
             raise typer.Exit(0)
 
         db_name = f"{env}_resources.db"
@@ -293,14 +354,10 @@ def check_command(
         db_path = store.get_db_path(db_name)
 
         auth_state, items = asyncio.run(_check_command_async(db_path))
-        update_status.write_update_status(env=env, auth_state=auth_state, items=items, managed_path=managed_path)
+        update_status.write_update_status(
+            env=env, auth_state=auth_state, items=items, managed_path=managed_path, auto_update=auto_update,
+        )
         raise typer.Exit(0)
-
-    except typer.Exit:
-        raise
-    except Exception:
-        # Transient failure, no touch to update_status.json so we know checked_at didn't advance this cycle.
-        raise typer.Exit(1)
 
 
 async def _check_command_async(db_path: str) -> tuple[str, list[dict] | None]:

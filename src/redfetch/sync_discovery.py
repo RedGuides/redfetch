@@ -125,6 +125,13 @@ def payload_version_id(payload: dict | None) -> int | None:
     return int(raw) if raw is not None else None
 
 
+def payload_version_string(payload: dict | None) -> str | None:
+    if not payload:
+        return None
+    raw = payload.get("version_string")
+    return str(raw) if raw is not None else None
+
+
 def _category_allowed_in_env(category_id: int | None, settings_env: str) -> bool:
     """Category 11 (plugins) is excluded from TEST and EMU for now."""
     if category_id is None:

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from redfetch.sync_discovery import payload_category_id, payload_title, payload_version_id
+from redfetch.sync_discovery import (
+    payload_category_id,
+    payload_title,
+    payload_version_id,
+    payload_version_string,
+)
 from redfetch.sync_types import (
     DesiredSet,
     RemoteArtifact,
@@ -30,6 +35,7 @@ class _PayloadDetails(NamedTuple):
     title: str | None
     category_id: int | None
     version_id: int | None
+    version_string: str | None
     artifact: RemoteArtifact | None
     access_tier: str | None
     requires_license: bool
@@ -60,6 +66,7 @@ def _payload_details(payload: dict) -> _PayloadDetails:
         title=payload_title(payload),
         category_id=payload_category_id(payload),
         version_id=payload_version_id(payload),
+        version_string=payload_version_string(payload),
         artifact=_extract_artifact(payload),
         access_tier=payload.get("access_tier"),
         requires_license=bool(payload.get("requires_license", False)),
@@ -127,6 +134,7 @@ def fetch_remote_snapshot(
             title=details.title,
             category_id=details.category_id,
             version_id=details.version_id,
+            version_string=details.version_string,
             status=status,
             artifact=details.artifact if status == "downloadable" else None,
             source_note="manifest",

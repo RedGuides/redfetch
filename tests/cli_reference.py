@@ -73,7 +73,7 @@ def _option_label(param) -> str:
 def _param_bullets(params) -> list[str]:
     bullets: list[str] = []
     for p in params:
-        if p.name == "help":
+        if p.name == "help" or getattr(p, "hidden", False):
             continue
         help_text = _markdown(getattr(p, "help", None))
         if not help_text:

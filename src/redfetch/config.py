@@ -10,6 +10,7 @@ import tomlkit
 from dynaconf import Dynaconf, Validator, ValidationError
 from dynaconf.loaders import env_loader
 from platformdirs import user_config_dir, user_data_dir
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 # Parent Category to folder
 CATEGORY_MAP = {
@@ -210,6 +211,17 @@ def _resolve_redfetch_executable():
     return None
 
 
+@retry(
+    retry=retry_if_exception_type(PermissionError),
+    stop=stop_after_attempt(5),
+    wait=wait_fixed(0.1),
+    reraise=True,
+)
+def _replace_with_retry(src: str, dst: str) -> None:
+    # MQ reads update_status.json
+    os.replace(src, dst)
+
+
 def atomic_write_text(path: str, text: str) -> None:
     """Write UTF-8 text to `path` via a temp file + os.replace() so readers never see a partial write."""
     directory = os.path.dirname(path)
@@ -218,7 +230,7 @@ def atomic_write_text(path: str, text: str) -> None:
     tmp_path = f"{path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(text)
-    os.replace(tmp_path, path)
+    _replace_with_retry(tmp_path, path)
 
 
 def atomic_write_json(path: str, data) -> None:

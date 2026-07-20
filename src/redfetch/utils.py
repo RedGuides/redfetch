@@ -63,6 +63,14 @@ def get_vvmq_path() -> str | None:
     return _resolve_current_special_path(vvmq_id)
 
 
+def is_auto_update_enabled() -> bool:
+    """Whether silent runs may install updates."""
+    try:
+        return bool(config.settings.from_env(config.settings.ENV).get("AUTO_UPDATE", True))
+    except Exception:
+        return False
+
+
 def get_current_myseq_id() -> str | None:
     current_env = config.settings.ENV.upper()
     for resource_id, env_name in config.MYSEQ_MAP.items():

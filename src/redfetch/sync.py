@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 import httpx
+import psutil
 from filelock import FileLock, Timeout
 from platformdirs import user_data_dir
 
@@ -40,6 +42,40 @@ def _process_lock() -> FileLock:
         lock_dir = os.environ.get("REDFETCH_DATA_DIR") or user_data_dir("redfetch", "RedGuides")
         _file_lock = FileLock(os.path.join(lock_dir, "sync.lock"))
     return _file_lock
+
+
+def _lock_sidecar_path(lock: FileLock) -> str:
+    return f"{lock.lock_file}.info"
+
+
+def _write_lock_sidecar(lock: FileLock) -> None:
+    try:
+        with open(_lock_sidecar_path(lock), "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid()}, f)
+    except OSError:
+        pass
+
+
+def _remove_lock_sidecar(lock: FileLock) -> None:
+    try:
+        os.remove(_lock_sidecar_path(lock))
+    except OSError:
+        pass
+
+
+def _lock_holder_pid(lock: FileLock) -> int | None:
+    """PID validated against a live redfetch."""
+    try:
+        with open(_lock_sidecar_path(lock), encoding="utf-8") as f:
+            pid = int(json.load(f)["pid"])
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+    try:
+        # only trust a process that still looks like ours.
+        name = psutil.Process(pid).name().lower()
+    except psutil.Error:
+        return None
+    return pid if ("redfetch" in name or "python" in name) else None
 
 
 def vvmq_was_updated(execution_result: ExecutionResult, vvmq_id: str | None) -> bool:
@@ -255,7 +291,12 @@ async def sync(
     else:
         print("All resources are up-to-date; no downloads were necessary.")
 
-    return SyncOutcome(success=success, vvmq_updated=vvmq_updated)
+    return SyncOutcome(
+        success=success,
+        vvmq_updated=vvmq_updated,
+        execution_plan=execution_plan,
+        execution_result=execution_result,
+    )
 
 
 async def run_sync(
@@ -263,7 +304,6 @@ async def run_sync(
     headers: dict,
     resource_ids: list[str] | None = None,
     on_event: SyncEventCallback | None = None,
-    navmesh_override: bool | None = None,
 ) -> SyncOutcome:
     """Top-level entry point: run the sync pipeline under a global lock, then navmesh if applicable."""
     global _sync_lock
@@ -274,33 +314,38 @@ async def run_sync(
         async with _sync_lock:
             process_lock = _process_lock()
             try:
-                process_lock.acquire(blocking=False)
+                held = process_lock.acquire(blocking=False)
             except Timeout:
-                print("Another redfetch process is already updating; skipping this run.")
+                holder_pid = _lock_holder_pid(process_lock)
+                holder = f" (PID {holder_pid})" if holder_pid else ""
+                print(f"Another redfetch process{holder} is already updating; skipping this run.")
                 return SyncOutcome(success=False, status="busy")
-            try:
-                result = await sync(
-                    db_path,
-                    headers,
-                    resource_ids=resource_ids,
-                    on_event=on_event,
-                )
-
-                if resource_ids is None:
-                    from redfetch import navmesh
-
-                    navmesh_ok = await navmesh.sync_navmeshes(
+            with held:
+                _write_lock_sidecar(process_lock)
+                try:
+                    result = await sync(
                         db_path,
                         headers,
+                        resource_ids=resource_ids,
                         on_event=on_event,
-                        override=navmesh_override,
                     )
-                    if not navmesh_ok:
-                        print("navmesh sync encountered errors")
 
-                return result
-            finally:
-                process_lock.release()
+                    if resource_ids is None:
+                        from redfetch import navmesh
+
+                        try:
+                            await navmesh.sync_navmeshes(
+                                db_path,
+                                headers,
+                                on_event=on_event,
+                            )
+                        except Exception as exc:
+                            # A navmesh failure must never fail the full sync
+                            print(f"navmesh sync warning: {exc}")
+
+                    return result
+                finally:
+                    _remove_lock_sidecar(process_lock)
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("Download cancelled by user.")
         return SyncOutcome(success=False, status="cancelled")

@@ -187,6 +187,7 @@ class RemoteResourceState(SyncModel):
     title: str | None = None
     category_id: int | None = None
     version_id: int | None = None
+    version_string: str | None = None
     status: RemoteStatus
     artifact: RemoteArtifact | None = None
     source_note: str | None = None
@@ -251,6 +252,7 @@ class PlannedAction(TargetIdentity):
     title: str | None = None
     category_id: int | None = None
     remote_version: int | None = None
+    remote_version_string: str | None = None
     artifact: RemoteArtifact | None = None
     resolved_path: str | None = None
     subfolder: str | None = None
@@ -268,6 +270,7 @@ class PlannedAction(TargetIdentity):
         title: str | None,
         category_id: int | None,
         remote_version: int | None,
+        remote_version_string: str | None,
         artifact: RemoteArtifact | None,
         resolved_path: str | None,
         subfolder: str | None,
@@ -284,6 +287,7 @@ class PlannedAction(TargetIdentity):
             title=title,
             category_id=category_id,
             remote_version=remote_version,
+            remote_version_string=remote_version_string,
             artifact=artifact,
             resolved_path=resolved_path,
             subfolder=subfolder,
@@ -368,6 +372,8 @@ class SyncOutcome:
     success: bool
     vvmq_updated: bool = False
     status: Literal["ok", "failed", "busy", "cancelled"] | None = None
+    execution_plan: ExecutionPlan | None = None
+    execution_result: ExecutionResult | None = None
 
     def __post_init__(self) -> None:
         if self.status is None:

@@ -60,6 +60,8 @@ def _fake_settings(env="LIVE"):
     settings.validators = SimpleNamespace(
         validate=lambda: calls.__setitem__("validated", calls["validated"] + 1)
     )
+    # Nothing persisted -> per-env reads fall back to code defaults (e.g. AUTO_UPDATE on).
+    settings.from_env = lambda _env: SimpleNamespace(get=lambda key, default=None: default)
     return settings, calls
 
 
@@ -114,6 +116,8 @@ def test_check_command_uses_ephemeral_env(monkeypatch, tmp_path):
     assert on_disk["auth_state"] == "ok"
     assert len(on_disk["updates"]["items"]) == 1
     assert on_disk["managed_path"] == r"D:\MQ\VanillaMQ_TEST"
+    # Post-init writes echo the promotion policy (default on) for MQ's spawn decision.
+    assert on_disk["auto_update"] is True
 
 
 def test_check_command_not_configured_writes_verdict(monkeypatch, tmp_path):
@@ -166,3 +170,4 @@ def test_check_command_needs_login_writes_verdict(monkeypatch, tmp_path):
     assert on_disk["env"] == "LIVE"
     assert on_disk["updates"]["items"] == []
     assert on_disk["managed_path"] == r"D:\MQ\VanillaMQ_LIVE"
+    assert on_disk["auto_update"] is True

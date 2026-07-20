@@ -243,6 +243,37 @@ def pip_update_redfetch(update_command, latest_version):
         sys.exit(1)
 
 
+def spawn_silent_self_update() -> bool:
+    try:
+        if "test.pypi.org" in PYPI_URL:
+            return False  # no updates for dev builds
+
+        latest_version = fetch_latest_version_cached()
+        if version.parse(latest_version) <= version.parse(get_current_version()):
+            return False
+
+        pyapp_exe = os.getenv('PYAPP')
+        if pyapp_exe:
+            update_command = [pyapp_exe, 'self', 'update']
+        else:
+            update_command = get_update_command()
+            if not update_command:
+                return False
+            _sweep_pip_stash_debris()
+
+        # CREATE_NO_WINDOW because a hidden run must not flash a console.
+        subprocess.Popen(
+            update_command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def self_update():
     """Update with PYAPP."""
     try:

@@ -176,6 +176,7 @@ def build_execution_plan(
             title=remote_state.title if remote_state else target.title,
             category_id=remote_state.category_id if remote_state else target.category_id,
             remote_version=remote_state.version_id if remote_state else None,
+            remote_version_string=remote_state.version_string if remote_state else None,
             artifact=remote_state.artifact if remote_state and action == "download" else None,
             resolved_path=resolved_path,
             subfolder=subfolder,

@@ -78,6 +78,85 @@ def test_install_context_changed_is_not_an_update():
     assert update_status.build_items_from_plan(plan) == []
 
 
+def _result_item(resource_id, outcome, *, reason="outdated", target_key=None):
+    from redfetch.sync_types import ExecutionResultItem
+
+    return ExecutionResultItem(
+        target_key=target_key or f"/{resource_id}/",
+        resource_id=resource_id,
+        outcome=outcome,
+        reason=reason,
+    )
+
+
+def _exec_result(*items):
+    from redfetch.sync_types import ExecutionResult
+
+    return ExecutionResult(items={i.target_key: i for i in items})
+
+
+def test_split_items_skipped_current_is_neither_installed_nor_remaining():
+    plan = _plan(
+        _action("4", action="download", reason="outdated", title="KissAssist", remote_version=1240),
+    )
+    result = _exec_result(_result_item("4", "skipped"))
+
+    installed, remaining = update_status.split_items_by_outcome(plan, result)
+
+    assert installed == []
+    assert remaining == []
+
+
+def test_split_items_missing_result_counts_as_remaining():
+    """A planned download with no execution record (crash/cancel) is still outdated."""
+    plan = _plan(
+        _action("4", action="download", reason="outdated", title="KissAssist", remote_version=1240),
+    )
+
+    installed, remaining = update_status.split_items_by_outcome(plan, _exec_result())
+
+    assert installed == []
+    assert remaining == [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}]
+
+
+def test_split_items_keeps_blocked_exclusion():
+    """The blocked-items exclusion is load-bearing: a lapsed subscriber must not
+    spawn-loop on resources that can never install."""
+    plan = _plan(
+        _action("12", action="block", reason="needs_license", title="Lapsed"),
+        _action("9", action="download", reason="not_installed", title="Fresh Install"),
+    )
+    result = _exec_result(
+        _result_item("12", "blocked", reason="needs_license"),
+        _result_item("9", "downloaded", reason="not_installed"),
+    )
+
+    installed, remaining = update_status.split_items_by_outcome(plan, result)
+
+    assert installed == []
+    assert remaining == []
+
+
+def test_split_items_resource_with_any_failed_target_stays_remaining():
+    """Same resource at two install targets: one failure keeps it out of installed."""
+    plan = _plan(
+        _action("4", action="download", reason="outdated", title="KissAssist", remote_version=1240),
+        _action(
+            "4", action="download", reason="outdated", title="KissAssist", remote_version=1240,
+            target_kind="dependency", parent_id="7", root_resource_id="7",
+        ),
+    )
+    result = _exec_result(
+        _result_item("4", "downloaded"),
+        _result_item("4", "error", target_key="/7/4/"),
+    )
+
+    installed, remaining = update_status.split_items_by_outcome(plan, result)
+
+    assert installed == []
+    assert remaining == [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}]
+
+
 @pytest.fixture
 def status_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DEFAULT_CONFIG_DIR", str(tmp_path))
@@ -136,6 +215,32 @@ def test_write_is_atomic_no_leftover_tmp(status_dir):
     files = {p.name for p in status_dir.iterdir()}
     assert update_status.UPDATE_STATUS_FILENAME in files
     assert not any(name.endswith(".tmp") for name in files)
+
+
+def test_additive_fields_omitted_when_unset(status_dir):
+    """check's writes never carry installed/pending_restart; stale ones age out."""
+    update_status.write_update_status(env="LIVE", auth_state="ok", items=[])
+    on_disk = _read_status(status_dir)
+    assert "auto_update" not in on_disk
+    assert "installed" not in on_disk
+    assert "pending_restart" not in on_disk
+
+
+def test_additive_fields_round_trip(status_dir):
+    installed = [{"resource_id": "4", "name": "KissAssist", "available_version_id": 1240}]
+    update_status.write_update_status(
+        env="LIVE",
+        auth_state="ok",
+        items=[],
+        auto_update=True,
+        installed=installed,
+        pending_restart=True,
+    )
+    on_disk = _read_status(status_dir)
+    assert on_disk["auto_update"] is True
+    assert on_disk["installed"] == installed
+    assert on_disk["pending_restart"] is True
+    assert on_disk["schema_version"] == update_status.SCHEMA_VERSION  # additive, no bump
 
 
 def test_unicode_titles_survive_round_trip(status_dir):

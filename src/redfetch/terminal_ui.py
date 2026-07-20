@@ -36,6 +36,7 @@ from redfetch import post_update
 from redfetch import processes
 from redfetch import utils
 from redfetch import meta
+from redfetch import navmesh
 from redfetch import sync
 from redfetch import shortcuts
 from redfetch import desktop_shortcut
@@ -548,7 +549,7 @@ class SettingsTab(ScrollableContainer):
             yield Label("Nav Meshes:", classes="left_middle")
             yield Switch(
                 id="navmesh",
-                value=config.settings.from_env(current_env).get("NAVMESH_OPT_IN", False),
+                value=navmesh.is_navmesh_enabled(),
                 tooltip=(
                     "Download pre-made navigation meshes for the Nav plugin (via mqmesh.com). "
                 ),
@@ -579,6 +580,14 @@ class SettingsTab(ScrollableContainer):
                 tooltip="A collection of scripts for this server type that RedGuides staff recommends.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
+            yield Label("Background updates:", classes="left_middle")
+            yield Switch(
+                id="auto_update",
+                value=utils.is_auto_update_enabled(),
+                tooltip=(
+                    "Run an update silently when MacroQuest is launched."
+                ),
+            )
             yield Label("Start MQ post-update:", classes="left_middle")
             yield make_tristate(
                 "auto_run_vvmq",
@@ -665,8 +674,13 @@ class SettingsTab(ScrollableContainer):
                 checkbox = self.query_one(f"#launch_{value}", Checkbox)
                 checkbox.value = value in enabled_targets
 
-        navmesh_switch = self.query_one("#navmesh", Switch)
-        navmesh_switch.value = settings_for_env.get("NAVMESH_OPT_IN", False)
+        # Setting a switch's value here saves it. prevent() keeps this a display-only refresh.
+        with self.prevent(Switch.Changed):
+            navmesh_switch = self.query_one("#navmesh", Switch)
+            navmesh_switch.value = navmesh.is_navmesh_enabled()
+
+            auto_update_switch = self.query_one("#auto_update", Switch)
+            auto_update_switch.value = utils.is_auto_update_enabled()
 
         # Staff picks switch - per-environment setting
         staff_switch = self.query_one("#staff_picks", Switch)
@@ -774,6 +788,8 @@ class SettingsTab(ScrollableContainer):
             self.app.handle_toggle_staff_picks(event.value)
         elif event.switch.id == "navmesh":
             self.app.handle_toggle_navmesh(event.value)
+        elif event.switch.id == "auto_update":
+            self.app.handle_toggle_auto_update(event.value)
         elif event.switch.id == "desktop_shortcut":
             self.app.handle_toggle_desktop_shortcut(event.value)
 
@@ -1425,11 +1441,19 @@ class Redfetch(App):
 
     def handle_toggle_navmesh(self, value: bool) -> None:
         current_opt_in = config.settings.from_env(self.current_env).get('NAVMESH_OPT_IN', None)
-        # Always save if not set yet, or if value changed
-        if current_opt_in is None or current_opt_in != value:
+        # a first toggle always saves
+        if current_opt_in != value:
             config.update_setting(['NAVMESH_OPT_IN'], value, env=self.current_env)
             state = "enabled" if value else "disabled"
             self.notify(f"navmesh downloads for {self.current_env} are now {state}")
+
+    def handle_toggle_auto_update(self, value: bool) -> None:
+        current = config.settings.from_env(self.current_env).get('AUTO_UPDATE', None)
+        # a first toggle always saves
+        if current != value:
+            config.update_setting(['AUTO_UPDATE'], value, env=self.current_env)
+            state = "enabled" if value else "disabled"
+            self.notify(f"Background updates for {self.current_env} are now {state}")
 
     def handle_toggle_auto_run_vvmq(self, value) -> None:
         main_screen = self._get_main_screen()
@@ -1691,42 +1715,11 @@ class Redfetch(App):
     async def _update_watched_worker(self) -> SyncOutcome:
         print("Starting update of all watched & special resources, please wait...")
 
-        # Check navmesh preference (prompt if not configured and VVMQ exists)
-        navmesh_override = await self._prompt_navmesh_opt_in()
-
-        outcome = await self.run_synchronization(navmesh_override=navmesh_override)
+        outcome = await self.run_synchronization()
         # scan + decide now, while is_updating still gates env switching and re-clicks
         self._pending_offer = await post_update.prepare(outcome)
         return outcome
 
-    async def _prompt_navmesh_opt_in(self) -> bool | None:
-        """Prompt user about navmesh downloads if not configured."""
-        from redfetch import navmesh
-        
-        # Check if VVMQ path exists (navmesh requires it)
-        vvmq_path = utils.get_vvmq_path()
-        if not vvmq_path:
-            return None  # Can't do navmesh without VVMQ
-        
-        opt_in = navmesh.get_navmesh_opt_in()
-        
-        if opt_in is not None:
-            return None  # Already configured, use existing setting
-        
-        # Prompt user
-        response = await self.push_screen_wait(NavMeshPromptScreen())
-        
-        if response == NavMeshPromptScreen.RESPONSE_YES:
-            return True  # One-time yes
-        elif response == NavMeshPromptScreen.RESPONSE_ALWAYS:
-            self.handle_toggle_navmesh(True)
-            return None  # Config is now set, use it
-        elif response == NavMeshPromptScreen.RESPONSE_NEVER:
-            self.handle_toggle_navmesh(False)
-            return None  # Config is now set, use it
-        else:  # RESPONSE_NO
-            return False  # One-time no
-    
     def cancel_update_watched(self):
         cancelled_workers = self.workers.cancel_group(self, "update_watched_group")
         if cancelled_workers:
@@ -1762,7 +1755,7 @@ class Redfetch(App):
         except Exception:
             pass
 
-    async def run_synchronization(self, resource_ids=None, navmesh_override=None) -> SyncOutcome:
+    async def run_synchronization(self, resource_ids=None) -> SyncOutcome:
         try:
             db_name = f"{self.current_env}_resources.db"
             await asyncio.to_thread(store.initialize_db, db_name)
@@ -1778,7 +1771,6 @@ class Redfetch(App):
                 db_path, headers,
                 resource_ids=resource_ids,
                 on_event=self.on_sync_event,
-                navmesh_override=navmesh_override,
             )
             return result
         except Exception:
@@ -2092,35 +2084,6 @@ class RunVVMQScreen(ModalScreen):
             self.dismiss(self.RESPONSE_NEVER)
         else:
             self.dismiss(self.RESPONSE_SKIP)
-
-
-class NavMeshPromptScreen(ModalScreen):
-    """A modal screen to ask if the user wants to download navmeshes."""
-
-    RESPONSE_YES = "yes"
-    RESPONSE_ALWAYS = "always"
-    RESPONSE_NEVER = "never"
-    RESPONSE_NO = "no"
-
-    def compose(self) -> ComposeResult:
-        yield Grid(
-            Label("🧭 Download navigation meshes? (recommended)", id="question"),
-            Button("Yes", variant="primary", id="yesnav"),
-            Button("No", variant="default", id="nonav"),
-            Center(Button("Always", variant="primary", id="alwaysnav")),
-            Center(Button("Never", variant="default", id="nevernav")),
-            id="dialog",
-        )
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "yesnav":
-            self.dismiss(self.RESPONSE_YES)
-        elif event.button.id == "alwaysnav":
-            self.dismiss(self.RESPONSE_ALWAYS)
-        elif event.button.id == "nevernav":
-            self.dismiss(self.RESPONSE_NEVER)
-        else:
-            self.dismiss(self.RESPONSE_NO)
 
 
 class UninstallScreen(ModalScreen):
