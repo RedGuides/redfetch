@@ -144,7 +144,6 @@ def get_update_command():
         'pip': [sys.executable, '-m', 'pip', 'install', '--upgrade', 'redfetch'],
         'pipx': ['pipx', 'upgrade', 'redfetch'],
         'uv': ['uv', 'tool', 'upgrade', 'redfetch'],
-        'pyapp': None  # Handle separately with self_update()
     }
     return commands.get(method)
 

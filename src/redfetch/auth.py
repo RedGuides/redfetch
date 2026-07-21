@@ -76,11 +76,6 @@ def _ensure_cache():
     return _disk_cache
 
 
-def get_disk_cache():
-    """Return the shared disk cache (for non-identity caching by other modules)."""
-    return _ensure_cache()
-
-
 def set_user_id(user_id: str) -> None:
     """Store user_id in disk cache (non-sensitive public identifier)."""
     _ensure_cache().set('user_id', str(user_id))

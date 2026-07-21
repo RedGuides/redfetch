@@ -60,7 +60,6 @@ BREADCRUMB_FILENAME = "last_command.json"
 DEFAULT_CONFIG_DIR = user_config_dir("redfetch", "RedGuides")
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-os.environ['REDFETCH_SCRIPT_DIR'] = script_dir
 
 # Populated by initialize_config()
 config_dir = None

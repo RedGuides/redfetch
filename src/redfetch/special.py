@@ -41,13 +41,6 @@ def _build_indexes(special_resources: Dict[str, dict]) -> SpecialIndexes:
     return SpecialIndexes(opted_in_specials=opted_in_specials, dependency_parents=dependency_parents)
 
 
-def is_resource_opted_in(resource_id: str) -> bool:
-    """Return True if the given resource is an opted-in special resource."""
-    special_resources = _get_special_resources()
-    details = special_resources.get(resource_id)
-    return bool(details and details.get('opt_in', False))
-
-
 def compute_special_status(resource_ids: Iterable[str] | None = None) -> Dict[str, SpecialResourceInfo]:
     """Compute special/dependency status for IDs (or all opted-in if None)."""
     special_resources = _get_special_resources()

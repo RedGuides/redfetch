@@ -15,11 +15,6 @@ from redfetch import config
 # path functions
 #
 
-def get_base_path() -> str:
-    """Determine the base path based on the active version."""
-    return get_vvmq_path() or get_current_download_folder()
-
-
 def resolve_special_destination(special_resource: dict | None, download_folder: str) -> str | None:
     """Resolve a special resource destination path without side effects."""
     if not special_resource:
