@@ -127,6 +127,14 @@ def get_staff_pick_ids_for_env(env: str) -> list[str]:
         if isinstance(details, dict) and details.get("staff_pick", False)
     ]
 
+
+def staff_picks_enabled(env: str) -> bool:
+    """True when every staff pick for the env is opted in; drives the bundle switch."""
+    staff_ids = get_staff_pick_ids_for_env(env)
+    specials = config.settings.from_env(env).SPECIAL_RESOURCES
+    return bool(staff_ids) and all(specials.get(rid, {}).get("opt_in", False) for rid in staff_ids)
+
+
 class FetchTab(ScrollableContainer):
     """Content for the Fetch tab."""
 
@@ -566,17 +574,10 @@ class SettingsTab(ScrollableContainer):
                     "normal EverQuest map, using Brewall and Good's folders."
                 ),
             )
-            staff_ids = get_staff_pick_ids_for_env(current_env)
             yield Label("Staff Picks:", classes="left_middle")
             yield Switch(
                 id="staff_picks",
-                value=bool(staff_ids)
-                and all(
-                    config.settings.from_env(current_env)
-                    .SPECIAL_RESOURCES.get(rid, {})
-                    .get("opt_in", False)
-                    for rid in staff_ids
-                ),
+                value=staff_picks_enabled(current_env),
                 tooltip="A collection of scripts for this server type that RedGuides staff recommends.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
@@ -682,16 +683,8 @@ class SettingsTab(ScrollableContainer):
             auto_update_switch = self.query_one("#auto_update", Switch)
             auto_update_switch.value = utils.is_auto_update_enabled()
 
-        # Staff picks switch - per-environment setting
-        staff_switch = self.query_one("#staff_picks", Switch)
-        env = app.current_env
-        staff_ids = get_staff_pick_ids_for_env(env)
-        staff_switch.value = bool(staff_ids) and all(
-            config.settings.from_env(env)
-            .SPECIAL_RESOURCES.get(rid, {})
-            .get("opt_in", False)
-            for rid in staff_ids
-        )
+            staff_switch = self.query_one("#staff_picks", Switch)
+            staff_switch.value = staff_picks_enabled(self.app.current_env)
 
         # Update inputs that depend on the current environment
         dl_input = self.query_one("#dl_path_input", Input)
@@ -1440,10 +1433,10 @@ class Redfetch(App):
             self.notify(f"Staff Picks for {env} are now {state}")
 
     def handle_toggle_navmesh(self, value: bool) -> None:
-        current_opt_in = config.settings.from_env(self.current_env).get('NAVMESH_OPT_IN', None)
+        current_opt_in = config.settings.from_env(self.current_env).get('NAVMESH_DOWNLOADS', None)
         # a first toggle always saves
         if current_opt_in != value:
-            config.update_setting(['NAVMESH_OPT_IN'], value, env=self.current_env)
+            config.update_setting(['NAVMESH_DOWNLOADS'], value, env=self.current_env)
             state = "enabled" if value else "disabled"
             self.notify(f"navmesh downloads for {self.current_env} are now {state}")
 

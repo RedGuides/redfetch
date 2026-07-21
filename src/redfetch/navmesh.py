@@ -45,7 +45,7 @@ def get_navmesh_directory() -> str | None:
 def is_navmesh_enabled() -> bool:
     """Navmesh downloads are opt-out."""
     try:
-        return bool(config.settings.from_env(config.settings.ENV).get("NAVMESH_OPT_IN", True))
+        return bool(config.settings.from_env(config.settings.ENV).get("NAVMESH_DOWNLOADS", True))
     except Exception:
         # unreadable config: fail closed rather than download into an unknown env
         return False

@@ -4,6 +4,7 @@ import os
 import platform
 import re
 import shutil
+import tomllib
 
 # third-party
 import tomlkit
@@ -139,6 +140,9 @@ def initialize_config():
         # If not, create it and set the default environment to 'LIVE'
         atomic_write_text(env_file_path, 'REDFETCH_ENV=LIVE\n')
         print(f".env file created with default environment set to 'LIVE' at {env_file_path}")
+
+    # Migrate any settings.local.toml written by older versions
+    _migrate_local_settings(config_dir)
 
     # Initialize Dynaconf settings
     settings = Dynaconf(
@@ -445,6 +449,26 @@ def save_config(file_path, config_data):
     else:
         toml_text = SETTINGS_LOCAL_HEADER
     atomic_write_text(file_path, toml_text)
+
+
+def _migrate_local_settings(config_dir):
+    """Carry renamed settings in an older settings.local.toml"""
+    config_file = os.path.join(config_dir, 'settings.local.toml')
+    if not os.path.exists(config_file):
+        return
+    try:
+        with open(config_file, "rb") as f:
+            data = tomllib.load(f)
+    except Exception:
+        return
+    # NAVMESH_OPT_IN became NAVMESH_DOWNLOADS
+    changed = False
+    for env_table in data.values():
+        if isinstance(env_table, dict) and "NAVMESH_OPT_IN" in env_table:
+            env_table.setdefault("NAVMESH_DOWNLOADS", env_table.pop("NAVMESH_OPT_IN"))
+            changed = True
+    if changed:
+        save_config(config_file, data)
 
 
 def update_setting(setting_path, setting_value, env=None):

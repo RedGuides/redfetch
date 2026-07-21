@@ -46,3 +46,19 @@ def test_accepts_tomlkit_document(tmp_path, monkeypatch):
     doc = tomlkit.parse('[LIVE.SPECIAL_RESOURCES.151]\nopt_in = true\n')
     parsed = tomllib.loads(_render(tmp_path, doc, monkeypatch))
     assert parsed["LIVE"]["SPECIAL_RESOURCES"]["151"] == {"opt_in": True}
+
+
+def test_migrate_renames_navmesh_opt_in(tmp_path, monkeypatch):
+    """NAVMESH_OPT_IN carries forward as NAVMESH_DOWNLOADS; reruns are no-ops."""
+    monkeypatch.setenv("REDFETCH_DATA_DIR", str(tmp_path))
+    local = tmp_path / "settings.local.toml"
+    local.write_text("[LIVE]\nNAVMESH_OPT_IN = false\n", encoding="utf-8")
+
+    config._migrate_local_settings(str(tmp_path))
+    first = local.read_text(encoding="utf-8")
+    parsed = tomllib.loads(first)
+    assert parsed["LIVE"]["NAVMESH_DOWNLOADS"] is False
+    assert "NAVMESH_OPT_IN" not in parsed["LIVE"]
+
+    config._migrate_local_settings(str(tmp_path))  # second run: no-op
+    assert local.read_text(encoding="utf-8") == first
