@@ -55,7 +55,7 @@ def _get_setting(key: str, default=None):
 
 
 # ---------------------------------------------------------------------------
-# Disk cache for non-secret identity data (user_id, username, token_expiry)
+# Disk cache for non-secret identity data (username, token_expiry)
 # ---------------------------------------------------------------------------
 
 _disk_cache = None
@@ -74,16 +74,6 @@ def _ensure_cache():
     if _disk_cache is None:
         _disk_cache = _get_disk_cache_instance()
     return _disk_cache
-
-
-def set_user_id(user_id: str) -> None:
-    """Store user_id in disk cache (non-sensitive public identifier)."""
-    _ensure_cache().set('user_id', str(user_id))
-
-
-def get_user_id() -> Optional[str]:
-    """Retrieve user_id from disk cache."""
-    return _ensure_cache().get('user_id')
 
 
 def set_username(username: str) -> None:
@@ -236,7 +226,7 @@ def first_authorization(client_id: str, client_secret: str | None, *, scope: str
 
 
 def _cache_user_info(access_token: str | None) -> None:
-    """Fetch /api/me and cache username/user_id (best-effort)."""
+    """Fetch /api/me and cache username (best-effort)."""
     if not access_token:
         return
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -246,8 +236,6 @@ def _cache_user_info(access_token: str | None) -> None:
     me = data.get("me") or {}
     if me.get("username"):
         set_username(str(me["username"]))
-    if me.get("user_id"):
-        set_user_id(str(me["user_id"]))
 
 
 def authorize():
@@ -376,7 +364,6 @@ def get_cached_tokens():
     data["access_token"] = keyring.get_password(KEYRING_SERVICE_NAME, "access_token")
     data["refresh_token"] = keyring.get_password(KEYRING_SERVICE_NAME, "refresh_token")
     data["username"] = get_username_from_cache()
-    data["user_id"] = get_user_id()
     return data
 
 
@@ -429,23 +416,21 @@ async def fetch_me(client: httpx.AsyncClient) -> Optional[dict]:
 
 
 async def fetch_user_id_from_api(api_key):
-    """Fetch user_id using the API key; caches it."""
+    """Fetch user_id using the API key."""
     async with httpx.AsyncClient(headers={'XF-Api-Key': api_key}, http2=True) as client:
         me = await fetch_me(client)
     if me:
-        set_user_id(me['user_id'])
         return me['user_id']
     return None
 
 
 async def fetch_username(api_key, cache=True):
-    """Fetch username via API key; caches username and user_id."""
+    """Fetch username via API key; caches username."""
     async with httpx.AsyncClient(headers={'XF-Api-Key': api_key}, http2=True) as client:
         me = await fetch_me(client)
     if me:
         if cache:
             set_username(me['username'])
-            set_user_id(me['user_id'])
         return me['username']
     return "Unknown"
 
@@ -529,7 +514,6 @@ async def get_username():
             me = await fetch_me(client)
         if me and me.get("username"):
             set_username(me["username"])
-            set_user_id(me["user_id"])
             return me["username"]
         raise RuntimeError("Unable to retrieve username using the stored OAuth token.")
 
