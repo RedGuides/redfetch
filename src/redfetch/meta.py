@@ -355,50 +355,16 @@ def self_remove():
         sys.exit(1)
 
 
-def _release_disk_caches() -> None:
-    """Ensure all disk caches are closed before deleting directories."""
-    errors: list[str] = []
-
-    try:
-        clear_pypi_cache()
-    except Exception as exc:
-        errors.append(f"PyPI cache: {exc}")
-
-    try:
-        from redfetch import auth
-    except Exception as exc:
-        errors.append(f"Auth cache import: {exc}")
-    else:
-        try:
-            auth.clear_disk_cache()
-        except Exception as exc:
-            errors.append(f"Disk cache: {exc}")
-
-    try:
-        from redfetch import net
-    except Exception as exc:
-        errors.append(f"Manifest cache import: {exc}")
-    else:
-        try:
-            net.clear_manifest_cache()
-        except Exception as exc:
-            errors.append(f"Manifest cache: {exc}")
-
-    if errors:
-        raise RuntimeError("; ".join(errors))
-
-
 def uninstall():
     """Guide the user through the uninstallation process."""
-    # Import the logout function from auth module
     from .auth import logout
 
     config.initialize_config()
 
     console.print("\n[bold]Uninstallation Process:[/bold]")
 
-    # Call the logout function to clear stored credentials
     logout()
+    console.print("Logged out successfully.")
 
     config.remove_breadcrumb()
 
@@ -486,10 +452,6 @@ def uninstall():
         # Delete the entire .cache directory
         cache_dir = os.path.join(config_dir, '.cache')
         if os.path.isdir(cache_dir):
-            try:
-                _release_disk_caches()
-            except Exception as e:
-                console.print(f"[red]Failed to release cache handles: {e}[/red]")
             try:
                 shutil.rmtree(cache_dir)
             except Exception as e:

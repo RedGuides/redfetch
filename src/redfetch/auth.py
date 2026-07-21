@@ -373,28 +373,19 @@ def logout():
 
     keyring_credentials = ["access_token", "refresh_token", "api_key"]
     legacy_credentials = ["user_id", "username", "expires_at"]
-    
-    credentials_deleted = False
 
     for credential in keyring_credentials + legacy_credentials:
         try:
             keyring.delete_password(KEYRING_SERVICE_NAME, credential)
-            credentials_deleted = True
         except keyring.errors.PasswordDeleteError:
             pass
 
-    try:
-        clear_disk_cache()
-        meta.clear_pypi_cache()
-        net.clear_manifest_cache()
-        credentials_deleted = True
-    except Exception:
-        pass
-
-    if credentials_deleted:
-        print("You have been logged out successfully.")
-    else:
-        print("No active session found. You were not logged in.")
+    # isolated so a locked cache can't block the remaining clears
+    for clear in (clear_disk_cache, meta.clear_pypi_cache, net.clear_manifest_cache):
+        try:
+            clear()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

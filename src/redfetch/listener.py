@@ -7,9 +7,9 @@ from typing import Any, Dict, Optional
 
 from aiohttp import web
 
+from redfetch import config
 from redfetch import store
 from redfetch import sync
-from redfetch.special import compute_special_status
 
 log = logging.getLogger(__name__)
 
@@ -169,9 +169,9 @@ async def handle_category_map(request: web.Request) -> web.Response:
 
 
 async def handle_special_resource_ids(request: web.Request) -> web.Response:
-    status = compute_special_status(None)
-    special_resource_ids = [int(rid) for rid, info in status.items() if info["is_special"]]
-    return web.json_response(special_resource_ids)
+    # from_env, not bare settings: --server swaps settings.ENV at runtime
+    special_resources = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES
+    return web.json_response([int(rid) for rid, d in special_resources.items() if d.get('opt_in', False)])
 
 
 async def create_app(
