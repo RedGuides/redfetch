@@ -33,6 +33,7 @@ src/redfetch/__about__.py
 
 # Database files
 *.db
+.cache/
 
 # Environment file
 .env
