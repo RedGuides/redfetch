@@ -91,26 +91,6 @@ def find_everquest_uninstall_location():
     except OSError:
         pass
 
-    # 3) HKU: enumerate SIDs as final fallback
-    try:
-        with reg.ConnectRegistry(None, reg.HKEY_USERS) as hku:
-            i = 0
-            while True:
-                try:
-                    sid = reg.EnumKey(hku, i)
-                    i += 1
-                    subkey = rf"{sid}\{base_uninstall}"
-                    for valname in ("InstallLocation", "DisplayIcon", "UninstallString"):
-                        val = _read_reg_value(hku, subkey, valname)
-                        if val:
-                            candidate = _extract_dir_from_value(str(val))
-                            if _is_valid_eq_dir(candidate):
-                                return candidate
-                except OSError:
-                    break
-    except OSError:
-        pass
-
     return None
 
 
