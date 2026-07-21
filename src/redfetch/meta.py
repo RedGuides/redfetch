@@ -368,6 +368,15 @@ def uninstall():
 
     config.remove_breadcrumb()
 
+    if sys.platform == "win32":
+        from . import desktop_shortcut
+        try:
+            if desktop_shortcut.get_shortcut_path().exists():
+                desktop_shortcut.remove_shortcut()
+                console.print("Desktop shortcut removed.")
+        except Exception as e:
+            console.print(f"[yellow]Could not remove the desktop shortcut: {e}[/yellow]")
+
     # Get executable path and installation method
     executable_path = get_executable_path()
     install_method = detect_installation_method()

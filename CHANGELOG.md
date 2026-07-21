@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.0] - 2026-07-21
 
 ### Added
-- Background updates triggered on each launch of "Very Vanilla MQ", so you no longer have to look at redfetch. Credit: all the TUI haters
+- Background updates triggered on each launch of "Very Vanilla MQ", so you no longer have to see redfetch. Run MacroQuest directly. Credit: all the TUI haters
 
 ### Changed
 - Navigation meshes now download by default instead of prompting. Opt out in settings. (`PROTECTED_FILES_BY_RESOURCE` still protects your custom meshes)
