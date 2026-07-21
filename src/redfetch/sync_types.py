@@ -13,7 +13,6 @@ SyncMode = Literal["full", "targeted"]
 DesiredSource = Literal["watching", "licensed", "special", "explicit", "dependency"]
 TargetKind = Literal["root", "dependency"]
 RemoteStatus = Literal[
-    "manifest_current",
     "downloadable",
     "access_denied",
     "needs_level_2",
@@ -74,8 +73,8 @@ PLAN_REASON_META: dict[PlanReason, ReasonInfo] = {
 
 
 def reason_message(reason: PlanReason) -> str:
-    meta = PLAN_REASON_META.get(reason)
-    return meta.message if meta else reason
+    # Direct subscript on purpose: a new PlanReason without meta should fail loudly here.
+    return PLAN_REASON_META[reason].message
 
 SyncEvent = (
     tuple[Literal["total"], int, None]
@@ -163,13 +162,6 @@ class DesiredSet(SyncModel):
         existing.explicit_root = existing.explicit_root or target.explicit_root
         return existing
 
-    def resource_targets(self, resource_id: str) -> list[DesiredInstallTarget]:
-        return [
-            target
-            for target in self.install_targets.values()
-            if target.resource_id == resource_id
-        ]
-
 
 class RemoteArtifact(SyncModel):
     """What to actually download for a resource."""
@@ -190,11 +182,6 @@ class RemoteResourceState(SyncModel):
     version_string: str | None = None
     status: RemoteStatus
     artifact: RemoteArtifact | None = None
-    source_note: str | None = None
-
-    @property
-    def is_resolved(self) -> bool:
-        return self.version_id is not None and self.artifact is not None
 
 
 class RemoteSnapshot(SyncModel):
@@ -346,12 +333,9 @@ class ExecutionResult(SyncModel):
     """Collected results handed to the recorder after execution."""
 
     items: dict[str, ExecutionResultItem] = Field(default_factory=dict)
-    was_cancelled: bool = False
 
     def has_errors(self) -> bool:
-        return self.was_cancelled or any(
-            item.outcome == "error" for item in self.items.values()
-        )
+        return any(item.outcome == "error" for item in self.items.values())
 
 
 @dataclass(frozen=True, slots=True)

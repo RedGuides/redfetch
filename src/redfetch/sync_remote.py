@@ -115,7 +115,6 @@ def fetch_remote_snapshot(
             remote_resources[resource_id] = RemoteResourceState(
                 resource_id=resource_id,
                 status="not_found",
-                source_note="manifest_absent",
             )
             continue
 
@@ -137,7 +136,6 @@ def fetch_remote_snapshot(
             version_string=details.version_string,
             status=status,
             artifact=details.artifact if status == "downloadable" else None,
-            source_note="manifest",
         )
 
     return RemoteSnapshot(resources=remote_resources)

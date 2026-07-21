@@ -21,7 +21,6 @@ from redfetch.sync_types import (
     ExecutionResult,
     PLAN_REASON_META,
     PreparedSync,
-    ReasonInfo,
     SyncEventCallback,
     SyncOutcome,
     reason_message,
@@ -30,7 +29,6 @@ from redfetch.sync_types import (
 
 _sync_lock: asyncio.Lock | None = None
 _file_lock: FileLock | None = None
-_DEFAULT_REASON = ReasonInfo(message="")
 
 
 def _process_lock() -> FileLock:
@@ -62,8 +60,8 @@ def _print_plan_summary(
         if action.action == "block"
     ]
     if is_full_sync:
-        quiet = [a for a in all_blocked if PLAN_REASON_META.get(a.reason, _DEFAULT_REASON).quiet]
-        blocked = [a for a in all_blocked if not PLAN_REASON_META.get(a.reason, _DEFAULT_REASON).quiet]
+        quiet = [a for a in all_blocked if PLAN_REASON_META[a.reason].quiet]
+        blocked = [a for a in all_blocked if not PLAN_REASON_META[a.reason].quiet]
     else:
         quiet = []
         blocked = all_blocked
@@ -77,13 +75,9 @@ def _print_plan_summary(
             label = action.title or action.resource_id
             print(f"  - {label} (id={action.resource_id}): {reason_message(action.reason)}")
 
-    summary_buckets: dict[str, int] = {}
-    for action in quiet:
-        label = PLAN_REASON_META[action.reason].summary_label
-        if label:
-            summary_buckets[label] = summary_buckets.get(label, 0) + 1
-    for label, count in summary_buckets.items():
-        print(f"{label}: >>> {count} <<<")
+    no_files = sum(1 for a in quiet if a.reason == "no_files")
+    if no_files:
+        print(f"{PLAN_REASON_META['no_files'].summary_label}: >>> {no_files} <<<")
 
     if counts.get("untrack", 0):
         print(f"Resources to untrack: >>> {counts.get('untrack', 0)} <<<")

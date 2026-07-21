@@ -83,7 +83,6 @@ def downloadable_remote(resource_id: str, *, version_id: int = 101, title: str =
             download_url=f"https://example.com/{resource_id}.zip",
             file_hash="d41d8cd98f00b204e9800998ecf8427e",
         ),
-        source_note="manifest_plus_access_check",
     )
 
 
@@ -95,7 +94,6 @@ def blocked_remote(resource_id: str, status: str) -> RemoteResourceState:
         version_id=101,
         status=status,
         artifact=None,
-        source_note="api_fallback",
     )
 
 

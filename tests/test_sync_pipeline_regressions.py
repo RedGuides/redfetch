@@ -39,7 +39,6 @@ def _downloadable_state(resource_id: str, *, category_id: int = 8) -> RemoteReso
             download_url=f"https://example.com/{resource_id}.zip",
             file_hash="d41d8cd98f00b204e9800998ecf8427e",
         ),
-        source_note="manifest_plus_access_check",
     )
 
 
@@ -263,7 +262,6 @@ def test_root_and_dependency_same_resource_id_but_only_dependency_is_outdated():
             download_url="https://example.com/153.zip",
             file_hash="d41d8cd98f00b204e9800998ecf8427e",
         ),
-        source_note="manifest_plus_access_check",
     ),
     "151": RemoteResourceState(
         resource_id="151",
@@ -277,7 +275,6 @@ def test_root_and_dependency_same_resource_id_but_only_dependency_is_outdated():
             download_url="https://example.com/151.zip",
             file_hash="d41d8cd98f00b204e9800998ecf8427e",
         ),
-        source_note="manifest_plus_access_check",
     ),
     })
     execution_plan = planner.build_execution_plan(
