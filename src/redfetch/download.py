@@ -7,7 +7,7 @@ import sys
 import time
 import zlib
 from pathlib import Path
-from zipfile import ZipFile, is_zipfile
+from zipfile import BadZipFile, ZipFile, is_zipfile
 import asyncio
 
 # third-party
@@ -191,15 +191,6 @@ def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=Fa
             return False
 
         with ZipFile(zip_path, 'r') as zip_ref:
-            try:
-                bad_member = zip_ref.testzip()
-                if bad_member is not None:
-                    print(f"ZIP integrity check failed at member: {bad_member}. Extraction aborted.")
-                    return False
-            except Exception as e:
-                print(f"ZIP integrity check failed: {e}. Extraction aborted.")
-                return False
-
             infos = zip_ref.infolist()
             if len(infos) > MAX_FILES_PER_ZIP:
                 print(f"ZIP has too many files ({len(infos)} > {MAX_FILES_PER_ZIP}). Extraction aborted.")
@@ -221,10 +212,14 @@ def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=Fa
             if protected_files is None:
                 protected_files = config.settings.from_env(config.settings.ENV).PROTECTED_FILES_BY_RESOURCE.get(resource_id, [])
             sweep_stale_swap_files(extract_to)
-            if should_flatten:
-                extract_flattened(zip_ref, extract_to, protected_files)
-            else:
-                extract_with_structure(zip_ref, extract_to, protected_files)
+            try:
+                if should_flatten:
+                    extract_flattened(zip_ref, extract_to, protected_files)
+                else:
+                    extract_with_structure(zip_ref, extract_to, protected_files)
+            except (BadZipFile, zlib.error) as e:  # bad CRC raises BadZipFile; truncated deflate raises zlib.error
+                print(f"ZIP integrity check failed: {e}. Extraction aborted.")
+                return False
             return True
     finally:
         delete_zip_file(zip_path)
