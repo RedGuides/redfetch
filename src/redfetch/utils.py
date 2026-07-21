@@ -149,12 +149,10 @@ def parse_resource_id(input_string: str) -> str:
 
     # Check if it's a redguides.com URL
     if not parsed_url.netloc.endswith('redguides.com'):
-        print(f"Invalid URL: Neither a redguides.com URL nor a valid resource id")
         raise ValueError("Invalid URL: Neither a redguides.com URL nor a valid resource id")
 
     # Check if it's a thread URL
     if 'threads' in parsed_url.path:
-        print(f"Invalid URL: This appears to be a discussion thread, not a resource")
         raise ValueError("Invalid URL: This appears to be a discussion thread, not a resource")
 
     # Extract the resource ID using regex
@@ -162,7 +160,6 @@ def parse_resource_id(input_string: str) -> str:
     if match:
         return str(match.group(1))
     else:
-        print(f"Could not find a valid resource ID in the URL")
         raise ValueError("Could not find a valid resource ID in the URL")
 
 

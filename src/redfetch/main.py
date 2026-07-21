@@ -45,13 +45,10 @@ class Env(str, Enum):
 
 def parse_resource_id_or_fail(value: str) -> str:
     """Accept either an integer ID or a URL that includes a recognizable ID."""
-    value_stripped = value.strip()
-    if value_stripped.isdigit():
-        return value_stripped
-    parsed = utils.parse_resource_id(value_stripped)
-    if parsed is None:
-        raise typer.BadParameter("Provide a resource ID or a recognized RedGuides URL.")
-    return parsed
+    try:
+        return utils.parse_resource_id(value.strip())
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _apply_server_override(server: "Optional[Env]" = None) -> None:
