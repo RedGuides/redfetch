@@ -1008,20 +1008,6 @@ class MainScreen(Screen):
         button = self.query_one(f"#{button_id}", Button)
         button.variant = variant
 
-    #
-    # Log search proxies (used by key bindings)
-    #
-
-    def handle_log_search_next(self) -> None:
-        """Proxy: move to the next search match in the log via FetchTab."""
-        fetch_tab = self.query_one(FetchTab)
-        fetch_tab.handle_log_search_next()
-
-    def handle_log_search_prev(self) -> None:
-        """Proxy: move to the previous search match in the log via FetchTab."""
-        fetch_tab = self.query_one(FetchTab)
-        fetch_tab.handle_log_search_prev()
-
 
 class Redfetch(App):
     """The main Redfetch application."""
@@ -1273,13 +1259,13 @@ class Redfetch(App):
         """Keyboard action: go to next log search match."""
         main_screen = self._get_main_screen()
         if main_screen:
-            main_screen.handle_log_search_next()
+            main_screen.query_one(FetchTab).handle_log_search_next()
 
     def action_search_prev(self) -> None:
         """Keyboard action: go to previous log search match."""
         main_screen = self._get_main_screen()
         if main_screen:
-            main_screen.handle_log_search_prev()
+            main_screen.query_one(FetchTab).handle_log_search_prev()
 
     def action_cycle_theme(self) -> None:
         """Cycle to the next theme."""
@@ -1720,11 +1706,7 @@ class Redfetch(App):
 
     def on_sync_event(self, event: SyncEvent) -> None:
         """Handle events from the sync process to update the UI."""
-        event_type, resource_id, details = event
-        self._process_sync_event(event_type, resource_id, details)
-
-    def _process_sync_event(self, event_type: str, resource_id: str | int, details: str | None) -> None:
-        """Process sync events on the main thread."""
+        event_type, resource_id, _details = event
         # _base_main_screen so the bar advances
         main_screen = self._base_main_screen()
         try:
