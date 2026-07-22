@@ -44,11 +44,11 @@ def _plan(*actions):
     return ExecutionPlan(actions={a.target_key: a for a in actions})
 
 
-def test_build_items_includes_only_outdated_downloads():
+def test_build_items_includes_every_planned_download():
     plan = _plan(
         _action("4", action="download", reason="outdated", title="KissAssist", remote_version=1240, remote_version_string="11.005"),
         _action("3040", action="download", reason="outdated", title="RGMercs", remote_version=991),
-        # Excluded: a brand-new install is not an "update" to something already held.
+        # Included: a fresh install downloads like any update would.
         _action("9", action="download", reason="not_installed", title="New Thing", remote_version=5),
         # Excluded: already current.
         _action("10", action="skip", reason="already_current", title="Current", remote_version=7),
@@ -63,6 +63,7 @@ def test_build_items_includes_only_outdated_downloads():
     assert items == [
         {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": "11.005"},
         {"resource_id": "3040", "name": "RGMercs", "available_version_id": 991, "version": None},
+        {"resource_id": "9", "name": "New Thing", "available_version_id": 5, "version": None},
     ]
 
 
@@ -72,12 +73,14 @@ def test_build_items_falls_back_to_resource_id_when_no_title():
     assert items == [{"resource_id": "4", "name": "4", "available_version_id": 1240, "version": None}]
 
 
-def test_install_context_changed_is_not_an_update():
-    """Re-downloads for path/settings changes aren't user-facing 'updates'."""
+def test_install_context_changed_is_a_planned_download():
+    """Re-downloads for path/settings changes ride along like any planned download."""
     plan = _plan(
         _action("4", action="download", reason="install_context_changed", title="KissAssist", remote_version=1240),
     )
-    assert update_status.build_items_from_plan(plan) == []
+    assert update_status.build_items_from_plan(plan) == [
+        {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": None}
+    ]
 
 
 def _result_item(resource_id, outcome, *, reason="outdated", target_key=None):
@@ -97,18 +100,6 @@ def _exec_result(*items):
     return ExecutionResult(items={i.target_key: i for i in items})
 
 
-def test_split_items_skipped_current_is_neither_installed_nor_remaining():
-    plan = _plan(
-        _action("4", action="download", reason="outdated", title="KissAssist", remote_version=1240),
-    )
-    result = _exec_result(_result_item("4", "skipped"))
-
-    installed, remaining = update_status.split_items_by_outcome(plan, result)
-
-    assert installed == []
-    assert remaining == []
-
-
 def test_split_items_missing_result_counts_as_remaining():
     """A planned download with no execution record (crash/cancel) is still outdated."""
     plan = _plan(
@@ -123,7 +114,7 @@ def test_split_items_missing_result_counts_as_remaining():
 
 def test_split_items_keeps_blocked_exclusion():
     """The blocked-items exclusion is load-bearing: a lapsed subscriber must not
-    spawn-loop on resources that can never install."""
+    spawn-loop on resources that can never install. Fresh installs count as installed."""
     plan = _plan(
         _action("12", action="block", reason="needs_license", title="Lapsed"),
         _action("9", action="download", reason="not_installed", title="Fresh Install"),
@@ -135,7 +126,9 @@ def test_split_items_keeps_blocked_exclusion():
 
     installed, remaining = update_status.split_items_by_outcome(plan, result)
 
-    assert installed == []
+    assert installed == [
+        {"resource_id": "9", "name": "Fresh Install", "available_version_id": None, "version": None}
+    ]
     assert remaining == []
 
 

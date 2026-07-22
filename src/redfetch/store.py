@@ -405,6 +405,10 @@ async def record_installed_state(
             if result_item.outcome == "downloaded":
                 continue
 
+            # Keep a failed download's row untouched
+            if action.action == "download" and existing is not None:
+                continue
+
             desired_target = desired_set.install_targets.get(target_key)
             if desired_target is None:
                 continue

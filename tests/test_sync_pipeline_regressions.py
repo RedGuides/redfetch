@@ -16,6 +16,8 @@ from redfetch.sync_discovery import _add_root_target
 from redfetch.sync_types import (
     DesiredInstallTarget,
     DesiredSet,
+    ExecutionResult,
+    ExecutionResultItem,
     LocalInstallState,
     LocalSnapshot,
     PlannedAction,
@@ -185,6 +187,74 @@ def test_record_download_success_persists_planner_resolved_path(tmp_path):
         row = cursor.fetchone()
 
     assert row == ("C:/downloads/macros", 1234)
+
+
+def test_failed_relocation_stays_planned_for_retry(tmp_path):
+    """A failed install_context_changed download must not stamp the new path into
+    the DB, or the next run plans already_current and the relocation never happens."""
+    db_path = _db_path(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        store.initialize_schema(conn.cursor())
+        conn.commit()
+
+    desired = _root_target("153")  # resolved_path = the NEW location
+    desired_set = _desired_set(desired)
+    remote_state = _downloadable_state("153")
+    remote_snapshot = RemoteSnapshot(resources={"153": remote_state})
+
+    # Seed the DB as production would: the current version installed at the OLD location.
+    seeded = PlannedAction(
+        target_key="/153/",
+        resource_id="153",
+        parent_id=None,
+        parent_target_key=None,
+        root_resource_id="153",
+        target_kind="root",
+        action="download",
+        reason="not_installed",
+        title="Resource 153",
+        category_id=8,
+        remote_version=remote_state.version_id,
+        artifact=remote_state.artifact,
+        resolved_path="C:/old/153",
+        subfolder=None,
+        flatten=False,
+        protected_files=[],
+        explicit_root=False,
+    )
+    asyncio.run(store.record_download_success(
+        db_path, target=desired, action=seeded, remote_state=remote_state,
+    ))
+    local_snapshot = asyncio.run(store.load_local_snapshot(db_path))
+
+    plan = planner.build_execution_plan(
+        desired_set=desired_set,
+        remote_snapshot=remote_snapshot,
+        local_snapshot=local_snapshot,
+        settings_env="LIVE",
+    )
+    assert plan.actions["/153/"].reason == "install_context_changed"  # precondition
+
+    result = ExecutionResult(items={"/153/": ExecutionResultItem(
+        target_key="/153/", resource_id="153", outcome="error", reason="install_context_changed",
+    )})
+    asyncio.run(store.record_installed_state(
+        db_path,
+        desired_set=desired_set,
+        remote_snapshot=remote_snapshot,
+        local_snapshot=local_snapshot,
+        execution_plan=plan,
+        execution_result=result,
+    ))
+
+    replanned = planner.build_execution_plan(
+        desired_set=desired_set,
+        remote_snapshot=remote_snapshot,
+        local_snapshot=asyncio.run(store.load_local_snapshot(db_path)),
+        settings_env="LIVE",
+    )
+    assert replanned.actions["/153/"].action == "download"
+    assert replanned.actions["/153/"].reason == "install_context_changed"
 
 
 def test_planner_blocks_all_targets_participating_in_cycle():

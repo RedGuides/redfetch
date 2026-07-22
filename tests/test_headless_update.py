@@ -177,7 +177,7 @@ def test_completion_write_derives_items_from_execution(headless_env):
         [
             _action("4", title="KissAssist", remote_version=1240, remote_version_string="11.005"),
             _action("3040", title="RGMercs", remote_version=991, remote_version_string="20260715"),
-            # A fresh install is not an "update": excluded from both lists.
+            # A fresh install downloads and reports like any other update.
             _action("9", reason="not_installed", title="New Thing", remote_version=5),
         ],
         [
@@ -205,7 +205,8 @@ def test_completion_write_derives_items_from_execution(headless_env):
         {"resource_id": "3040", "name": "RGMercs", "available_version_id": 991, "version": "20260715"}
     ]
     assert on_disk["installed"] == [
-        {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": "11.005"}
+        {"resource_id": "4", "name": "KissAssist", "available_version_id": 1240, "version": "11.005"},
+        {"resource_id": "9", "name": "New Thing", "available_version_id": 5, "version": None},
     ]
 
 

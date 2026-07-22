@@ -20,11 +20,6 @@ def update_status_path() -> str:
     return os.path.join(config.DEFAULT_CONFIG_DIR, UPDATE_STATUS_FILENAME)
 
 
-def _is_outdated_download(action: PlannedAction) -> bool:
-    """Blocked items are excluded on purpose"""
-    return action.action == "download" and action.reason == "outdated"
-
-
 def _item(action: PlannedAction) -> dict:
     return {
         "resource_id": action.resource_id,
@@ -35,30 +30,26 @@ def _item(action: PlannedAction) -> dict:
 
 
 def build_items_from_plan(execution_plan: ExecutionPlan) -> list[dict]:
-    """Only stuff we're actually going to download (opt-outs, blocks, and new installs aren't in the plan)."""
-    return [_item(a) for a in execution_plan.actions.values() if _is_outdated_download(a)]
+    return [_item(a) for a in execution_plan.actions.values() if a.action == "download"]
 
 
 def split_items_by_outcome(
     execution_plan: ExecutionPlan,
     execution_result: ExecutionResult,
 ) -> tuple[list[dict], list[dict]]:
-    """Split the planned updates into (installed, remaining) by what actually downloaded."""
+    """Split the planned downloads into (installed, remaining) by what actually downloaded."""
     installed: dict[str, dict] = {}
     remaining: dict[str, dict] = {}
     for action in execution_plan.actions.values():
-        if not _is_outdated_download(action):
+        if action.action != "download":
             continue
         item = _item(action)
         result = execution_result.items.get(action.target_key)
-        outcome = result.outcome if result is not None else None
-        if outcome == "downloaded":
+        if result is not None and result.outcome == "downloaded":
             installed.setdefault(action.resource_id, item)
-        elif outcome == "skipped":
-            pass  # already up to date: goes in neither list
         else:
             remaining.setdefault(action.resource_id, item)
-    # A resource with any failed target is still outdated, not installed.
+    # A resource with any failed target stays remaining, not installed.
     for resource_id in remaining:
         installed.pop(resource_id, None)
     return list(installed.values()), list(remaining.values())
