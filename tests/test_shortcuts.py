@@ -47,6 +47,8 @@ def test_every_open_name_resolves_case_insensitively():
 
 def test_known_static_attributes():
     assert shortcuts.find_runnable("mq").executable == "MacroQuest.exe"
+    assert shortcuts.find_runnable("mq").startup is not None
+    assert shortcuts.find_runnable("eqbcs").startup is None
     assert shortcuts.find_runnable("eqgame").args == ("patchme",)
     assert shortcuts.find_runnable("meshgenerator").executable == "MeshGenerator.exe"
     assert shortcuts.find_runnable("mesh").executable == "MeshGenerator.exe"  # alias preserved
@@ -75,6 +77,227 @@ def test_run_invokes_prepare_hook_before_launch(monkeypatch):
                            prepare=lambda: events.append("prepare"))
     shortcuts.run(r)
     assert events == ["prepare", "run"]
+
+
+def test_vvmq_startup_hook_late_binds(monkeypatch):
+    monkeypatch.setattr(shortcuts, "start_vvmq", lambda: "sentinel")
+    assert shortcuts.find_runnable("vvmq").startup() == "sentinel"
+
+
+# --- launch_loadout(): the shared companion routine --------------------------
+
+def test_launch_loadout_empty_when_nothing_configured(monkeypatch):
+    monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered",
+                        lambda env=None, running=None: ([], []))
+    assert shortcuts.launch_loadout(frozenset()) == []
+
+
+def test_launch_loadout_reports_launches_skips_and_failures_in_order(monkeypatch):
+    def _run(command, cwd=None):
+        if command == "bad --flag":
+            raise FileNotFoundError("bad")
+        return True
+
+    monkeypatch.setattr(shortcuts.processes, "run_command", _run)
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: (
+            [(["C:\\x\\EQBCS.exe"], "C:\\x"), ("bad --flag", None)], ["C:\\y\\MySEQ.exe"]
+        ),
+    )
+    messages = shortcuts.launch_loadout(frozenset())
+    assert messages == [
+        shortcuts.LaunchMessage("MySEQ.exe is already running; not starting another."),
+        shortcuts.LaunchMessage("EQBCS.exe started."),
+        shortcuts.LaunchMessage("Failed to start bad: bad", is_error=True),
+    ]
+
+
+# --- start_vvmq(): full startup (MacroQuest + companion loadout) -------------
+
+@pytest.fixture
+def vvmq_env(monkeypatch):
+    calls = {"started": [], "commands": []}
+    monkeypatch.setattr(shortcuts.sys, "platform", "win32")
+    monkeypatch.setattr(shortcuts.utils, "get_vvmq_path", lambda: "C:\\VanillaMQ")
+    monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start", lambda running=None: True)
+    monkeypatch.setattr(
+        shortcuts.processes, "run_executable",
+        lambda folder, exe, *a, **k: calls["started"].append((folder, exe)) or True,
+    )
+    monkeypatch.setattr(
+        shortcuts.processes, "run_command",
+        lambda command, cwd=None: calls["commands"].append((command, cwd)) or True,
+    )
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: ([], []),
+    )
+    return monkeypatch, calls
+
+
+def _start(running=frozenset()):
+    return shortcuts.start_vvmq(running=running)
+
+
+def test_start_vvmq_starts_mq_then_loadout(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: ([(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []),
+    )
+    result = _start()
+    assert result.mq_up is True
+    assert calls["started"] == [("C:\\VanillaMQ", "MacroQuest.exe")]
+    assert calls["commands"] == [(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")]
+    assert ("MacroQuest started.", False) in result.messages
+    assert ("EQBCS.exe started.", False) in result.messages
+
+
+def test_start_vvmq_skips_mq_when_running_but_still_launches_loadout(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start", lambda running=None: False)
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: ([(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []),
+    )
+    result = _start()
+    assert result.mq_up is True
+    assert calls["started"] == []
+    assert calls["commands"] == [(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")]
+    assert ("MacroQuest is already running; not starting another.", False) in result.messages
+
+
+def test_start_vvmq_missing_path_is_error(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    monkeypatch.setattr(shortcuts.utils, "get_vvmq_path", lambda: None)
+    result = _start()
+    assert result.mq_up is False
+    assert calls["started"] == [] and calls["commands"] == []
+    assert any("path not found" in msg and err for msg, err in result.messages)
+
+
+def test_start_vvmq_mq_failure_skips_loadout(vvmq_env):
+    monkeypatch, calls = vvmq_env
+
+    def _boom(folder, exe, *a, **k):
+        raise FileNotFoundError("MacroQuest.exe not found")
+
+    monkeypatch.setattr(shortcuts.processes, "run_executable", _boom)
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: pytest.fail("loadout must not launch when MacroQuest fails"),
+    )
+    result = _start()
+    assert result.mq_up is False
+    assert calls["commands"] == []
+    assert any("Failed to start MacroQuest" in msg and err for msg, err in result.messages)
+
+
+def test_start_vvmq_reports_already_running_companion(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: ([], ["C:\\y\\MySEQ.exe"]),
+    )
+    result = _start()
+    assert result.mq_up is True
+    assert calls["commands"] == []
+    assert any("MySEQ.exe is already running" in msg for msg, _ in result.messages)
+
+
+def test_start_vvmq_companion_failure_continues(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: ([("bad --flag", None), (["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []),
+    )
+
+    def _run(command, cwd=None):
+        if command == "bad --flag":
+            raise FileNotFoundError("bad")
+        calls["commands"].append((command, cwd))
+        return True
+
+    monkeypatch.setattr(shortcuts.processes, "run_command", _run)
+    result = _start()
+    assert result.mq_up is True
+    assert calls["commands"] == [(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")]
+    assert any("Failed to start bad" in msg and err for msg, err in result.messages)
+
+
+def test_start_vvmq_scans_running_once_when_not_given(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    scanned = frozenset({"scanned.exe"})
+    scans = []
+    seen = {}
+    monkeypatch.setattr(shortcuts.processes, "running_executable_paths",
+                        lambda: scans.append(1) or scanned)
+    monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start",
+                        lambda running=None: seen.__setitem__("offer", running) or True)
+    monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered",
+                        lambda env=None, running=None: seen.__setitem__("resolve", running) or ([], []))
+
+    shortcuts.start_vvmq()
+
+    assert scans == [1]
+    assert seen["offer"] is scanned and seen["resolve"] is scanned
+
+
+def test_start_vvmq_forwards_running_to_helpers(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    seen = {}
+    monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start",
+                        lambda running=None: seen.__setitem__("offer", running) or True)
+    monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered",
+                        lambda env=None, running=None: seen.__setitem__("resolve", running) or ([], []))
+    sentinel = frozenset({"given.exe"})
+
+    shortcuts.start_vvmq(running=sentinel)
+
+    assert seen["offer"] is sentinel and seen["resolve"] is sentinel
+
+
+def test_start_vvmq_loadout_resolution_failure_bubbles(vvmq_env):
+    monkeypatch, calls = vvmq_env
+
+    def _boom(env=None, running=None):
+        raise TypeError("POST_UPDATE_LAUNCH command must be a string or list.")
+
+    monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered", _boom)
+    with pytest.raises(TypeError):
+        _start()
+
+
+def test_start_vvmq_scan_failure_bubbles(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    monkeypatch.setattr(shortcuts.processes, "running_executable_paths",
+                        lambda: (_ for _ in ()).throw(OSError("psutil boom")))
+    with pytest.raises(OSError):
+        shortcuts.start_vvmq()
+    assert calls["started"] == [] and calls["commands"] == []
+
+
+def test_start_vvmq_non_windows_is_clean_error(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    monkeypatch.setattr(shortcuts.sys, "platform", "linux")
+    result = _start()
+
+    assert result.mq_up is False
+    assert calls["started"] == [] and calls["commands"] == []
+    assert any(err and "only supported on Windows" in msg for msg, err in result.messages)
+
+
+def test_start_vvmq_routes_companions_through_shared_loadout(vvmq_env):
+    monkeypatch, calls = vvmq_env
+    sentinel = shortcuts.LaunchMessage("sentinel companion")
+    seen = {}
+    monkeypatch.setattr(shortcuts, "launch_loadout",
+                        lambda running=None: seen.__setitem__("running", running) or [sentinel])
+    result = _start(running=frozenset({"x"}))
+
+    assert sentinel in result.messages
+    assert seen["running"] == frozenset({"x"})
 
 
 # --- meshgen INI seeding (Windows-only: exercises the real Win32 profile API) ----
@@ -182,10 +405,44 @@ def test_openable_available_file(tmp_path):
 def test_cli_run_launches(stub_init):
     launched = []
     stub_init.setattr(shortcuts, "run", lambda r, extra=None: launched.append(r))
+    result = runner.invoke(main.app, ["run", "eqbcs"])
+    assert result.exit_code == 0, result.output
+    assert launched and launched[0].key == "eqbcs"
+    assert "EQBCS.exe" in result.output
+
+
+def test_cli_run_vvmq_does_full_startup(stub_init):
+    stub_init.setattr(shortcuts, "run", lambda r, extra=None: pytest.fail("vvmq must not use bare run()"))
+    stub_init.setattr(
+        shortcuts, "start_vvmq",
+        lambda: shortcuts.StartupResult([("MacroQuest started.", False), ("EQBCS started.", False)], mq_up=True),
+    )
     result = runner.invoke(main.app, ["run", "vvmq"])
     assert result.exit_code == 0, result.output
-    assert launched and launched[0].key == "vvmq"
-    assert "MacroQuest.exe" in result.output
+    assert "MacroQuest started." in result.output
+    assert "EQBCS started." in result.output
+
+
+def test_cli_run_vvmq_failure_exits_1(stub_init):
+    stub_init.setattr(
+        shortcuts, "start_vvmq",
+        lambda: shortcuts.StartupResult([("MacroQuest path not found. Please check your configuration.", True)], mq_up=False),
+    )
+    result = runner.invoke(main.app, ["run", "vvmq"])
+    assert result.exit_code == 1
+    assert "MacroQuest path not found" in result.output
+
+
+def test_cli_run_vvmq_companion_failure_still_exits_0(stub_init):
+    stub_init.setattr(
+        shortcuts, "start_vvmq",
+        lambda: shortcuts.StartupResult(
+            [("MacroQuest started.", False), ("Failed to start EQBCS.exe: boom", True)], mq_up=True
+        ),
+    )
+    result = runner.invoke(main.app, ["run", "vvmq"])
+    assert result.exit_code == 0, result.output
+    assert "Failed to start EQBCS.exe" in result.output
 
 
 def test_cli_run_unknown_target_errors(stub_init):
@@ -196,11 +453,11 @@ def test_cli_run_unknown_target_errors(stub_init):
 
 def test_cli_run_launch_failure_exits_1(stub_init):
     def boom(r, extra=None):
-        raise FileNotFoundError("MacroQuest.exe not found in the specified folder.")
+        raise FileNotFoundError("EQBCS.exe not found in the specified folder.")
     stub_init.setattr(shortcuts, "run", boom)
-    result = runner.invoke(main.app, ["run", "vvmq"])
+    result = runner.invoke(main.app, ["run", "eqbcs"])
     assert result.exit_code == 1
-    assert "Couldn't run vvmq" in result.output
+    assert "Couldn't run eqbcs" in result.output
 
 
 def test_cli_run_bare_lists(stub_init):
@@ -216,7 +473,7 @@ def test_cli_server_override_is_applied(stub_init):
     stub_init.setattr(config, "settings", SimpleNamespace(ENV="LIVE"))
     stub_init.setattr(config, "select_environment_in_memory", lambda env: envs.append(env))
     stub_init.setattr(shortcuts, "run", lambda r, extra=None: None)
-    result = runner.invoke(main.app, ["run", "vvmq", "-s", "emu"])
+    result = runner.invoke(main.app, ["run", "eqbcs", "-s", "emu"])
     assert result.exit_code == 0, result.output
     assert envs == ["EMU"]
 

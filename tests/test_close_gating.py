@@ -660,6 +660,35 @@ def test_execute_loadout_runs_commands_and_notifies_skips(exec_env):
     _execute(surface, post_update.Decision.COLD_START)
     assert calls["commands"] == [(["C:\\x\\EQBCS.exe"], "C:\\x")]
     assert any("MySEQ.exe is already running" in msg for msg, _ in surface.notices)
+    assert any(msg == "EQBCS.exe started." for msg, _ in surface.notices)
+
+
+def test_loadout_adapter_forwards_shared_messages(monkeypatch):
+    from redfetch import shortcuts
+
+    monkeypatch.setattr(
+        post_update.shortcuts, "launch_loadout",
+        lambda running=None: [
+            shortcuts.LaunchMessage("EQBCS.exe started."),
+            shortcuts.LaunchMessage("Failed to start bad: boom", is_error=True),
+        ],
+    )
+    surface = FakeSurface()
+    post_update._launch_loadout(surface, frozenset())
+    assert surface.notices == [("EQBCS.exe started.", False), ("Failed to start bad: boom", True)]
+
+
+def test_execute_cold_start_routes_loadout_through_shared_routine(exec_env):
+    monkeypatch, calls = exec_env
+    from redfetch import shortcuts
+
+    monkeypatch.setattr(
+        post_update.shortcuts, "launch_loadout",
+        lambda running=None: [shortcuts.LaunchMessage("sentinel")],
+    )
+    surface = FakeSurface(cold_choice="yes")
+    _execute(surface, post_update.Decision.COLD_START)
+    assert ("sentinel", False) in surface.notices
 
 
 def test_execute_loadout_failure_notifies_and_continues(exec_env):
@@ -822,3 +851,31 @@ def tui_surface_cls():
 def test_tui_ask_cold_start_maps_modal_responses(tui_surface_cls, response, expected):
     surface = tui_surface_cls(_StubApp(response))
     assert asyncio.run(surface.ask_cold_start()) == expected
+
+
+def test_tui_run_target_dispatches_startup_and_gates_reentry(tui_surface_cls):
+    from types import SimpleNamespace
+    from textual.worker import WorkerState
+    from redfetch.terminal_ui import Redfetch
+
+    runnable = SimpleNamespace(startup=lambda: None, label="Very Vanilla MQ")
+    events = []
+    idle = SimpleNamespace(
+        STARTUP_GROUP=Redfetch.STARTUP_GROUP,
+        workers=[],
+        notify=lambda m, **k: events.append(("toast", m)),
+        _startup_worker=lambda r: events.append(("worker", r)),
+    )
+    Redfetch.run_target(idle, runnable)
+    assert events == [("worker", runnable)]
+
+    live = SimpleNamespace(group=Redfetch.STARTUP_GROUP, state=WorkerState.RUNNING)
+    busy = SimpleNamespace(
+        STARTUP_GROUP=Redfetch.STARTUP_GROUP,
+        workers=[live],
+        notify=lambda m, **k: events.append(("toast", m)),
+        _startup_worker=lambda r: events.append(("worker2", r)),
+    )
+    Redfetch.run_target(busy, runnable)
+    assert ("worker2", runnable) not in events
+    assert any("already starting" in m for kind, m in events if kind == "toast")

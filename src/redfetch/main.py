@@ -417,6 +417,17 @@ def run_shortcut_command(
     if runnable is None:
         valid = ", ".join(r.key for r in shortcuts.RUNNABLES)
         raise typer.BadParameter(f"Unknown shortcut '{target}'. Try: {valid}")
+    if runnable.startup:
+        try:
+            result = runnable.startup()
+        except (ValueError, TypeError, RuntimeError, OSError) as exc:
+            console.print(f"[red]Couldn't run {runnable.key}:[/red] {exc}")
+            raise typer.Exit(1)
+        for message, is_error in result.messages:
+            console.print(message, style="red" if is_error else None, markup=False)
+        if not result.mq_up:
+            raise typer.Exit(1)
+        return
     try:
         shortcuts.run(runnable)
         console.print(f"Started [bold]{runnable.executable}[/bold].")

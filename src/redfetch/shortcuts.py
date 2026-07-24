@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import sys
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import NamedTuple
 
 from redfetch import config
 from redfetch import processes
@@ -84,13 +86,15 @@ class Runnable:
     aliases: tuple[str, ...] = ()
     tooltip: str = ""
     prepare: Callable[[], None] | None = None   # optional pre-launch hook
+    startup: Callable[[], StartupResult] | None = None
 
 
 RUNNABLES: tuple[Runnable, ...] = (
     Runnable(
         "vvmq", "Very Vanilla MQ 🍦", "MacroQuest.exe", utils.get_vvmq_path,
         aliases=("mq", "macroquest"),
-        tooltip="Run MacroQuest, the legendary add-on platform for EverQuest.",
+        tooltip="Run MacroQuest, the legendary add-on platform for EverQuest, plus your post-update programs.",
+        startup=lambda: start_vvmq(),
     ),
     Runnable(
         "meshgenerator", "MeshGenerator 🌐", "MeshGenerator.exe", utils.get_vvmq_path,
@@ -207,7 +211,7 @@ def openable_available(o: Openable) -> bool:
     return os.path.isdir(folder)
 
 
-# ---- launch (the single execution point both front-ends call) --------------
+# ---- launch: bare executables -----------------------------------------------
 
 def run(r: Runnable, extra: Sequence[str] | None = None) -> None:
     """Launch a registered executable."""
@@ -215,6 +219,67 @@ def run(r: Runnable, extra: Sequence[str] | None = None) -> None:
         r.prepare()
     processes.run_executable(r.resolve_dir(), r.executable, [*r.args, *(extra or [])])
 
+
+# ---- full startup: MacroQuest + companion loadout --------------------------
+
+class LaunchMessage(NamedTuple):
+    text: str
+    is_error: bool = False
+
+
+@dataclass(slots=True)
+class StartupResult:
+    messages: list[LaunchMessage]
+    mq_up: bool
+
+
+def launch_loadout(running: set[str] | None = None) -> list[LaunchMessage]:
+    """Start configured companion programs."""
+    to_run, skipped = utils.resolve_post_update_launch_filtered(running=running)
+    messages: list[LaunchMessage] = []
+    for program in skipped:
+        messages.append(LaunchMessage(f"{os.path.basename(program)} is already running; not starting another."))
+    for command, cwd in to_run:
+        label = os.path.basename(utils._command_program(command)) or "post-update program"
+        try:
+            processes.run_command(command, cwd)
+            messages.append(LaunchMessage(f"{label} started."))
+        except Exception as exc:
+            messages.append(LaunchMessage(f"Failed to start {label}: {exc}", is_error=True))
+    return messages
+
+
+def start_vvmq(running: set[str] | None = None) -> StartupResult:
+    """Start MacroQuest and its configured companions."""
+    if sys.platform != "win32":
+        return StartupResult(
+            [LaunchMessage("Starting MacroQuest is only supported on Windows.", is_error=True)], mq_up=False
+        )
+    mq_folder = utils.get_vvmq_path()
+    if not mq_folder:
+        return StartupResult(
+            [LaunchMessage("MacroQuest path not found. Please check your configuration.", is_error=True)],
+            mq_up=False,
+        )
+    if running is None:
+        running = processes.running_executable_paths()
+
+    messages: list[LaunchMessage] = []
+    if utils.should_offer_mq_start(running):
+        try:
+            processes.run_executable(mq_folder, "MacroQuest.exe")
+            messages.append(LaunchMessage("MacroQuest started."))
+        except Exception as exc:
+            messages.append(LaunchMessage(f"Failed to start MacroQuest: {exc}", is_error=True))
+            return StartupResult(messages, mq_up=False)
+    else:
+        messages.append(LaunchMessage("MacroQuest is already running; not starting another."))
+
+    messages += launch_loadout(running)
+    return StartupResult(messages, mq_up=True)
+
+
+# ---- open: folders & files ---------------------------------------------------
 
 def open_target(o: Openable) -> str:
     """Open a registered folder or file."""

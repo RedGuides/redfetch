@@ -1567,8 +1567,20 @@ class Redfetch(App):
         clear_button.variant = "success"
         self.set_timer(3, lambda: setattr(clear_button, "variant", "default"))
 
+    STARTUP_GROUP = "startup_group"
+
     def run_target(self, runnable) -> None:
         """Launch a shortcuts runnable, notifying on success/failure."""
+        if runnable.startup:
+            # Cancelling a to_thread worker does not stop its thread.
+            if any(
+                w.group == self.STARTUP_GROUP and w.state in (WorkerState.PENDING, WorkerState.RUNNING)
+                for w in self.workers
+            ):
+                self.notify(f"{runnable.label} is already starting.")
+                return
+            self._startup_worker(runnable)
+            return
         try:
             shortcuts.run(runnable)
             self.notify(f"{runnable.executable} started successfully.")
@@ -1576,6 +1588,19 @@ class Redfetch(App):
             message = f"Failed to start {runnable.executable}: {exc}"
             print(message)
             self.notify(message, severity="error")
+
+    @work(group=STARTUP_GROUP)
+    async def _startup_worker(self, runnable) -> None:
+        try:
+            result = await asyncio.to_thread(runnable.startup)
+        except Exception as exc:
+            message = f"Failed to start {runnable.label}: {exc}"
+            print(message)
+            self.notify(message, severity="error", markup=False)
+            return
+        for message, is_error in result.messages:
+            print(message)
+            self.notify(message, severity="error" if is_error else "information", markup=False)
 
     def open_target(self, openable) -> None:
         """Open a shortcuts folder/file. Folders open visibly; files get a toast."""
@@ -1586,17 +1611,6 @@ class Redfetch(App):
             return
         if openable.filename is not None:
             self.notify(f"{openable.filename} opened{(' ' + detail) if detail else ''}.")
-
-    def run_command(self, command, cwd=None) -> None:
-        """Run a command and notify on success or failure."""
-        label = os.path.basename(utils._command_program(command)) or "post-update program"
-        try:
-            processes.run_command(command, cwd)
-            self.notify(f"{label} started successfully.")
-        except Exception as exc:
-            message = f"Failed to start {label}: {exc}"
-            print(message)
-            self.notify(message, severity="error")
 
     def handle_uninstall(self) -> None:
         """Handle the uninstall button press."""

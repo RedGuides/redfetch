@@ -11,6 +11,7 @@ from typing import Literal, Protocol
 
 from redfetch import config
 from redfetch import processes
+from redfetch import shortcuts
 from redfetch import utils
 from redfetch.sync_types import SyncOutcome
 
@@ -115,17 +116,8 @@ async def execute(pending: PendingOffer, surface: PostUpdateSurface) -> None:
 
 
 def _launch_loadout(surface: PostUpdateSurface, running: set[str] | None) -> None:
-    """Launch the opt-in loadout, skipping anything already running."""
-    to_run, skipped = utils.resolve_post_update_launch_filtered(config.settings.ENV, running)
-    for program in skipped:
-        surface.notify(f"{os.path.basename(program)} is already running; not starting another.")
-    for command, cwd in to_run:
-        try:
-            processes.run_command(command, cwd)
-        except Exception as exc:
-            # A bad custom command should not stop the remaining launch commands.
-            label = os.path.basename(utils._command_program(command)) or "post-update program"
-            surface.notify(f"Failed to start {label}: {exc}", error=True)
+    for message in shortcuts.launch_loadout(running):
+        surface.notify(message.text, error=message.is_error)
 
 
 async def _cold_start_consent(surface: PostUpdateSurface) -> bool:
