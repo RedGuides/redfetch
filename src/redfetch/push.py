@@ -1,15 +1,16 @@
 """Publish resource updates to RedGuides."""
 
-import os
 import asyncio
+from pathlib import Path
+
 import httpx
 import keepachangelog
 import typer
 from md2bbcode.main import process_readme
 
 from redfetch import api
-from redfetch.net import BASE_URL
 from redfetch import auth
+from redfetch.net import BASE_URL
 
 XF_API_URL = f'{BASE_URL}/api'
 URI_MESSAGE = f'{XF_API_URL}/resource-updates'
@@ -18,115 +19,177 @@ URI_RESOURCE_VERSIONS = f'{XF_API_URL}/resource-versions'
 MAX_MESSAGE_CHARS = 10_000
 
 
-def _get_api_headers_blocking() -> dict:
-    """Synchronous helper to obtain API headers from the async auth client."""
-    return asyncio.run(auth.get_api_headers())
+def handle_cli(
+    resource_id: int,
+    *,
+    description: str | Path | None = None,
+    version: str | None = None,
+    message: str | Path | None = None,
+    file: str | Path | None = None,
+    domain: str | None = None,
+) -> None:
+    """Publish the requested resource updates."""
+    if not any([description, version, message, file]):
+        print("At least one option (--description, --version, --message, or --file) must be specified.")
+        raise typer.Exit(code=1)
+
+    if message and not version:
+        print("The --message option requires --version to be specified.")
+        raise typer.Exit(code=1)
+
+    auth.initialize_keyring()
+    auth.authorize()
+
+    # Reuse one set of headers for every request.
+    headers, resource = asyncio.run(_fetch_headers_and_resource(resource_id))
+    resource_id = resource['resource_id']
+
+    if description:
+        publish_description(resource_id, description, headers, domain=domain)
+
+    if version and message:
+        publish_message(resource_id, version, message, headers, domain=domain)
+
+    if file:
+        publish_file(resource_id, file, headers, version=version)
 
 
-def update_resource_description(resource_id, new_description):
-    """Update resource description."""
+async def _fetch_headers_and_resource(resource_id: int) -> tuple[dict[str, str], dict]:
+    headers = await auth.get_api_headers()
+    resource = await api.get_resource_details(resource_id, headers)
+    return headers, resource
+
+
+def publish_description(
+    resource_id: int,
+    description_path: str | Path,
+    headers: dict[str, str],
+    domain: str | None = None,
+) -> None:
+    """Publish a description file."""
+    path = Path(description_path)
+    description = path.read_text(encoding="utf-8", errors="replace")
+    if path.suffix.lower() == ".md":
+        description = process_readme(description, domain=domain)
+
     url = f"{XF_API_URL}/resources/{resource_id}"
-    payload = {'description': new_description}
-    headers = _get_api_headers_blocking()
-    response = httpx.post(url, headers=headers, data=payload, timeout=30.0)
+    response = httpx.post(url, headers=headers, data={'description': description}, timeout=30.0)
     response.raise_for_status()
     print("Successfully updated the resource description.")
 
 
-def add_xf_message(resource_id, msg_title, message):
-    """Post a new resource update message."""
-    headers = _get_api_headers_blocking()
-    form_message = {
+def publish_message(
+    resource_id: int,
+    version: str,
+    message: str | Path,
+    headers: dict[str, str],
+    domain: str | None = None,
+) -> None:
+    """Publish a version message."""
+    text = generate_version_message(message, version, domain=domain)
+    if not text.strip():
+        print("Warning: No message content provided, skipping update post.")
+        return
+
+    form = {
         'resource_id': resource_id,
-        'title': msg_title,
-        'message': message
+        'title': version,
+        'message': text,
     }
-    response = httpx.post(URI_MESSAGE, headers=headers, data=form_message, timeout=30.0)
+    response = httpx.post(URI_MESSAGE, headers=headers, data=form, timeout=30.0)
     response.raise_for_status()
-    print(f"Response: {response.status_code}, {response.text}")
-    return response.json()
+    print(f"Successfully posted update '{version}' to resource {resource_id}.")
 
 
-def add_xf_attachment(resource_id, upfilename, version=None):
-    """Upload a file and attach it as a new resource version."""
-    headers = _get_api_headers_blocking()
-
-    # Prepare the data for getting an attachment key and uploading the file
-    data = {
-        "type": "resource_version",
-        "context[resource_id]": resource_id
-    }
-
+def publish_file(
+    resource_id: int,
+    file_path: str | Path,
+    headers: dict[str, str],
+    version: str | None = None,
+) -> None:
+    """Publish a release file."""
     try:
-        # Get an attachment key and also upload the file
-        with open(upfilename, "rb") as file:
-            files = {"attachment": (os.path.basename(upfilename), file, "application/octet-stream")}
-            response = httpx.post(URI_ATTACHMENT, headers=headers, data=data, files=files, timeout=60.0)
-            response.raise_for_status()
-            content = response.json()
-            attach_key = content.get("key")
-            if attach_key:
-                # Now associate the attachment(s) with the resource version
-                data_update = {
-                    "type": "resource_version",
-                    "resource_id": resource_id,
-                    "version_attachment_key": attach_key,
-                }
-                if version:
-                    data_update["version_string"] = version
-                response_update = httpx.post(URI_RESOURCE_VERSIONS, headers=headers, data=data_update, timeout=60.0)
-                response_update.raise_for_status()
-                print(f"Successfully added attachment for resource {resource_id}")
-            else:
-                print("[ERROR] No attachment key received from the server.")
-                raise RuntimeError("No attachment key received from the server.")
+        upload_form = {"type": "resource_version", "context[resource_id]": resource_id}
+        with open(file_path, "rb") as f:
+            files = {"attachment": (Path(file_path).name, f, "application/octet-stream")}
+            upload = httpx.post(URI_ATTACHMENT, headers=headers, data=upload_form, files=files, timeout=60.0)
+        upload.raise_for_status()
+
+        attach_key = upload.json().get("key")
+        if not attach_key:
+            print("[ERROR] No attachment key received from the server.")
+            raise RuntimeError("No attachment key received from the server.")
+
+        version_form = {
+            "type": "resource_version",
+            "resource_id": resource_id,
+            "version_attachment_key": attach_key,
+        }
+        if version:
+            version_form["version_string"] = version
+        response = httpx.post(URI_RESOURCE_VERSIONS, headers=headers, data=version_form, timeout=60.0)
+        response.raise_for_status()
+        print(f"Successfully added attachment for resource {resource_id}")
     except httpx.HTTPStatusError as e:
         print(f"HTTP Error: {e.response.status_code} - {e.response.text}")
         raise
     except FileNotFoundError:
-        print(f"Error: File '{upfilename}' not found.")
+        print(f"Error: File '{file_path}' not found.")
         raise
 
 
-def update_resource(resource_id, version_info, upfilename=None):
-    """Create a version update (message + optional attachment)."""
-    message = version_info.get('message', '')
-    if message.strip():
-        add_xf_message(resource_id, version_info['version_string'], message)
-    else:
-        print("Warning: No message content provided, skipping update post.")
+def generate_version_message(
+    message: str | Path,
+    version: str | None,
+    domain: str | None = None,
+) -> str:
+    """Build a version message from text or a file."""
+    if not message or not Path(message).is_file():
+        return _truncate_text(str(message))
 
-    if upfilename:
-        add_xf_attachment(resource_id, upfilename, version_info['version_string'])
+    message_path = Path(message)
 
+    if message_path.suffix.lower() != ".md":
+        return _truncate_text(message_path.read_text(encoding="utf-8", errors="replace"))
 
-def convert_markdown_to_bbcode(markdown_text, domain=None):
-    """Convert markdown text to BBCode."""
-    bbcode_output = process_readme(markdown_text, domain=domain)
-    return bbcode_output
+    changes = _try_parse_keepachangelog_dict(message_path)
+    if changes is not None:
+        try:
+            return _truncate_text(parse_changelog(message_path, version, domain=domain, changes=changes))
+        except ValueError as e:
+            print(f"Warning: {e}. Posting full file contents instead.")
 
-
-def _truncate_text(text: str, max_chars: int, suffix: str = "\n\n(truncated)") -> str:
-    """Truncate text to max_chars (including suffix), if needed."""
-    if not isinstance(text, str):
-        text = str(text)
-    if max_chars <= 0 or len(text) <= max_chars:
-        return text
-
-    suffix = suffix or ""
-    if len(suffix) >= max_chars:
-        return suffix[:max_chars]
-
-    allowed = max_chars - len(suffix)
-    return text[:allowed].rstrip() + suffix
+    markdown_text = message_path.read_text(encoding="utf-8", errors="replace")
+    return _truncate_text(process_readme(markdown_text, domain=domain))
 
 
-def _try_parse_keepachangelog_dict(changelog_path: str):
-    """
-    Attempt to parse a keep-a-changelog file.
+def parse_changelog(
+    changelog_path: str | Path,
+    version: str,
+    domain: str | None = None,
+    changes: dict[str, dict] | None = None,
+) -> str:
+    """Convert one changelog version to BBCode."""
+    if changes is None:
+        changes = keepachangelog.to_dict(changelog_path)
 
-    Returns a non-empty dict if it looks like a changelog; otherwise returns None.
-    """
+    version_key = version.removeprefix('v')
+    if version_key not in changes:
+        raise ValueError(f"Version {version} not found in {changelog_path}")
+
+    markdown_lines = []
+    for section, notes in changes[version_key].items():
+        if section == 'metadata':
+            continue
+        markdown_lines.append(f"### {section.capitalize()}")
+        markdown_lines.extend(f"- {note}" for note in notes)
+        markdown_lines.append("")
+
+    return process_readme("\n".join(markdown_lines), domain=domain)
+
+
+def _try_parse_keepachangelog_dict(changelog_path: str | Path) -> dict[str, dict] | None:
+    """Parse a keep-a-changelog file; None if it doesn't look like one."""
     try:
         changes = keepachangelog.to_dict(changelog_path)
     except Exception:
@@ -138,109 +201,14 @@ def _try_parse_keepachangelog_dict(changelog_path: str):
     return changes
 
 
-def parse_changelog(changelog_path, version, domain=None, changes=None):
-    """
-    Parses the changelog file and returns the changelog entry for the given version as BBCode.
-    """
-    # Use keepachangelog to parse the changelog file
-    if changes is None:
-        changes = keepachangelog.to_dict(changelog_path)
-    # Remove 'v' prefix if present
-    version_key = version.lstrip('v')
-    if version_key in changes:
-        # Flatten the change notes into a markdown string
-        version_data = changes[version_key]
-        markdown_lines = []
-        for section, notes in version_data.items():
-            if section != 'metadata':
-                markdown_lines.append(f"### {section.capitalize()}")
-                for note in notes:
-                    markdown_lines.append(f"- {note}")
-                markdown_lines.append("")  # Add a newline
-        markdown_message = "\n".join(markdown_lines)
-        # Convert markdown to BBCode
-        bbcode_message = convert_markdown_to_bbcode(markdown_message, domain=domain)
-        return bbcode_message
-    else:
-        raise ValueError(f"Version {version} not found in {changelog_path}")
+def _truncate_text(text: str, max_chars: int = MAX_MESSAGE_CHARS, suffix: str = "\n\n(truncated)") -> str:
+    """Truncate text to fit the message limit."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
 
+    suffix = suffix or ""
+    if len(suffix) >= max_chars:
+        return suffix[:max_chars]
 
-def generate_version_message(args):
-    """
-    Build a version message from `--message` (file path or literal string).
-
-    If `--message` is a keep-a-changelog file, extract the entry for `--version`; otherwise post the
-    file contents (markdown is converted to BBCode). Large messages are truncated.
-    """
-    max_chars = MAX_MESSAGE_CHARS
-
-    # message can be a literal string, or a path-like string to a real file.
-    if args.message and os.path.isfile(args.message):
-        message_path = args.message
-        ext = os.path.splitext(message_path)[1].lower()
-
-        if ext == ".md":
-            # If it looks like keep-a-changelog, post the entry for --version; otherwise post the file.
-            changes = _try_parse_keepachangelog_dict(message_path)
-            if changes is not None:
-                try:
-                    message = parse_changelog(message_path, args.version, domain=args.domain, changes=changes)
-                except ValueError as e:
-                    with open(message_path, "r", encoding="utf-8", errors="replace") as f:
-                        markdown_text = f.read()
-                    message = convert_markdown_to_bbcode(markdown_text, domain=args.domain)
-                    print(f"Warning: {e}. Posting full file contents instead.")
-            else:
-                with open(message_path, "r", encoding="utf-8", errors="replace") as f:
-                    markdown_text = f.read()
-                message = convert_markdown_to_bbcode(markdown_text, domain=args.domain)
-        else:
-            # Plain text (or other) file: post as-is.
-            with open(message_path, "r", encoding="utf-8", errors="replace") as f:
-                message = f.read()
-
-        return _truncate_text(message, max_chars)
-
-    # If --message is a regular string, use it directly (still guard against extreme length).
-    return _truncate_text(args.message, max_chars)
-
-
-def update_description(resource_id, description_path, domain=None):
-    """Read description, convert markdown to BBCode if needed, then update."""
-    with open(description_path, 'r') as f:
-        new_description = f.read()
-    if description_path.lower().endswith('.md'):
-        new_description = convert_markdown_to_bbcode(new_description, domain=domain)
-    update_resource_description(resource_id, new_description)
-
-
-def handle_cli(args):
-    """Handle the push subcommand using existing push helpers."""
-
-    if not any([args.description, args.version, args.message, args.file]):
-        print("At least one option (--description, --version, --message, or --file) must be specified.")
-        raise typer.Exit(code=1)
-
-    if args.message and not args.version:
-        print("The --message option requires --version to be specified.")
-        raise typer.Exit(code=1)
-
-    # Ensure the user is authorized
-    auth.initialize_keyring()
-    auth.authorize()
-
-    # Blocking call is fine here; push is a short-lived CLI operation.
-    headers = _get_api_headers_blocking()
-    resource = asyncio.run(api.get_resource_details(args.resource_id, headers))
-    resource_id = resource['resource_id']
-
-    if args.description:
-        update_description(resource_id, args.description, domain=args.domain)
-
-    if args.version and args.message:
-        message = generate_version_message(args)
-        version_info = {'version_string': args.version, 'message': message}
-        update_resource(resource_id, version_info, args.file)
-    elif args.file:
-        # Allow publishing a version with a file but no changelog message.
-        add_xf_attachment(resource_id, args.file, args.version)
+    allowed = max_chars - len(suffix)
+    return text[:allowed].rstrip() + suffix
