@@ -6,6 +6,7 @@ import hashlib
 import json
 import asyncio
 from dataclasses import dataclass
+from typing import NamedTuple
 import httpx
 import aiosqlite
 from hishel import AsyncSqliteStorage
@@ -76,6 +77,20 @@ async def fetch_manifest(db_path: str) -> dict:
         return response.json()
 
 
+class _LocalNavmeshFile(NamedTuple):
+    filename: str
+    file_size: int
+    mtime_ns: int
+
+
+class _HashRecord(NamedTuple):
+    """Row shape for the navmesh_files hash cache."""
+    filename: str
+    md5_hash: str
+    file_size: int
+    mtime_ns: int
+
+
 async def get_local_navmesh_state(db_path: str, navmesh_dir: str) -> dict[str, str]:
     """ Get hash map of local navmesh file """
     result: dict[str, str] = {}
@@ -84,12 +99,12 @@ async def get_local_navmesh_state(db_path: str, navmesh_dir: str) -> dict[str, s
         return result
 
     # Scan local files
-    local_files: list[tuple[str, int, int]] = []  # (filename, size, mtime_ns)
+    local_files: list[_LocalNavmeshFile] = []
     try:
         for entry in os.scandir(navmesh_dir):
             if entry.is_file() and entry.name.endswith(".navmesh"):
                 stat = entry.stat()
-                local_files.append((entry.name, stat.st_size, stat.st_mtime_ns))
+                local_files.append(_LocalNavmeshFile(entry.name, stat.st_size, stat.st_mtime_ns))
     except OSError:
         return result
 
@@ -97,30 +112,30 @@ async def get_local_navmesh_state(db_path: str, navmesh_dir: str) -> dict[str, s
         return result
 
     # Load cached hashes from DB
-    cached_records: dict[str, tuple[str, int, int]] = {}  # filename -> (hash, size, mtime_ns)
+    cached_records: dict[str, _HashRecord] = {}
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
         async with conn.execute(
             "SELECT filename, md5_hash, file_size, mtime_ns FROM navmesh_files"
         ) as cur:
             async for row in cur:
-                filename, md5_hash, file_size, mtime_ns = row
-                cached_records[filename] = (md5_hash, file_size, mtime_ns)
+                rec = _HashRecord(*row)
+                cached_records[rec.filename] = rec
 
     # Process each local file
-    to_update: list[tuple[str, str, int, int]] = []  # (filename, hash, size, mtime_ns)
+    to_update: list[_HashRecord] = []
 
-    for filename, size, mtime_ns in local_files:
-        cached = cached_records.get(filename)
-        if cached and cached[1] == size and cached[2] == mtime_ns:
+    for local in local_files:
+        cached = cached_records.get(local.filename)
+        if cached and cached.file_size == local.file_size and cached.mtime_ns == local.mtime_ns:
             # File unchanged, use cached hash
-            result[filename] = cached[0]
+            result[local.filename] = cached.md5_hash
         else:
             # File changed or new, re-hash it
-            file_path = os.path.join(navmesh_dir, filename)
+            file_path = os.path.join(navmesh_dir, local.filename)
             file_hash = _hash_file(file_path)
             if file_hash:
-                result[filename] = file_hash
-                to_update.append((filename, file_hash, size, mtime_ns))
+                result[local.filename] = file_hash
+                to_update.append(_HashRecord(local.filename, file_hash, local.file_size, local.mtime_ns))
 
     # Update DB with new/changed hashes
     if to_update:

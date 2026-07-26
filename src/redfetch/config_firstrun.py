@@ -211,87 +211,61 @@ def update_setting(doc: TOMLDocument, table_path: str, key_name: str, new_value,
     return True
 
 
-def first_run_setup():
-    default_config_dir = user_config_dir("redfetch", "RedGuides")
-    
-    # Check if running in a CI environment
-    if os.environ.get('CI') == 'true':
-        # Assume setup is complete and use the default config directory
-        config_dir = default_config_dir
-        os.makedirs(config_dir, exist_ok=True)
-        create_first_run_flag(default_config_dir, config_dir)
-        return config_dir
+def _read_env_file(env_file_path: str) -> str | None:
+    """Read REDFETCH_ENV from an env file."""
+    try:
+        with open(env_file_path, "r", encoding="utf-8") as env_file:
+            for line in env_file:
+                line = line.strip()
+                if line.startswith("REDFETCH_ENV="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
 
-    # Load existing settings early
-    settings_file = os.path.join(default_config_dir, "settings.local.toml")
-    doc = load_config(settings_file)
 
-    if not is_first_run(default_config_dir):
-        with open(os.path.join(default_config_dir, 'first_run_complete'), 'r') as f:
-            config_dir = f.read().strip()
-        
-        # Check for .env file
-        env_file_path = os.path.join(config_dir, '.env')
-        if os.path.exists(env_file_path):
-            # Effective env: .env value, then REDFETCH_ENV, then LIVE
-            env_from_file = None
-            try:
-                with open(env_file_path, "r", encoding="utf-8") as env_file:
-                    for line in env_file:
-                        line = line.strip()
-                        if line.startswith("REDFETCH_ENV="):
-                            env_from_file = line.split("=", 1)[1].strip()
-                            break
-            except OSError:
-                pass
+def _show_env_banner(config_dir: str) -> None:
+    """Show the active environment and configuration overrides."""
+    # The config-specific value takes precedence over the process environment.
+    env_from_file = _read_env_file(os.path.join(config_dir, ".env"))
+    effective_env = env_from_file or os.environ.get("REDFETCH_ENV") or "LIVE"
 
-            effective_env = env_from_file or os.environ.get("REDFETCH_ENV") or "LIVE"
+    notice_lines: list[str] = [
+        f"[bold yellow]Server type: [cyan]{effective_env}[/cyan][/bold yellow]",
+        f"Configuration directory: {config_dir}",
+    ]
 
-            # Banner always shows server/config dir, plus effective env overrides.
-            notice_lines: list[str] = [
-                f"[bold yellow]Server type: [cyan]{effective_env}[/cyan][/bold yellow]",
-                f"Configuration directory: {config_dir}",
-            ]
+    base_url_override = os.environ.get("REDFETCH_BASE_URL")
+    if base_url_override:
+        notice_lines.append(f"[bold red]REDFETCH_BASE_URL:[/bold red] {base_url_override}")
 
-            # Base URL override (show if explicitly set via env).
-            base_url_override = os.environ.get("REDFETCH_BASE_URL")
-            if base_url_override:
-                notice_lines.append(f"[bold red]REDFETCH_BASE_URL:[/bold red] {base_url_override}")
+    # API key authentication takes precedence over OAuth credentials.
+    if os.environ.get("REDGUIDES_API_KEY"):
+        notice_lines.append("[bold yellow]Auth:[/bold yellow] API key via REDGUIDES_API_KEY")
+        if os.environ.get("REDGUIDES_USER_ID"):
+            notice_lines.append("[bold yellow]Auth:[/bold yellow] REDGUIDES_USER_ID set via env")
+    else:
+        if os.environ.get("REDFETCH_OAUTH_CLIENT_ID"):
+            notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client ID set via env")
+        if os.environ.get("REDFETCH_OAUTH_CLIENT_SECRET"):
+            notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client secret set via env")
+        oauth_redirect_override = os.environ.get("REDFETCH_OAUTH_REDIRECT_URI")
+        if oauth_redirect_override:
+            notice_lines.append(f"[bold yellow]OAuth redirect:[/bold yellow] {oauth_redirect_override}")
 
-            # Auth overrides: API key always takes precedence over OAuth.
-            api_key_present = bool(os.environ.get("REDGUIDES_API_KEY"))
-            if api_key_present:
-                notice_lines.append("[bold yellow]Auth:[/bold yellow] API key via REDGUIDES_API_KEY")
-                # Only meaningful alongside API key (automation keys updating as other users).
-                if os.environ.get("REDGUIDES_USER_ID"):
-                    notice_lines.append("[bold yellow]Auth:[/bold yellow] REDGUIDES_USER_ID set via env")
-            else:
-                # Only surface OAuth env vars when API key isn't overriding them.
-                if os.environ.get("REDFETCH_OAUTH_CLIENT_ID"):
-                    notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client ID set via env")
-                if os.environ.get("REDFETCH_OAUTH_CLIENT_SECRET"):
-                    notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client secret set via env")
-                oauth_redirect_override = os.environ.get("REDFETCH_OAUTH_REDIRECT_URI")
-                if oauth_redirect_override:
-                    notice_lines.append(f"[bold yellow]OAuth redirect:[/bold yellow] {oauth_redirect_override}")
+    pypi_url_override = os.environ.get("REDFETCH_PYPI_URL")
+    if pypi_url_override:
+        notice_lines.append(f"[bold yellow]REDFETCH_PYPI_URL:[/bold yellow] {pypi_url_override}")
 
-            # PyPI URL override
-            pypi_url_override = os.environ.get("REDFETCH_PYPI_URL")
-            if pypi_url_override:
-                notice_lines.append(f"[bold yellow]REDFETCH_PYPI_URL:[/bold yellow] {pypi_url_override}")
+    # Explicit overrides bypass the normal banner cooldown.
+    has_env_overrides = len(notice_lines) > 2
+    if has_env_overrides or _banner_due(config_dir):
+        console.print(Panel("\n".join(notice_lines), expand=False))
+        _mark_banner_shown(config_dir)
 
-            # Env overrides always spam the status/config banner.
-            has_overrides = len(notice_lines) > 2
-            if has_overrides or _banner_due(config_dir):
-                console.print(Panel("\n".join(notice_lines), expand=False))
-                _mark_banner_shown(config_dir)
-            return config_dir
-        else:
-            console.print("[bold red]Environment file (.env) not found. Rerunning setup.[/bold red]")
 
-    # Add EQ detection before greeting
-    eq_path = find_everquest_uninstall_location()
-
+def _greet_wizards() -> None:
+    """Run the wizard greeting, exiting if the user declines."""
     castle_gate = (
         "[red]/ \\               / \\\n[/]"
         "[red]/   \\             /   \\\n[/]"
@@ -357,7 +331,35 @@ def first_run_setup():
         console.print("\n[bold red]The wizards shake their heads sadly, \"Your riddle eludes us. Perhaps you should go east.\"[/bold red]")
         Prompt.ask("\nPress Enter to continue")
         raise SystemExit(1)
-    
+
+
+def first_run_setup():
+    default_config_dir = user_config_dir("redfetch", "RedGuides")
+
+    # CI cannot complete the interactive setup.
+    if os.environ.get("CI") == "true":
+        config_dir = default_config_dir
+        os.makedirs(config_dir, exist_ok=True)
+        create_first_run_flag(default_config_dir, config_dir)
+        return config_dir
+
+    # Load existing settings early
+    settings_file = os.path.join(default_config_dir, "settings.local.toml")
+    doc = load_config(settings_file)
+
+    if not is_first_run(default_config_dir):
+        with open(os.path.join(default_config_dir, "first_run_complete"), "r") as f:
+            config_dir = f.read().strip()
+
+        if os.path.exists(os.path.join(config_dir, ".env")):
+            _show_env_banner(config_dir)
+            return config_dir
+        console.print("[bold red]Environment file (.env) not found. Rerunning setup.[/bold red]")
+
+    eq_path = find_everquest_uninstall_location()
+
+    _greet_wizards()
+
     config_dir = setup_directories()
     create_first_run_flag(default_config_dir, config_dir)
     console.print(Panel(f"[bold green]Configuration directory: {config_dir}[/bold green]", expand=False))

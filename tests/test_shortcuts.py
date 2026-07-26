@@ -5,7 +5,8 @@ import os
 import pytest
 from typer.testing import CliRunner
 
-from redfetch import shortcuts, processes, config, main
+from redfetch import shortcuts, processes, config, main, utils
+from redfetch.utils import FilteredLaunch, LaunchCommand
 
 windows_only = pytest.mark.skipif(os.name != "nt", reason="uses the Win32 profile API")
 
@@ -88,7 +89,7 @@ def test_vvmq_startup_hook_late_binds(monkeypatch):
 
 def test_launch_loadout_empty_when_nothing_configured(monkeypatch):
     monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered",
-                        lambda env=None, running=None: ([], []))
+                        lambda env=None, running=None: FilteredLaunch([], []))
     assert shortcuts.launch_loadout(frozenset()) == []
 
 
@@ -101,8 +102,9 @@ def test_launch_loadout_reports_launches_skips_and_failures_in_order(monkeypatch
     monkeypatch.setattr(shortcuts.processes, "run_command", _run)
     monkeypatch.setattr(
         shortcuts.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: (
-            [(["C:\\x\\EQBCS.exe"], "C:\\x"), ("bad --flag", None)], ["C:\\y\\MySEQ.exe"]
+        lambda env=None, running=None: FilteredLaunch(
+            [LaunchCommand(["C:\\x\\EQBCS.exe"], "C:\\x"), LaunchCommand("bad --flag")],
+            ["C:\\y\\MySEQ.exe"],
         ),
     )
     messages = shortcuts.launch_loadout(frozenset())
@@ -131,7 +133,7 @@ def vvmq_env(monkeypatch):
     )
     monkeypatch.setattr(
         shortcuts.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: ([], []),
+        lambda env=None, running=None: FilteredLaunch([], []),
     )
     return monkeypatch, calls
 
@@ -144,7 +146,9 @@ def test_start_vvmq_starts_mq_then_loadout(vvmq_env):
     monkeypatch, calls = vvmq_env
     monkeypatch.setattr(
         shortcuts.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: ([(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []),
+        lambda env=None, running=None: FilteredLaunch(
+            [LaunchCommand(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []
+        ),
     )
     result = _start()
     assert result.mq_up is True
@@ -159,7 +163,9 @@ def test_start_vvmq_skips_mq_when_running_but_still_launches_loadout(vvmq_env):
     monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start", lambda running=None: False)
     monkeypatch.setattr(
         shortcuts.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: ([(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []),
+        lambda env=None, running=None: FilteredLaunch(
+            [LaunchCommand(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []
+        ),
     )
     result = _start()
     assert result.mq_up is True
@@ -198,7 +204,7 @@ def test_start_vvmq_reports_already_running_companion(vvmq_env):
     monkeypatch, calls = vvmq_env
     monkeypatch.setattr(
         shortcuts.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: ([], ["C:\\y\\MySEQ.exe"]),
+        lambda env=None, running=None: FilteredLaunch([], ["C:\\y\\MySEQ.exe"]),
     )
     result = _start()
     assert result.mq_up is True
@@ -210,7 +216,9 @@ def test_start_vvmq_companion_failure_continues(vvmq_env):
     monkeypatch, calls = vvmq_env
     monkeypatch.setattr(
         shortcuts.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: ([("bad --flag", None), (["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []),
+        lambda env=None, running=None: FilteredLaunch(
+            [LaunchCommand("bad --flag"), LaunchCommand(["C:\\VanillaMQ\\EQBCS.exe"], "C:\\VanillaMQ")], []
+        ),
     )
 
     def _run(command, cwd=None):
@@ -226,6 +234,20 @@ def test_start_vvmq_companion_failure_continues(vvmq_env):
     assert any("Failed to start bad" in msg and err for msg, err in result.messages)
 
 
+def _spy_helpers(monkeypatch, seen):
+    """Patch the two helpers that receive ``running``, recording what they get."""
+    def _offer(running=None):
+        seen["offer"] = running
+        return True
+
+    def _resolve(env=None, running=None):
+        seen["resolve"] = running
+        return FilteredLaunch([], [])
+
+    monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start", _offer)
+    monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered", _resolve)
+
+
 def test_start_vvmq_scans_running_once_when_not_given(vvmq_env):
     monkeypatch, calls = vvmq_env
     scanned = frozenset({"scanned.exe"})
@@ -233,10 +255,7 @@ def test_start_vvmq_scans_running_once_when_not_given(vvmq_env):
     seen = {}
     monkeypatch.setattr(shortcuts.processes, "running_executable_paths",
                         lambda: scans.append(1) or scanned)
-    monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start",
-                        lambda running=None: seen.__setitem__("offer", running) or True)
-    monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered",
-                        lambda env=None, running=None: seen.__setitem__("resolve", running) or ([], []))
+    _spy_helpers(monkeypatch, seen)
 
     shortcuts.start_vvmq()
 
@@ -247,10 +266,7 @@ def test_start_vvmq_scans_running_once_when_not_given(vvmq_env):
 def test_start_vvmq_forwards_running_to_helpers(vvmq_env):
     monkeypatch, calls = vvmq_env
     seen = {}
-    monkeypatch.setattr(shortcuts.utils, "should_offer_mq_start",
-                        lambda running=None: seen.__setitem__("offer", running) or True)
-    monkeypatch.setattr(shortcuts.utils, "resolve_post_update_launch_filtered",
-                        lambda env=None, running=None: seen.__setitem__("resolve", running) or ([], []))
+    _spy_helpers(monkeypatch, seen)
     sentinel = frozenset({"given.exe"})
 
     shortcuts.start_vvmq(running=sentinel)
@@ -292,8 +308,12 @@ def test_start_vvmq_routes_companions_through_shared_loadout(vvmq_env):
     monkeypatch, calls = vvmq_env
     sentinel = shortcuts.LaunchMessage("sentinel companion")
     seen = {}
-    monkeypatch.setattr(shortcuts, "launch_loadout",
-                        lambda running=None: seen.__setitem__("running", running) or [sentinel])
+
+    def _loadout(running=None):
+        seen["running"] = running
+        return [sentinel]
+
+    monkeypatch.setattr(shortcuts, "launch_loadout", _loadout)
     result = _start(running=frozenset({"x"}))
 
     assert sentinel in result.messages

@@ -5,7 +5,10 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 # Local
@@ -172,10 +175,34 @@ def validate_file_in_path(path: str | None, filename: str) -> bool:
 # post-update launch
 #
 
+@dataclass(frozen=True, slots=True)
+class LaunchCommand:
+    """A resolved post-update launch."""
+    command: list[str] | str    # argv, or a Windows shell string for custom targets
+    cwd: str | None = None
+
+    @property
+    def program(self) -> str:
+        """The program (first token) of the command."""
+        return _command_program(self.command)
+
+
+@dataclass(frozen=True, slots=True)
+class FilteredLaunch:
+    """A launch plan split by what's already running."""
+    to_run: list[LaunchCommand]
+    skipped: list[str]          # absolute paths of programs already running
+
+
+class Preset(NamedTuple):
+    resolve_dir: Callable[[], str | None]
+    executable: str
+
+
 # Presets offered as "Also start post-update" toggles.
 POST_UPDATE_PRESETS = {
-    "eqbcs": (get_vvmq_path, "EQBCS.exe"),
-    "myseq": (get_myseq_path, "MySEQ.exe"),
+    "eqbcs": Preset(get_vvmq_path, "EQBCS.exe"),
+    "myseq": Preset(get_myseq_path, "MySEQ.exe"),
 }
 
 POST_UPDATE_PRESET_LABELS = {
@@ -226,10 +253,10 @@ def _command_program(command: list[str] | str) -> str:
 
 def resolve_post_update_launch(
     env: str | None = None,
-) -> list[tuple[list[str] | str, str | None]]:
-    """Resolve enabled targets for ``env`` to ``(command, cwd)`` pairs, skipping unresolvable ones."""
+) -> list[LaunchCommand]:
+    """Resolve enabled targets for ``env`` to launch commands, skipping unresolvable ones."""
     env = env or config.settings.ENV
-    resolved: list[tuple[list[str] | str, str | None]] = []
+    resolved: list[LaunchCommand] = []
     for target in get_post_update_targets(env):
         item = _resolve_launch_target(target, env)
         if item:
@@ -240,28 +267,33 @@ def resolve_post_update_launch(
 def resolve_post_update_launch_filtered(
     env: str | None = None,
     running: set[str] | None = None,
-) -> tuple[list[tuple[list[str] | str, str | None]], list[str]]:
+) -> FilteredLaunch:
+    """Split the launch plan for ``env`` by which programs are already running."""
     from redfetch import processes
 
     if running is None:
         running = processes.running_executable_paths()
-    to_run: list[tuple[list[str] | str, str | None]] = []
+    to_run: list[LaunchCommand] = []
     skipped: list[str] = []
-    for command, cwd in resolve_post_update_launch(env):
-        program = _command_program(command)
-        if program and os.path.isfile(program) and \
-                processes.is_executable_running(program, running):
+    for launch in resolve_post_update_launch(env):
+        program = launch.program
+        already_running = (
+            program
+            and os.path.isfile(program)
+            and processes.is_executable_running(program, running)
+        )
+        if already_running:
             skipped.append(program)
-            continue
-        to_run.append((command, cwd))
-    return to_run, skipped
+        else:
+            to_run.append(launch)
+    return FilteredLaunch(to_run, skipped)
 
 
 def _resolve_launch_target(
     target: str,
     env: str | None = None,
-) -> tuple[list[str] | str, str | None] | None:
-    """Resolve a single post-update ``target`` to a ``(command, cwd)`` pair."""
+) -> LaunchCommand | None:
+    """Resolve a single post-update ``target`` to a launch command."""
     env = env or config.settings.ENV
     cfg = config.settings.from_env(env).get("POST_UPDATE_LAUNCH", {})
 
@@ -286,8 +318,8 @@ def _resolve_launch_target(
                     command = (
                         "powershell -NoProfile -ExecutionPolicy Bypass -File " + command
                     )
-                return (command, None)
-            return (shlex.split(command, posix=True), None)
+                return LaunchCommand(command)
+            return LaunchCommand(shlex.split(command, posix=True))
 
         if not isinstance(command, (list, tuple)):
             raise TypeError("POST_UPDATE_LAUNCH command must be a string or list.")
@@ -297,14 +329,13 @@ def _resolve_launch_target(
             return None
         if is_ps1:
             argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", *argv]
-        return (argv, None)
+        return LaunchCommand(argv)
 
     preset = POST_UPDATE_PRESETS.get(target)
     if not preset:
         print(f"Unknown POST_UPDATE_LAUNCH target: {target}; skipping.")
         return None
-    resolver, exe = preset
-    folder = resolver()
-    if folder and validate_file_in_path(folder, exe):
-        return ([os.path.join(folder, exe)], folder)
+    folder = preset.resolve_dir()
+    if folder and validate_file_in_path(folder, preset.executable):
+        return LaunchCommand([os.path.join(folder, preset.executable)], folder)
     return None

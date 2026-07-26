@@ -120,10 +120,10 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         query = parse_qs(urlparse(self.path).query)
 
-        error = (query.get("error") or [None])[0]
-        error_description = (query.get("error_description") or [None])[0]
-        code = (query.get("code") or [None])[0]
-        state = (query.get("state") or [None])[0]
+        error = query.get("error", [None])[0]
+        error_description = query.get("error_description", [None])[0]
+        code = query.get("code", [None])[0]
+        state = query.get("state", [None])[0]
 
         # Some browsers will request /favicon.ico or similar first; ignore those.
         if not error and (not code or not state):

@@ -93,7 +93,7 @@ RUNNABLES: tuple[Runnable, ...] = (
     Runnable(
         "vvmq", "Very Vanilla MQ 🍦", "MacroQuest.exe", utils.get_vvmq_path,
         aliases=("mq", "macroquest"),
-        tooltip="Run MacroQuest, the legendary add-on platform for EverQuest, plus your post-update programs.",
+        tooltip="Run MacroQuest, the legendary add-on platform for EverQuest, plus any post-update selections.",
         startup=lambda: start_vvmq(),
     ),
     Runnable(
@@ -235,14 +235,14 @@ class StartupResult:
 
 def launch_loadout(running: set[str] | None = None) -> list[LaunchMessage]:
     """Start configured companion programs."""
-    to_run, skipped = utils.resolve_post_update_launch_filtered(running=running)
+    filtered = utils.resolve_post_update_launch_filtered(running=running)
     messages: list[LaunchMessage] = []
-    for program in skipped:
+    for program in filtered.skipped:
         messages.append(LaunchMessage(f"{os.path.basename(program)} is already running; not starting another."))
-    for command, cwd in to_run:
-        label = os.path.basename(utils._command_program(command)) or "post-update program"
+    for launch in filtered.to_run:
+        label = os.path.basename(launch.program) or "post-update program"
         try:
-            processes.run_command(command, cwd)
+            processes.run_command(launch.command, launch.cwd)
             messages.append(LaunchMessage(f"{label} started."))
         except Exception as exc:
             messages.append(LaunchMessage(f"Failed to start {label}: {exc}", is_error=True))

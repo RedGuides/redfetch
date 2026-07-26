@@ -8,6 +8,7 @@ import pytest
 
 from redfetch import main, post_update, processes, sync, utils
 from redfetch.sync_types import ExecutionResult, ExecutionResultItem, SyncOutcome
+from redfetch.utils import FilteredLaunch, LaunchCommand
 
 # for tests whose fake paths/case-folding only behave under ntpath (CI also runs on ubuntu)
 windows_paths = pytest.mark.skipif(sys.platform != "win32", reason="Windows path semantics")
@@ -336,7 +337,10 @@ def test_filter_skips_running_preset_keeps_idle(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         utils, "resolve_post_update_launch",
-        lambda env=None: [([str(eqbcs)], str(tmp_path)), ([str(myseq)], str(tmp_path))],
+        lambda env=None: [
+            LaunchCommand([str(eqbcs)], str(tmp_path)),
+            LaunchCommand([str(myseq)], str(tmp_path)),
+        ],
     )
     # EQBCS is already running; MySEQ is not.
     monkeypatch.setattr(
@@ -344,23 +348,23 @@ def test_filter_skips_running_preset_keeps_idle(monkeypatch, tmp_path):
         lambda: {os.path.normcase(os.path.normpath(str(eqbcs)))},
     )
 
-    to_run, skipped = utils.resolve_post_update_launch_filtered("LIVE")
-    assert to_run == [([str(myseq)], str(tmp_path))]
-    assert skipped == [str(eqbcs)]
+    filtered = utils.resolve_post_update_launch_filtered("LIVE")
+    assert filtered.to_run == [LaunchCommand([str(myseq)], str(tmp_path))]
+    assert filtered.skipped == [str(eqbcs)]
 
 
 def test_filter_always_runs_non_file_program(monkeypatch, tmp_path):
     # A custom powershell command: program token is "powershell", not a file on disk.
     custom = "powershell -NoProfile -File C:\\scripts\\go.ps1"
     monkeypatch.setattr(
-        utils, "resolve_post_update_launch", lambda env=None: [(custom, None)]
+        utils, "resolve_post_update_launch", lambda env=None: [LaunchCommand(custom)]
     )
     # Even if "powershell" happened to be a running exe name, a non-file program is never skipped.
     monkeypatch.setattr(processes, "running_executable_paths", lambda: set())
 
-    to_run, skipped = utils.resolve_post_update_launch_filtered("LIVE")
-    assert to_run == [(custom, None)]
-    assert skipped == []
+    filtered = utils.resolve_post_update_launch_filtered("LIVE")
+    assert filtered.to_run == [LaunchCommand(custom)]
+    assert filtered.skipped == []
 
 
 # --- vvmq_was_updated: resource-level "did we write MacroQuest.exe" --------------------
@@ -499,10 +503,11 @@ def exec_env(monkeypatch):
         post_update.processes, "run_command",
         lambda command, cwd=None: calls["commands"].append((command, cwd)) or True,
     )
-    monkeypatch.setattr(
-        post_update.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: calls["loadouts"].append(running) or ([], []),
-    )
+    def _resolve_loadout(env=None, running=None):
+        calls["loadouts"].append(running)
+        return FilteredLaunch([], [])
+
+    monkeypatch.setattr(post_update.utils, "resolve_post_update_launch_filtered", _resolve_loadout)
     return monkeypatch, calls
 
 
@@ -654,7 +659,9 @@ def test_execute_loadout_runs_commands_and_notifies_skips(exec_env):
     monkeypatch, calls = exec_env
     monkeypatch.setattr(
         post_update.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: ([(["C:\\x\\EQBCS.exe"], "C:\\x")], ["C:\\y\\MySEQ.exe"]),
+        lambda env=None, running=None: FilteredLaunch(
+            [LaunchCommand(["C:\\x\\EQBCS.exe"], "C:\\x")], ["C:\\y\\MySEQ.exe"]
+        ),
     )
     surface = FakeSurface(cold_choice="yes")
     _execute(surface, post_update.Decision.COLD_START)
@@ -695,8 +702,8 @@ def test_execute_loadout_failure_notifies_and_continues(exec_env):
     monkeypatch, calls = exec_env
     monkeypatch.setattr(
         post_update.utils, "resolve_post_update_launch_filtered",
-        lambda env=None, running=None: (
-            [("missing-tool --flag", None), (["C:\\x\\EQBCS.exe"], "C:\\x")], []
+        lambda env=None, running=None: FilteredLaunch(
+            [LaunchCommand("missing-tool --flag"), LaunchCommand(["C:\\x\\EQBCS.exe"], "C:\\x")], []
         ),
     )
 
