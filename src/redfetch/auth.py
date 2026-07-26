@@ -20,10 +20,10 @@ from urllib.parse import parse_qs, urlencode, urlparse
 # third-party
 import httpx
 import keyring  # for storing tokens (secrets only)
-from diskcache import Cache
 from keyring.errors import NoKeyringError
 
 # Local
+from redfetch import cache
 from redfetch import config
 from redfetch import net
 
@@ -55,59 +55,27 @@ def _get_setting(key: str, default=None):
 
 
 # ---------------------------------------------------------------------------
-# Disk cache for non-secret identity data (username, token_expiry)
+# Non-secret cached identity data
 # ---------------------------------------------------------------------------
-
-_disk_cache = None
-
-
-def _get_disk_cache_instance():
-    """Create a diskcache.Cache in the config directory."""
-    cache_dir = getattr(config, 'config_dir', None) or os.getenv('REDFETCH_CONFIG_DIR')
-    if not cache_dir:
-        cache_dir = os.getcwd()
-    return Cache(os.path.join(cache_dir, '.cache'))
-
-
-def _ensure_cache():
-    global _disk_cache
-    if _disk_cache is None:
-        _disk_cache = _get_disk_cache_instance()
-    return _disk_cache
-
 
 def set_username(username: str) -> None:
     """Store username in disk cache (non-sensitive public display name)."""
-    _ensure_cache().set('username', username)
+    cache.shared().set('username', username)
 
 
 def get_username_from_cache() -> Optional[str]:
     """Retrieve username from disk cache."""
-    return _ensure_cache().get('username')
+    return cache.shared().get('username')
 
 
 def set_token_expiry(expires_at: str) -> None:
     """Store OAuth token expiry timestamp in disk cache."""
-    _ensure_cache().set('expires_at', expires_at)
+    cache.shared().set('expires_at', expires_at)
 
 
 def get_token_expiry() -> Optional[str]:
     """Retrieve OAuth token expiry timestamp from disk cache."""
-    return _ensure_cache().get('expires_at')
-
-
-def clear_disk_cache():
-    """Clear all cached non-secret data."""
-    global _disk_cache
-    cache = _ensure_cache()
-    try:
-        cache.clear()
-    finally:
-        try:
-            cache.close()
-        except Exception:
-            pass
-        _disk_cache = None
+    return cache.shared().get('expires_at')
 
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
@@ -368,9 +336,7 @@ def get_cached_tokens():
 
 
 def logout():
-    """Clear stored credentials from keyring and all disk caches."""
-    from redfetch import meta
-
+    """Clear stored credentials."""
     keyring_credentials = ["access_token", "refresh_token", "api_key"]
     legacy_credentials = ["user_id", "username", "expires_at"]
 
@@ -380,12 +346,10 @@ def logout():
         except keyring.errors.PasswordDeleteError:
             pass
 
-    # isolated so a locked cache can't block the remaining clears
-    for clear in (clear_disk_cache, meta.clear_pypi_cache, net.clear_manifest_cache):
-        try:
-            clear()
-        except Exception:
-            pass
+    try:
+        cache.clear()
+    except Exception:
+        pass  # cache cleanup must not block logout
 
 
 # ---------------------------------------------------------------------------

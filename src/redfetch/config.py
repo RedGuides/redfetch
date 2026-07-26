@@ -67,6 +67,14 @@ env_file_path = None
 settings = None
 
 
+def cache_dir() -> str:
+    """Return the cache directory, creating it if needed."""
+    base = config_dir or os.environ.get("REDFETCH_CONFIG_DIR") or os.getcwd()
+    path = os.path.join(base, ".cache")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 def normalize_and_create_path(path):
     if not path:
         raise ValidationError("Path is not set.")

@@ -21,8 +21,8 @@ from rich.prompt import Confirm
 
 # Local
 from redfetch.__about__ import __version__
+from redfetch import cache
 from redfetch import config
-from diskcache import Cache
 
 
 def _get_pypi_url() -> str:
@@ -46,45 +46,21 @@ def get_current_version():
 
 _UPDATE_CACHE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
 
-_meta_cache = None
-
-
-def _get_meta_cache():
-    """Lazy-load disk-backed cache under the config directory."""
-    cache_dir = getattr(config, 'config_dir', None) or os.getenv('REDFETCH_CONFIG_DIR')
-    if not cache_dir:
-        cache_dir = os.getcwd()
-    api_cache_dir = os.path.join(cache_dir, '.cache')
-    os.makedirs(api_cache_dir, exist_ok=True)
-    return Cache(api_cache_dir)
-
 
 def clear_pypi_cache() -> None:
     """Clear cached PyPI metadata."""
-    global _meta_cache
-    if _meta_cache is None:
-        _meta_cache = _get_meta_cache()
-    try:
-        _meta_cache.clear()
-    finally:
-        try:
-            _meta_cache.close()
-        except Exception:
-            pass
-        _meta_cache = None
+    cache.shared().delete(f"pypi_latest:{PYPI_URL}")
 
 
 def fetch_latest_version_cached():
     """Fetch latest PyPI version with a 2-hour disk-backed cache."""
-    global _meta_cache
-    if _meta_cache is None:
-        _meta_cache = _get_meta_cache()
+    disk_cache = cache.shared()
     cache_key = f"pypi_latest:{PYPI_URL}"
-    cached = _meta_cache.get(cache_key)
+    cached = disk_cache.get(cache_key)
     if cached is not None:
         return cached
     latest = fetch_latest_version_from_pypi()
-    _meta_cache.set(cache_key, latest, expire=_UPDATE_CACHE_TTL_SECONDS)
+    disk_cache.set(cache_key, latest, expire=_UPDATE_CACHE_TTL_SECONDS)
     return latest
 
 

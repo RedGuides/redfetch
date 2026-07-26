@@ -9,7 +9,7 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
-from diskcache import Cache
+from redfetch import cache
 from redfetch import config
 
 BASE_URL = os.environ.get("REDFETCH_BASE_URL", "https://www.redguides.com/community")
@@ -18,33 +18,6 @@ MANIFEST_URL = f"{BASE_URL}/resources-manifest"
 
 # Manifest cache: 60 seconds TTL
 _MANIFEST_TTL_SECONDS = 60
-_manifest_disk_cache: Optional[Cache] = None  # Lazy-loaded disk cache
-
-
-def _get_manifest_disk_cache() -> Cache:
-    """Lazy-load disk cache after config is initialized."""
-    global _manifest_disk_cache
-    if _manifest_disk_cache is None:
-        cache_dir = getattr(config, "config_dir", None) or os.getenv("REDFETCH_CONFIG_DIR")
-        if not cache_dir:
-            cache_dir = os.getcwd()
-        api_cache_dir = os.path.join(cache_dir, ".cache")
-        _manifest_disk_cache = Cache(api_cache_dir)
-    return _manifest_disk_cache
-
-
-def clear_manifest_cache() -> None:
-    """Clear and close the disk manifest cache."""
-    global _manifest_disk_cache
-    if _manifest_disk_cache is not None:
-        try:
-            _manifest_disk_cache.clear()
-        finally:
-            try:
-                _manifest_disk_cache.close()
-            except Exception:
-                pass
-            _manifest_disk_cache = None
 
 
 @retry(
@@ -71,7 +44,7 @@ async def get_json(client: httpx.AsyncClient, url: str, params: Optional[Dict[st
 
 async def fetch_manifest_cached(client: httpx.AsyncClient) -> dict:
     """Fetch manifest with a 60-second cache."""
-    disk_cache = _get_manifest_disk_cache()
+    disk_cache = cache.shared()
     manifest = disk_cache.get("manifest")
     if manifest:
         return manifest

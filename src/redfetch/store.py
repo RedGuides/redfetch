@@ -25,17 +25,8 @@ from redfetch.sync_types import (
 SCHEMA_VERSION = 2
 
 
-def _get_cache_dir() -> str:
-    base = getattr(config, "config_dir", None) or os.getenv("REDFETCH_CONFIG_DIR")
-    if not base:
-        base = os.getcwd()
-    cache_dir = os.path.join(base, ".cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
 def get_db_path(db_name: str) -> str:
-    return os.path.join(_get_cache_dir(), db_name)
+    return os.path.join(config.cache_dir(), db_name)
 
 
 def _apply_connection_pragmas(conn) -> None:
@@ -437,7 +428,7 @@ def reset_download_dates(cursor) -> None:
     try:
         meta.clear_pypi_cache()
     except Exception:
-        pass
+        pass  # cache invalidation is best-effort
 
 
 def reset_download_dates_for_resources(db_name: str, resource_ids: Iterable[str]) -> bool:
@@ -462,7 +453,7 @@ async def reset_download_dates_async(db_path: str) -> None:
     try:
         meta.clear_pypi_cache()
     except Exception:
-        pass
+        pass  # cache invalidation is best-effort
 
 
 def list_resources(cursor) -> list[tuple[int, str]]:
