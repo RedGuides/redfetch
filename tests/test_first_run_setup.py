@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from redfetch.config_firstrun import first_run_setup, is_configured
+from redfetch.config_firstrun import create_first_run_flag, first_run_setup, is_configured
 
 @pytest.fixture
 def mock_user_config_dir():
@@ -102,6 +102,20 @@ def test_is_configured_true_when_flag_and_env_present(tmp_path):
     (config_dir / ".env").write_text("")
     (tmp_path / "first_run_complete").write_text(str(config_dir))
     assert is_configured(str(tmp_path)) is True
+
+
+def test_flag_round_trips_non_ascii_config_dir(tmp_path):
+    config_dir = tmp_path / "cönfig-Δir"
+    config_dir.mkdir()
+    (config_dir / ".env").write_text("")
+    create_first_run_flag(str(tmp_path), str(config_dir))
+    assert is_configured(str(tmp_path)) is True
+
+
+def test_is_configured_tolerates_legacy_locale_encoded_flag(tmp_path):
+    legacy_path = str(tmp_path / "café")
+    (tmp_path / "first_run_complete").write_bytes(legacy_path.encode("cp1252"))
+    assert is_configured(str(tmp_path)) is False
 
 
 def test_first_run_setup_ci_environment(

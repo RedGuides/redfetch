@@ -66,7 +66,7 @@ def get_rg_utility_paths():
         return {}
     
     try:
-        with open(settings_path, 'r') as f:
+        with open(settings_path, 'r', encoding="utf-8-sig") as f:
             settings = json.load(f)
             return {k: v for k, v in settings.items() 
                    if k in relevant_keys and v}  # Only return non-empty paths
@@ -160,7 +160,7 @@ def setup_directories():
 def create_first_run_flag(default_config_dir, chosen_config_dir):
     os.makedirs(default_config_dir, exist_ok=True)
     first_run_flag = os.path.join(default_config_dir, 'first_run_complete')
-    with open(first_run_flag, 'w') as f:
+    with open(first_run_flag, 'w', encoding="utf-8") as f:
         f.write(chosen_config_dir)
 
 
@@ -173,7 +173,8 @@ def is_configured(default_config_dir: str | None = None) -> bool:
     """Can initialize_config() proceed without interactive prompts?"""
     default_config_dir = default_config_dir or user_config_dir("redfetch", "RedGuides")
     try:
-        with open(os.path.join(default_config_dir, "first_run_complete")) as f:
+        # Older flags may use the system encoding.
+        with open(os.path.join(default_config_dir, "first_run_complete"), encoding="utf-8", errors="replace") as f:
             config_dir = f.read().strip()
     except OSError:
         return False
@@ -348,7 +349,7 @@ def first_run_setup():
     doc = load_config(settings_file)
 
     if not is_first_run(default_config_dir):
-        with open(os.path.join(default_config_dir, "first_run_complete"), "r") as f:
+        with open(os.path.join(default_config_dir, "first_run_complete"), "r", encoding="utf-8", errors="replace") as f:
             config_dir = f.read().strip()
 
         if os.path.exists(os.path.join(config_dir, ".env")):

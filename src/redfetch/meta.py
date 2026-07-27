@@ -291,6 +291,7 @@ def self_remove():
         # Create a batch script to handle the uninstallation
         batch_script = textwrap.dedent(f"""
         @echo off
+        chcp 65001 > nul
         timeout /t 2 > nul
         "{executable_path}" self remove
         if %errorlevel% neq 0 (
@@ -311,14 +312,15 @@ def self_remove():
         """).strip()
 
         batch_file_path = os.path.join(os.path.dirname(executable_path), "uninstall.bat")
-        with open(batch_file_path, 'w') as batch_file:
+        # Match the UTF-8 code page selected by the script.
+        with open(batch_file_path, 'w', encoding="utf-8") as batch_file:
             batch_file.write(batch_script)
 
         console.print(f"[debug]Batch script created at: {batch_file_path}[/debug]")
-    
-        # Run the batch script in a new console
+
+        # start's first quoted argument is the window title.
         subprocess.Popen(
-            ['cmd.exe', '/c', 'start', batch_file_path],
+            ['cmd.exe', '/c', 'start', '', batch_file_path],
             creationflags=subprocess.CREATE_NEW_CONSOLE
         )
 
@@ -521,7 +523,8 @@ def write_commands_to_file(commands, paths):
     # Only write and open the file on Windows
     if platform.system() == 'Windows':
         file_path = os.path.join(os.path.expanduser("~"), "redfetch_removal_commands.txt")
-        with open(file_path, 'w') as file:
+        # The BOM helps older Notepad versions detect UTF-8.
+        with open(file_path, 'w', encoding="utf-8-sig") as file:
             file.write("Manual Cleanup Instructions:\n")
             file.write("The following directories may contain files downloaded by redfetch. You can remove them manually if you want:\n")
             for path in sorted(paths):
