@@ -7,8 +7,8 @@ import subprocess
 import sys
 import time
 import webbrowser
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Sequence, Tuple
 
 import psutil
 
@@ -26,7 +26,7 @@ def _norm(path: str) -> str:
     return os.path.normcase(os.path.normpath(path))
 
 
-def _normalized_executables(folder_path: str) -> List[str]:
+def _normalized_executables(folder_path: str) -> list[str]:
     folder = os.path.normpath(os.path.abspath(folder_path))
     if not os.path.isdir(folder):
         return []
@@ -37,12 +37,12 @@ def _normalized_executables(folder_path: str) -> List[str]:
     ]
 
 
-def are_executables_running_in_folder(folder_path: str) -> List[Tuple[int, str]]:
+def are_executables_running_in_folder(folder_path: str) -> list[tuple[int, str]]:
     """Return running executables located within ``folder_path``."""
     if not IS_WINDOWS:
         return []
 
-    running: List[Tuple[int, str]] = []
+    running: list[tuple[int, str]] = []
     try:
         exec_paths = _normalized_executables(folder_path)
         if not exec_paths:
@@ -64,9 +64,9 @@ def are_executables_running_in_folder(folder_path: str) -> List[Tuple[int, str]]
         return running
 
 
-def get_eqgame_process_pids() -> List[int]:
+def get_eqgame_process_pids() -> list[int]:
     """PIDs of running eqgame.exe processes. Observed only, never touched."""
-    pids: List[int] = []
+    pids: list[int] = []
     for proc in psutil.process_iter(["pid", "name"]):
         try:
             name = proc.info.get("name")
@@ -113,13 +113,13 @@ def _spawned_loader_name(mq_folder: str) -> str | None:
     return None
 
 
-def _spawned_loader_processes(mq_folder: str) -> List[Tuple[int, str]]:
+def _spawned_loader_processes(mq_folder: str) -> list[tuple[int, str]]:
     """Running processes matching the recorded loader-copy name."""
     spawned = _spawned_loader_name(mq_folder)
     if not spawned:
         return []
     spawned = spawned.lower()
-    procs: List[Tuple[int, str]] = []
+    procs: list[tuple[int, str]] = []
     for proc in psutil.process_iter(["pid", "name", "exe"]):
         try:
             name = proc.info.get("name")
@@ -179,7 +179,7 @@ def _post_wm_close(pids: set[int]) -> set[int]:
     return posted
 
 
-def _terminate_processes(procs: List[Tuple[int, str]]) -> None:
+def _terminate_processes(procs: list[tuple[int, str]]) -> None:
     """Terminate *procs* — WM_CLOSE first for a clean shutdown, then force; one shared wait."""
     names: dict[int, str] = {}
     targets = []
@@ -215,7 +215,7 @@ def _terminate_processes(procs: List[Tuple[int, str]]) -> None:
         print(f"Process '{names[proc.pid]}' (PID {proc.pid}) is taking a while to exit.")
 
 
-def _excluding(procs: List[Tuple[int, str]], exclude: frozenset[str]) -> List[Tuple[int, str]]:
+def _excluding(procs: list[tuple[int, str]], exclude: frozenset[str]) -> list[tuple[int, str]]:
     return [(pid, path) for pid, path in procs if os.path.basename(path).lower() not in exclude]
 
 
@@ -228,7 +228,7 @@ def terminate_folder_processes(folder_path: str) -> None:
     _terminate_processes(are_executables_running_in_folder(folder_path))
 
 
-def _restart_leftovers(mq_folder: str) -> List[Tuple[int, str]]:
+def _restart_leftovers(mq_folder: str) -> list[tuple[int, str]]:
     """Processes that would block a clean relaunch: an in-folder loader copy or the
     RunFromTemp copy still alive."""
     return (
@@ -275,12 +275,12 @@ def run_executable(folder_path: str, executable_name: str, args: Sequence[str] |
     return True
 
 
-def run_command(command: "str | Sequence[str]", cwd: str | None = None) -> bool:
+def run_command(command: str | Sequence[str], cwd: str | None = None) -> bool:
     """Launch a command that may be resolved through PATH."""
     if isinstance(command, str):
         if not command.strip():
             raise ValueError("No command to run.")
-        popen_arg: "str | list[str]" = command
+        popen_arg: str | list[str] = command
         display = command
     else:
         argv = list(command)

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import webbrowser
-from typing import Any, Dict, Optional
+from typing import Any
 
 from aiohttp import web
 
@@ -32,7 +32,7 @@ async def cors_middleware(request: web.Request, handler):
     return resp
 
 
-async def _get_root_version_local_async(db_name: str, resource_id: str) -> Optional[int]:
+async def _get_root_version_local_async(db_name: str, resource_id: str) -> int | None:
     """Async helper to fetch root version_local for a tracked root install target."""
     db_path = store.get_db_path(db_name)
     try:
@@ -78,7 +78,7 @@ async def handle_download(request: web.Request) -> web.Response:
     headers = app["headers"]
 
     try:
-        payload: Dict[str, Any] = await request.json()
+        payload: dict[str, Any] = await request.json()
     except Exception:
         return web.json_response({"success": False, "message": "JSON body is required."}, status=400)
 
@@ -133,7 +133,7 @@ async def handle_reset_download_date(request: web.Request) -> web.Response:
     db_name = app["db_name"]
 
     try:
-        payload: Dict[str, Any] = await request.json()
+        payload: dict[str, Any] = await request.json()
     except Exception:
         return web.json_response({"success": False, "message": "JSON body is required."}, status=400)
 

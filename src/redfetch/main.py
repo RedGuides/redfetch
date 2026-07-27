@@ -4,7 +4,6 @@ import os
 from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 import asyncio
 
 # third-party imports
@@ -51,7 +50,7 @@ def parse_resource_id_or_fail(value: str) -> str:
         raise typer.BadParameter(str(exc)) from exc
 
 
-def _apply_server_override(server: "Optional[Env]" = None) -> None:
+def _apply_server_override(server: Env | None = None) -> None:
     if server is not None and server.value != config.settings.ENV:
         config.select_environment_in_memory(server.value)
 
@@ -65,7 +64,7 @@ def _initialize_auth():
     auth.authorize()
 
 
-def initialize_db_only(server: "Optional[Env]" = None):
+def initialize_db_only(server: Env | None = None):
     """Initialize configuration, auth, and local cache database (no network)."""
     _initialize_auth()
     _apply_server_override(server)
@@ -168,7 +167,7 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
 )
 def update_command(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download of all watched resources."),
-    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Update this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Update this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
     headless: bool = typer.Option(False, "--headless", hidden=True, help="MQ silent update: no prompts, no browser, no dialogs. writes update_status.json."),
 ):
     if headless:
@@ -189,7 +188,7 @@ def _exit_silently_on_error():
         raise typer.Exit(1)
 
 
-def _headless_update(server: "Optional[Env]", force: bool) -> None:
+def _headless_update(server: Env | None, force: bool) -> None:
     from redfetch.config_firstrun import is_configured
     from redfetch import update_status
 
@@ -284,7 +283,7 @@ async def _headless_update_async(db_path: str) -> SyncOutcome | None:
 def download(
     id_or_url: str = typer.Argument(..., metavar="ID_OR_URL", help="RedGuides resource ID or URL"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download by resetting this resource's download date."),
-    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Download from this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Download from this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     db_name, db_path = initialize_db_only(server=server)
     asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))
@@ -310,7 +309,7 @@ def _has_auth_credentials() -> bool:
     rich_help_panel="📦 Resource Management",
 )
 def check_command(
-    server: Optional[Env] = typer.Option(
+    server: Env | None = typer.Option(
         None, "--server", "-s", case_sensitive=False,
         help="Check this server's env for this run only, without persisting it ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
     ),
@@ -405,8 +404,8 @@ def _print_shortcut_table(entries, available) -> None:
     rich_help_panel="🔧 System & Utilities",
 )
 def run_shortcut_command(
-    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Shortcut to run: vvmq, eqbcs, eq, eqgame, etc."),
-    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Run for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    target: str | None = typer.Argument(None, metavar="SHORTCUT", help="Shortcut to run: vvmq, eqbcs, eq, eqgame, etc."),
+    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Run for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     config.initialize_config()
     _apply_server_override(server)
@@ -442,8 +441,8 @@ def run_shortcut_command(
     rich_help_panel="🔧 System & Utilities",
 )
 def open_shortcut_command(
-    target: Optional[str] = typer.Argument(None, metavar="SHORTCUT", help="Folder/file to open: downloads, vvmq, eq, etc."),
-    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Resolve paths for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    target: str | None = typer.Argument(None, metavar="SHORTCUT", help="Folder/file to open: downloads, vvmq, eq, etc."),
+    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Resolve paths for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     config.initialize_config()
     _apply_server_override(server)
@@ -523,7 +522,7 @@ def resources_reset_command():
 def config_command(
     path: str = typer.Argument(..., metavar="SETTING_PATH", help="Dot-separated setting path (e.g., SPECIAL_RESOURCES.1974.opt_in)"),
     value: str = typer.Argument(..., metavar="VALUE", help="New value for the setting"),
-    server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to apply the change in ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])"),
+    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to apply the change in ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])"),
 ):
     config.initialize_config()
     setting_path_list = path.split('.')
@@ -555,7 +554,7 @@ def server_command(
     help="Show the configuration for the current or specified server.",
     rich_help_panel="🍔 Configuration"
 )
-def config_show_command(server: Optional[Env] = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to show (defaults to current)")):
+def config_show_command(server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to show (defaults to current)")):
     from rich.panel import Panel
 
     config.initialize_config()
@@ -623,11 +622,11 @@ def config_show_command(server: Optional[Env] = typer.Option(None, "--server", "
 def publish_command(
     ctx: typer.Context,
     resource_id: int = typer.Argument(..., metavar="RESOURCE_ID", help="Existing RedGuides resource ID"),
-    description: Optional[Path] = typer.Option(None, "--description", "-d", metavar="README.md", help="Path to a description file (e.g. README.md) to become the overview description.", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
-    version: Optional[str] = typer.Option(None, "--version", "-v", help="New version string (e.g., v1.0.1)"),
-    message: Optional[Path] = typer.Option(None, "--message", "-m", metavar="CHANGELOG.md | MESSAGE", help="Path to [italic]CHANGELOG.md[/italic] (keep a changelog), other message file, or a direct message string.", exists=False),
-    file: Optional[Path] = typer.Option(None, "--file", "-f", metavar="FILE.zip", help="Path to your zipped release file", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
-    domain: Optional[str] = typer.Option(None, "--domain", help="If description or message is a .md file with relative URLs, resolve them to this domain (e.g., https://raw.githubusercontent.com/your/repo/main/)")
+    description: Path | None = typer.Option(None, "--description", "-d", metavar="README.md", help="Path to a description file (e.g. README.md) to become the overview description.", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+    version: str | None = typer.Option(None, "--version", "-v", help="New version string (e.g., v1.0.1)"),
+    message: Path | None = typer.Option(None, "--message", "-m", metavar="CHANGELOG.md | MESSAGE", help="Path to [italic]CHANGELOG.md[/italic] (keep a changelog), other message file, or a direct message string.", exists=False),
+    file: Path | None = typer.Option(None, "--file", "-f", metavar="FILE.zip", help="Path to your zipped release file", exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+    domain: str | None = typer.Option(None, "--domain", help="If description or message is a .md file with relative URLs, resolve them to this domain (e.g., https://raw.githubusercontent.com/your/repo/main/)")
 ):
     if ctx.info_name == "push":
         console.print("[yellow]Warning:[/yellow] 'push' is deprecated. Use 'redfetch publish' instead.")
@@ -692,7 +691,7 @@ def legacy_callback_factory(new_command: str, invoke_func=None, **invoke_kwargs)
     return callback
 
 
-def legacy_switch_env_callback(ctx: typer.Context, value: Optional[Env]):
+def legacy_switch_env_callback(ctx: typer.Context, value: Env | None):
     """Deprecated --switch-env handler that forwards to the 'server' subcommand."""
     if ctx.resilient_parsing or value is None:
         return value
@@ -705,7 +704,7 @@ def legacy_switch_env_callback(ctx: typer.Context, value: Optional[Env]):
 def root(
     ctx: typer.Context,
     # Legacy: --switch-env ENV
-    switch_env: Optional[Env] = typer.Option(
+    switch_env: Env | None = typer.Option(
         None, "--switch-env", is_eager=True, case_sensitive=False, hidden=True,
         callback=legacy_switch_env_callback,
         metavar="ENV", help="(Deprecated) Use 'server' subcommand instead.",

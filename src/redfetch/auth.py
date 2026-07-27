@@ -14,7 +14,6 @@ import time
 import webbrowser
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 
 # third-party
@@ -63,7 +62,7 @@ def set_username(username: str) -> None:
     cache.shared().set('username', username)
 
 
-def get_username_from_cache() -> Optional[str]:
+def get_username_from_cache() -> str | None:
     """Retrieve username from disk cache."""
     return cache.shared().get('username')
 
@@ -73,7 +72,7 @@ def set_token_expiry(expires_at: str) -> None:
     cache.shared().set('expires_at', expires_at)
 
 
-def get_token_expiry() -> Optional[str]:
+def get_token_expiry() -> str | None:
     """Retrieve OAuth token expiry timestamp from disk cache."""
     return cache.shared().get('expires_at')
 
@@ -356,7 +355,7 @@ def logout():
 # API identity resolution
 # ---------------------------------------------------------------------------
 
-async def fetch_me(client: httpx.AsyncClient) -> Optional[dict]:
+async def fetch_me(client: httpx.AsyncClient) -> dict | None:
     """Fetch current user info from /api/me."""
     url = f'{BASE_URL}/api/me'
     try:

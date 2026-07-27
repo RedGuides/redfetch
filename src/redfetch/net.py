@@ -1,7 +1,7 @@
 """Async HTTP utilities with retry and simple caching."""
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 import httpx
 from tenacity import (
     retry,
@@ -26,7 +26,7 @@ _MANIFEST_TTL_SECONDS = 60
     retry=retry_if_exception_type(httpx.RequestError),
     reraise=True,
 )
-async def get_json(client: httpx.AsyncClient, url: str, params: Optional[Dict[str, Any]] = None) -> dict:
+async def get_json(client: httpx.AsyncClient, url: str, params: dict[str, Any] | None = None) -> dict:
     """GET JSON with retry on transient network errors and one rejected OAuth token."""
     response = await client.get(url, params=params, timeout=10.0)
     if response.status_code == 401:
