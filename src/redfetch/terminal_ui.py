@@ -1886,10 +1886,8 @@ class Redfetch(App):
         db_name = f"{self.current_env}_resources.db"
         await asyncio.to_thread(store.initialize_db, db_name)
         headers = await auth.get_api_headers()
-        settings = config.settings.from_env(self.current_env)
         category_map = config.CATEGORY_MAP
         self._redguides_interface_worker(
-            settings,
             db_name,
             headers,
             category_map,
@@ -1897,9 +1895,9 @@ class Redfetch(App):
         return True
 
     @work(exclusive=True, group="interface_group")
-    async def _redguides_interface_worker(self, settings, db_name, headers, category_map) -> bool:
+    async def _redguides_interface_worker(self, db_name, headers, category_map) -> bool:
         from redfetch.listener import run_server_async
-        await run_server_async(settings, db_name, headers, category_map)
+        await run_server_async(db_name, headers, category_map)
         return True
     
     @work

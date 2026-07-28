@@ -33,7 +33,7 @@ def _extract_dir_from_value(raw_value: str) -> str:
     return s
 
 
-def _is_valid_eq_dir(path: str) -> bool:
+def is_valid_eq_dir(path: str) -> bool:
     if not path:
         return False
     eqgame_path = os.path.join(path, "eqgame.exe")
@@ -73,7 +73,7 @@ def find_everquest_uninstall_location():
                 val = _read_reg_value(hkcu, base_uninstall, valname)
                 if val:
                     candidate = _extract_dir_from_value(str(val))
-                    if _is_valid_eq_dir(candidate):
+                    if is_valid_eq_dir(candidate):
                         return candidate
     except OSError:
         pass
@@ -86,7 +86,7 @@ def find_everquest_uninstall_location():
                     val = _read_reg_value(hklm, base_uninstall, valname, view=view)
                     if val:
                         candidate = _extract_dir_from_value(str(val))
-                        if _is_valid_eq_dir(candidate):
+                        if is_valid_eq_dir(candidate):
                             return candidate
     except OSError:
         pass
@@ -115,7 +115,7 @@ def read_autologin_eq_path(mq_config_dir: str | None, server_type: str) -> str |
             con.close()
 
     candidate = row[0] if row else None
-    return os.path.normpath(candidate) if _is_valid_eq_dir(candidate) else None
+    return os.path.normpath(candidate) if is_valid_eq_dir(candidate) else None
 
 
 if __name__ == "__main__":

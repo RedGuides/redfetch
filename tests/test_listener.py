@@ -27,7 +27,7 @@ def test_special_resource_ids_follow_runtime_env(monkeypatch):
     monkeypatch.setattr(config, "settings", fake)
 
     async def fetch_ids():
-        app = await listener.create_app(settings=None, db_name="LIVE", headers={}, category_map={})
+        app = await listener.create_app(db_name="LIVE", headers={}, category_map={})
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/special-resource-ids")
             assert resp.status == 200

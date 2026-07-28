@@ -175,7 +175,6 @@ async def handle_special_resource_ids(request: web.Request) -> web.Response:
 
 
 async def create_app(
-    settings,
     db_name: str,
     headers: dict,
     category_map,
@@ -183,7 +182,6 @@ async def create_app(
     """Create the aiohttp application for the RedGuides interface."""
     app = web.Application(middlewares=[cors_middleware])
 
-    app["settings"] = settings
     app["db_name"] = db_name
     app["headers"] = headers
     app["category_map"] = category_map
@@ -199,13 +197,12 @@ async def create_app(
 
 
 async def run_server_async(
-    settings,
     db_name: str,
     headers: dict,
     category_map,
 ) -> None:
     """Run the interface server until cancelled."""
-    app = await create_app(settings, db_name, headers, category_map)
+    app = await create_app(db_name, headers, category_map)
 
     runner = web.AppRunner(app)
     await runner.setup()

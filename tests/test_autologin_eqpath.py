@@ -22,7 +22,7 @@ def _make_login_db(db_path: str, rows: list[tuple[str, str]]) -> None:
 
 @pytest.fixture
 def eq_dir(tmp_path):
-    """A folder that passes detecteq._is_valid_eq_dir (contains eqgame.exe)."""
+    """A folder that passes detecteq.is_valid_eq_dir (contains eqgame.exe)."""
     d = tmp_path / "EverQuest"
     d.mkdir()
     (d / "eqgame.exe").write_text("")

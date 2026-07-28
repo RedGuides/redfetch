@@ -105,21 +105,21 @@ def normalize_category_paths(data):
     return data
 
 
-def normalize_paths_in_dict(data, parent_key=None):
+def normalize_paths_in_dict(data):
     """Dynaconf validator for SPECIAL_RESOURCE paths."""
     if isinstance(data, dict):
         for key, value in data.items():
             if isinstance(value, dict):
-                normalize_paths_in_dict(value, parent_key=key)
+                normalize_paths_in_dict(value)
             elif isinstance(value, list):
-                for index, item in enumerate(value):
-                    normalize_paths_in_dict(item, parent_key=key)
+                for item in value:
+                    normalize_paths_in_dict(item)
             elif key in ['default_path', 'custom_path'] and isinstance(value, str):
                 normalized_value = os.path.normpath(value) if value else value
                 data[key] = normalized_value
     elif isinstance(data, list):
-        for index, item in enumerate(data):
-            normalize_paths_in_dict(item, parent_key=parent_key)
+        for item in data:
+            normalize_paths_in_dict(item)
     return data
 
 
@@ -190,7 +190,7 @@ def self_heal_eqpath() -> None:
         try:
             env_settings = settings.from_env(env)
             stored = env_settings.get("EQPATH")
-            if stored and detecteq._is_valid_eq_dir(stored):
+            if stored and detecteq.is_valid_eq_dir(stored):
                 continue  # heal only when blank or broken
 
             vvmq_id = utils.get_current_vvmq_id(env)

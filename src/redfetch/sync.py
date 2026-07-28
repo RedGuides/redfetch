@@ -290,7 +290,6 @@ async def run_sync(
                     try:
                         await navmesh.sync_navmeshes(
                             db_path,
-                            headers,
                             on_event=on_event,
                         )
                     except Exception as exc:

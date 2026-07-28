@@ -209,7 +209,6 @@ async def download_navmesh_file(
 
 async def sync_navmeshes(
     db_path: str,
-    headers: dict,
     on_event: SyncEventCallback | None = None,
 ) -> bool:
     """ Main entry point for navmesh sync."""

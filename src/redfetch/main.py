@@ -477,9 +477,7 @@ def web_command():
 async def web_command_async(db_name: str) -> None:
     headers = await auth.get_api_headers()
     from .listener import run_server_async
-    await run_server_async(
-        config.settings, db_name, headers, config.CATEGORY_MAP
-    )
+    await run_server_async(db_name, headers, config.CATEGORY_MAP)
 
 
 @app.command(

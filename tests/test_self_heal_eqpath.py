@@ -30,7 +30,7 @@ def _make_vvmq(tmp_path, name, server_type, eq_path):
 
 @pytest.fixture
 def eq_dir(tmp_path):
-    """A valid EverQuest folder (passes detecteq._is_valid_eq_dir)."""
+    """A valid EverQuest folder (passes detecteq.is_valid_eq_dir)."""
     d = tmp_path / "EverQuest"
     d.mkdir()
     (d / "eqgame.exe").write_text("")
