@@ -8,6 +8,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from typing import NoReturn
 
 # Third-party
 import httpx
@@ -76,11 +77,6 @@ def fetch_latest_version_from_pypi():
             return releases[-1]
     # Default: whatever PyPI reports as the latest stable version
     return data["info"]["version"]
-
-
-def get_executable_path():
-    executable_path = os.environ.get('PYAPP')
-    return executable_path
 
 
 def detect_installation_method():
@@ -249,7 +245,7 @@ def spawn_silent_self_update() -> bool:
         return False
 
 
-def self_update():
+def self_update() -> NoReturn:
     """Update with PYAPP."""
     try:
         console.print("[bold]Performing self-update...[/bold]")
@@ -259,7 +255,7 @@ def self_update():
         console.print(f"Current version: {current_version}")
         console.print(f"Latest version: {latest_version}")
 
-        executable_path = get_executable_path()
+        executable_path = os.getenv('PYAPP')
         update_command = [executable_path, 'self', 'update']
 
         # Start the update process in a new console and exit the current one
@@ -276,47 +272,21 @@ def self_update():
         sys.exit(1)
 
 
-def self_remove():
+def self_remove() -> None:
     """Remove with PYAPP."""
     try:
         console.print("[bold]Performing self-uninstall...[/bold]")
 
-        executable_path = get_executable_path()
-        console.print(f"[debug]Executable path: {executable_path}[/debug]")
-
+        executable_path = os.getenv('PYAPP')
         if not executable_path:
             console.print("[bold red]Executable path not found. Exiting self-remove.[/bold red]")
             return
 
-        # Create a batch script to handle the uninstallation
-        batch_script = textwrap.dedent(f"""
-        @echo off
-        chcp 65001 > nul
-        timeout /t 2 > nul
-        "{executable_path}" self remove
-        if %errorlevel% neq 0 (
-            echo Uninstallation failed. Press any key to exit.
-            pause > nul
-            exit /b 1
-        )
-        echo Uninstallation successful. Cleaning up...
-        del "{executable_path}"
-        if exist "{executable_path}" (
-            echo Failed to delete the executable. You may need to delete it manually.
-        ) else (
-            echo Executable deleted successfully.
-        )
-        echo Cleanup complete. Press any key to exit.
-        pause > nul
-        (goto) 2>nul & del "%~f0"
-        """).strip()
-
-        batch_file_path = os.path.join(os.path.dirname(executable_path), "uninstall.bat")
+        batch_file_path = Path(executable_path).with_name("uninstall.bat")
         # Match the UTF-8 code page selected by the script.
-        with open(batch_file_path, 'w', encoding="utf-8") as batch_file:
-            batch_file.write(batch_script)
-
-        console.print(f"[debug]Batch script created at: {batch_file_path}[/debug]")
+        batch_file_path.write_text(
+            _uninstall_batch_script(executable_path, os.getpid()), encoding="utf-8"
+        )
 
         # start's first quoted argument is the window title.
         subprocess.Popen(
@@ -324,7 +294,6 @@ def self_remove():
             creationflags=subprocess.CREATE_NEW_CONSOLE
         )
 
-        # Exit the current process to allow the uninstall to proceed
         sys.exit(0)
 
     except Exception as e:
@@ -333,7 +302,54 @@ def self_remove():
         sys.exit(1)
 
 
-def uninstall():
+def _uninstall_batch_script(executable_path: str, parent_pid: int) -> str:
+    exe = executable_path.replace("%", "%%")  # Escape batch variable expansion.
+    return textwrap.dedent(f"""
+        @echo off
+        chcp 65001 > nul
+        echo Waiting for redfetch to close...
+
+        set /a waited=0
+        :wait_for_parent
+        tasklist /fi "PID eq {parent_pid}" 2>nul | find "{parent_pid}" > nul || goto parent_gone
+        set /a waited+=1
+        if %waited% geq 30 goto parent_gone
+        timeout /t 1 > nul
+        goto wait_for_parent
+
+        :parent_gone
+        "{exe}" self remove
+        if %errorlevel% neq 0 (
+            echo Uninstallation failed.
+            goto finish
+        )
+        echo Uninstallation successful. Cleaning up...
+
+        rem Antivirus can hold the exe briefly after it exits.
+        set /a tries=0
+        :delete_exe
+        del /f "{exe}" 2>nul
+        if not exist "{exe}" (
+            echo Executable deleted successfully.
+            goto finish
+        )
+        set /a tries+=1
+        if %tries% geq 5 (
+            echo Failed to delete the executable. You may need to delete it manually.
+            goto finish
+        )
+        timeout /t 1 > nul
+        goto delete_exe
+
+        :finish
+        echo Press any key to exit.
+        pause > nul
+        rem (goto) with no label kills the parser so the script can delete itself.
+        (goto) 2>nul & del "%~f0"
+        """).strip()
+
+
+def uninstall() -> NoReturn:
     """Guide the user through the uninstallation process."""
     from .auth import logout
 
@@ -345,201 +361,172 @@ def uninstall():
     console.print("Logged out successfully.")
 
     config.remove_breadcrumb()
+    _remove_desktop_shortcut()
 
-    if sys.platform == "win32":
-        from . import desktop_shortcut
-        try:
-            if desktop_shortcut.get_shortcut_path().exists():
-                desktop_shortcut.remove_shortcut()
-                console.print("Desktop shortcut removed.")
-        except Exception as e:
-            console.print(f"[yellow]Could not remove the desktop shortcut: {e}[/yellow]")
-
-    # Get executable path and installation method
-    executable_path = get_executable_path()
-    install_method = detect_installation_method()
-
-    # Inform the user of directories that may contain data
     console.print("\n[bold]Manual Cleanup Instructions:[/bold]\n")
 
-    environments = ['DEFAULT', 'LIVE', 'TEST', 'EMU']  # List of environments to check
-    printed_paths = set()  # To avoid duplicates
-    existing_paths = set()  # Collect existing paths
+    config_dir = os.environ.get('REDFETCH_CONFIG_DIR')
+    if config_dir:
+        _delete_config_files(Path(config_dir))
 
-    def should_print_path(path):
-        """Determine if the path should be printed, avoiding nested paths."""
-        path = os.path.abspath(path)
-        for printed_path in printed_paths:
-            try:
-                if os.path.commonpath([path, printed_path]) == printed_path:
-                    return False
-            except ValueError:
-                # Paths on different drives; can't have a common path
-                continue
-        return True
-
-    for env in environments:
-        env_settings = config.settings.from_env(env)
-
-        # Get download folder
-        download_folder = env_settings.get('DOWNLOAD_FOLDER')
-        if download_folder and os.path.exists(download_folder):
-            download_folder = os.path.normpath(download_folder)
-            if should_print_path(download_folder):
-                existing_paths.add(download_folder)
-                printed_paths.add(download_folder)
-
-        # Get EQPath
-        eq_path = env_settings.get('EQPATH')
-        if eq_path:
-            eq_path = os.path.normpath(os.path.join(eq_path, "maps"))
-            if os.path.exists(eq_path) and should_print_path(eq_path):
-                existing_paths.add(eq_path)
-                printed_paths.add(eq_path)
-
-        # Special resources
-        special_resources = env_settings.get('SPECIAL_RESOURCES', {})
-        for resource_id, resource_info in special_resources.items():
-            # Get paths from special resources
-            custom_path = resource_info.get('custom_path', '')
-            default_path = resource_info.get('default_path', '')
-
-            paths = set()
-
-            if custom_path:
-                paths.add(os.path.normpath(custom_path))
-            if default_path and download_folder:
-                paths.add(os.path.normpath(os.path.join(download_folder, default_path)))
-
-            for path in paths:
-                if os.path.exists(path) and should_print_path(path):
-                    existing_paths.add(path)
-                    printed_paths.add(path)
-
-    # Also inform about the configuration directory
-    config_dir = os.environ.get('REDFETCH_CONFIG_DIR', '')
-    if config_dir and os.path.exists(config_dir):
-        # Delete configuration files
-        files_to_delete = [
-            os.path.join(config_dir, '.env'),
-            os.path.join(config_dir, 'settings.local.toml')
-        ]
-        
-        # Add any .db files from config root (legacy location)
-        db_files = [f for f in os.listdir(config_dir) if f.endswith('.db')]
-        files_to_delete.extend([os.path.join(config_dir, f) for f in db_files])
-        
-        for file_path in files_to_delete:
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except Exception as e:
-                    console.print(f"[red]Failed to delete {file_path}: {e}[/red]")
-        
-        # Delete the entire .cache directory
-        cache_dir = os.path.join(config_dir, '.cache')
-        if os.path.isdir(cache_dir):
-            try:
-                shutil.rmtree(cache_dir)
-            except Exception as e:
-                console.print(f"[red]Failed to delete cache directory: {e}[/red]")
-                # Provide extra context for common Windows multi-user / shared-dir scenarios
-                winerror = getattr(e, "winerror", None)
-                if os.name == "nt" and winerror == 32:
-                    console.print(
-                        "[yellow]Windows reports that the cache is in use by another process. "
-                        "This often happens when another redfetch instance is still running, "
-                        "or when multiple Windows user accounts share the same redfetch folder "
-                        "(for example under C:\\Users\\Public\\redfetch).[/yellow]"
-                    )
-        
-        if should_print_path(config_dir):
-            existing_paths.add(config_dir)
-            printed_paths.add(config_dir)
-
-    if existing_paths:
+    leftover_dirs = _collect_leftover_dirs()
+    if leftover_dirs:
         console.print("The following directories may contain files downloaded by redfetch:")
-        for path in sorted(existing_paths):
+        for path in sorted(leftover_dirs):
             console.print(f" - [cyan]{path}[/cyan]")
-
-        # Generate OS-specific commands to remove the directories
-        commands = generate_removal_commands(existing_paths)
-        write_commands_to_file(commands, existing_paths)
+        commands = generate_removal_commands(leftover_dirs)
+        write_commands_to_file(commands, leftover_dirs)
     else:
         console.print("[green]No existing directories found that need manual cleanup.[/green]\n")
 
-    if executable_path:
-        # Ask the user if they want to proceed with self-uninstall
+    if os.getenv('PYAPP'):
         if Confirm.ask("Would you like to uninstall redfetch's little python environment?"):
-            # Now, perform self-remove
             self_remove()
         else:
             console.print("[yellow]Uninstallation canceled.[/yellow]")
-            sys.exit(0)
     else:
-        # If executable_path is not set, guide the user to uninstall via pip or pipx
-        console.print("\n[bold]To uninstall redfetch, please run the following command:[/bold]")
-        if install_method == 'pipx':
-            console.print("  [cyan]pipx uninstall redfetch[/cyan]")
-        elif install_method == 'uv':
-            console.print("  [cyan]uv tool uninstall redfetch[/cyan]")
-        else:
-            console.print("  [cyan]pip uninstall redfetch[/cyan]")
-        # Optionally, exit the program
-        sys.exit(0)
+        _print_package_uninstall_hint()
+    sys.exit(0)
 
 
-def generate_removal_commands(paths):
+def _remove_desktop_shortcut() -> None:
+    if sys.platform != "win32":
+        return
+    from . import desktop_shortcut
+
+    try:
+        if desktop_shortcut.get_shortcut_path().exists():
+            desktop_shortcut.remove_shortcut()
+            console.print("Desktop shortcut removed.")
+    except Exception as e:
+        console.print(f"[yellow]Could not remove the desktop shortcut: {e}[/yellow]")
+
+
+def _delete_config_files(config_dir: Path) -> None:
+    files_to_delete = [config_dir / '.env', config_dir / 'settings.local.toml']
+    files_to_delete.extend(config_dir.glob('*.db'))
+
+    for file_path in files_to_delete:
+        try:
+            file_path.unlink(missing_ok=True)
+        except Exception as e:
+            console.print(f"[red]Failed to delete {file_path}: {e}[/red]")
+
+    cache_dir = config_dir / '.cache'
+    if cache_dir.is_dir():
+        try:
+            shutil.rmtree(cache_dir)
+        except Exception as e:
+            console.print(f"[red]Failed to delete cache directory: {e}[/red]")
+            # Provide extra context for common Windows multi-user / shared-dir scenarios
+            if os.name == "nt" and getattr(e, "winerror", None) == 32:
+                console.print(
+                    "[yellow]Windows reports that the cache is in use by another process. "
+                    "This often happens when another redfetch instance is still running, "
+                    "or when multiple Windows user accounts share the same redfetch folder "
+                    "(for example under C:\\Users\\Public\\redfetch).[/yellow]"
+                )
+
+
+def _collect_leftover_dirs() -> set[Path]:
+    """Collect existing directories, excluding those nested in another."""
+    candidates: set[Path] = set()
+
+    for env in ('DEFAULT', 'LIVE', 'TEST', 'EMU'):
+        env_settings = config.settings.from_env(env)
+
+        download_folder = env_settings.get('DOWNLOAD_FOLDER')
+        if download_folder:
+            candidates.add(_absolute_path(download_folder))
+
+        eq_path = env_settings.get('EQPATH')
+        if eq_path:
+            candidates.add(_absolute_path(eq_path) / "maps")
+
+        for resource in env_settings.get('SPECIAL_RESOURCES', {}).values():
+            custom_path = resource.get('custom_path')
+            if custom_path:
+                candidates.add(_absolute_path(custom_path))
+            default_path = resource.get('default_path')
+            if default_path and download_folder:
+                candidates.add(_absolute_path(os.path.join(download_folder, default_path)))
+
+    config_dir = os.environ.get('REDFETCH_CONFIG_DIR')
+    if config_dir:
+        candidates.add(_absolute_path(config_dir))
+
+    return _prune_nested({path for path in candidates if path.exists()})
+
+
+def _absolute_path(raw: str) -> Path:
+    return Path(os.path.abspath(raw))
+
+
+def _prune_nested(paths: set[Path]) -> set[Path]:
+    return {
+        path
+        for path in paths
+        if not any(path != other and path.is_relative_to(other) for other in paths)
+    }
+
+
+def generate_removal_commands(paths: set[Path]) -> list[str]:
     """Generate OS-specific commands to remove the given directories."""
-    def deepest_first(path: str) -> tuple[int, str]:
-        depth = path.replace("\\", "/").rstrip("/").count("/")
-        return (-depth, path.casefold())
+    def deepest_first(path: Path) -> tuple[int, str]:
+        return (-len(path.parts), str(path).casefold())
 
-    system = platform.system()
-    if system == 'Windows':
-        # Generate PowerShell commands
+    ordered = sorted(paths, key=deepest_first)
+    if platform.system() == 'Windows':
         console.print("[bold]These directories may be removed manually after you make sure there's nothing you need from them, you can do so by running the following PowerShell commands:[/bold]\n")
         commands = []
-        for path in sorted(paths, key=deepest_first):
-            escaped_path = path.replace("'", "''")
-            command = f"Remove-Item -LiteralPath '{escaped_path}' -Recurse -Force"
-            commands.append(command)
-            console.print(f"  {command}")
+        for path in ordered:
+            escaped_path = str(path).replace("'", "''")
+            commands.append(f"Remove-Item -LiteralPath '{escaped_path}' -Recurse -Force")
     else:
-        # Assuming Unix-like system
         console.print("[bold]You can remove these directories by running the following commands in your terminal:[/bold]\n")
         commands = []
-        for path in sorted(paths, key=deepest_first):
-            escaped_path = path.replace("'", "'\\''")
-            command = f"rm -rf '{escaped_path}'"
-            commands.append(command)
-            console.print(f"  {command}")
+        for path in ordered:
+            escaped_path = str(path).replace("'", "'\\''")
+            commands.append(f"rm -rf '{escaped_path}'")
+
+    for command in commands:
+        console.print(f"  {command}")
     console.print("\n[bold yellow]These directories must be removed manually.[/bold yellow]")
     return commands
 
 
-def write_commands_to_file(commands, paths):
+def write_commands_to_file(commands: list[str], paths: set[Path]) -> None:
     """Write the removal commands and additional information to a text file and open it on Windows."""
-    # Only write and open the file on Windows
-    if platform.system() == 'Windows':
-        file_path = os.path.join(os.path.expanduser("~"), "redfetch_removal_commands.txt")
-        # The BOM helps older Notepad versions detect UTF-8.
-        with open(file_path, 'w', encoding="utf-8-sig") as file:
-            file.write("Manual Cleanup Instructions:\n")
-            file.write("The following directories may contain files downloaded by redfetch. You can remove them manually if you want:\n")
-            for path in sorted(paths):
-                file.write(f" - {path}\n")
-            file.write("\nMake sure there's nothing you want in them. When ready to delete, you can use:\n\n")
-            
-            for command in commands:
-                file.write(command + '\n')
-        
-        # Automatically open the file with the default text editor
-        try:
-            os.startfile(file_path)
-        except Exception as e:
-            console.print(f"[red]Failed to open the file: {e}[/red]")
-            console.print(f"Please open the file manually: [cyan]{file_path}[/cyan]")
-    else:
-        # On non-Windows systems, the important information is already printed to the console
+    if platform.system() != 'Windows':
         console.print("[yellow]After that, you can remove the redfetch package.[/yellow]")
+        return
+
+    lines = [
+        "Manual Cleanup Instructions:",
+        "The following directories may contain files downloaded by redfetch. You can remove them manually if you want:",
+        *(f" - {path}" for path in sorted(paths)),
+        "",
+        "Make sure there's nothing you want in them. When ready to delete, you can use:",
+        "",
+        *commands,
+    ]
+    file_path = Path.home() / "redfetch_removal_commands.txt"
+    # The BOM helps older Notepad versions detect UTF-8.
+    file_path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+
+    try:
+        os.startfile(file_path)
+    except Exception as e:
+        console.print(f"[red]Failed to open the file: {e}[/red]")
+        console.print(f"Please open the file manually: [cyan]{file_path}[/cyan]")
+
+
+def _print_package_uninstall_hint() -> None:
+    commands = {
+        'pipx': 'pipx uninstall redfetch',
+        'uv': 'uv tool uninstall redfetch',
+        'pip': 'pip uninstall redfetch',
+    }
+    command = commands.get(detect_installation_method(), commands['pip'])
+    console.print("\n[bold]To uninstall redfetch, please run the following command:[/bold]")
+    console.print(f"  [cyan]{command}[/cyan]")
