@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 import json
 import os
 import sqlite3
@@ -39,20 +40,21 @@ def _apply_connection_pragmas(conn) -> None:
         pass
 
 
-def get_db_connection(db_name: str):
+@contextmanager
+def get_db_connection(db_name: str) -> Iterator[sqlite3.Connection]:
+    """Yield an autocommit connection, closed on exit."""
     db_path = get_db_path(db_name)
     conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False, isolation_level=None)
     _apply_connection_pragmas(conn)
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def initialize_db(db_name: str):
-    db_path = get_db_path(db_name)
-    with sqlite3.connect(db_path, timeout=30.0) as conn:
-        _apply_connection_pragmas(conn)
-        cursor = conn.cursor()
-        initialize_schema(cursor)
-        conn.commit()
+    with get_db_connection(db_name) as conn:
+        initialize_schema(conn.cursor())
 
 
 def _ensure_metadata(cursor) -> None:
