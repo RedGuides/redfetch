@@ -663,8 +663,8 @@ def uninstall_command():
 )
 def auth_logout():
     config.initialize_config()
-    API_KEY = os.environ.get('REDGUIDES_API_KEY')
-    if not API_KEY:
+    api_key = os.environ.get('REDGUIDES_API_KEY')
+    if not api_key:
         auth.initialize_keyring()
         auth.logout()
         console.print("Logged out successfully.")

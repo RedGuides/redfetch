@@ -473,8 +473,7 @@ def is_protected(filename, target_path, protected_files, protected_files_lower):
     filename_lower = filename.lower()
     if filename_lower in protected_files_lower and os.path.exists(target_path):
         # Retrieve the original filename case for message consistency
-        protected_list = [f for f in protected_files if f.lower() == filename_lower]
-        original_filename = protected_list[0] if protected_list else filename
+        original_filename = next((f for f in protected_files if f.lower() == filename_lower), filename)
         print(f"Protected {original_filename}, skipping extraction.")
         return True
     return False

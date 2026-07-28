@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sqlite3
 import webbrowser
 from typing import Any
 
@@ -37,7 +38,7 @@ async def _get_root_version_local_async(db_name: str, resource_id: str) -> int |
     db_path = store.get_db_path(db_name)
     try:
         return await store.fetch_root_version_local(db_path, resource_id)
-    except Exception as e:
+    except sqlite3.OperationalError as e:
         if "no such table" in str(e):
             # Table doesn't exist yet; treat as not installed
             return None
