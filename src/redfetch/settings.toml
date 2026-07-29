@@ -306,6 +306,7 @@ staff_pick = true
 
 [EMU.SERVERS.lazarus]
 label = "Project Lazarus"
+shortname = "Project Lazarus"
 opt_in = false
 guide = "https://www.lazaruseq.com/pages/getting-started-guide"
 eqhost = "login.eqemulator.net:5999"

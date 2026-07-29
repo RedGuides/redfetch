@@ -44,13 +44,18 @@ _VVMQ_ID = {"LIVE": "1974", "TEST": "2218", "EMU": "60"}
 
 
 class _FakeEnv:
-    def __init__(self, eqpath=None, special_resources=None, download_folder=""):
+    def __init__(self, eqpath=None, special_resources=None, download_folder="", active_server=None):
         self._eqpath = eqpath
+        self._active_server = active_server
         self.SPECIAL_RESOURCES = special_resources or {}
         self.DOWNLOAD_FOLDER = download_folder
 
     def get(self, key, default=None):
-        return self._eqpath if key == "EQPATH" else default
+        if key == "EQPATH":
+            return self._eqpath
+        if key == "ACTIVE_SERVER":
+            return self._active_server
+        return default
 
 
 class _FakeSettings:
@@ -65,9 +70,13 @@ class _FakeSettings:
         return self._envs[env]  # KeyError for unconfigured envs -> heal's except skips it
 
 
-def _env_with_vvmq(env, vvmq, eqpath=None):
+def _env_with_vvmq(env, vvmq, eqpath=None, active_server=None):
     """A fake env whose VVMQ special resource points at `vvmq` via custom_path."""
-    return _FakeEnv(eqpath=eqpath, special_resources={_VVMQ_ID[env]: {"custom_path": str(vvmq)}})
+    return _FakeEnv(
+        eqpath=eqpath,
+        active_server=active_server,
+        special_resources={_VVMQ_ID[env]: {"custom_path": str(vvmq)}},
+    )
 
 
 @pytest.fixture
@@ -146,6 +155,52 @@ def test_exception_in_one_env_does_not_abort_others(tmp_path, eq_dir, spy, monke
     config.self_heal_eqpath()
 
     assert spy == [_healed(eq_dir, "TEST")]
+
+
+# --- the multipath heal gate (emu-multipath guard 4) -------------------------
+
+def test_active_server_gates_emu_heal(tmp_path, eq_dir, spy, monkeypatch):
+    """With a server active, EMU's path belongs to switch_server. login.db holds
+    exactly one emu path — "healing" could cross-wire another server's dir, so a
+    broken path must surface in the UI instead."""
+    vvmq = _make_vvmq(tmp_path, "vvmq_emu", "emu", eq_dir)
+    broken = str(tmp_path / "gone")
+    _install(
+        monkeypatch,
+        {"EMU": _env_with_vvmq("EMU", vvmq, eqpath=broken, active_server="lazarus")},
+    )
+
+    config.self_heal_eqpath()
+
+    assert spy == []
+
+
+def test_emu_without_active_server_still_heals(tmp_path, eq_dir, spy, monkeypatch):
+    """Regression: the gate only fires on ACTIVE_SERVER, not on the EMU env itself."""
+    vvmq = _make_vvmq(tmp_path, "vvmq_emu", "emu", eq_dir)
+    _install(monkeypatch, {"EMU": _env_with_vvmq("EMU", vvmq, eqpath=None)})
+
+    config.self_heal_eqpath()
+
+    assert spy == [_healed(eq_dir, "EMU")]
+
+
+def test_live_and_test_heal_regardless_of_emu_active_server(tmp_path, eq_dir, spy, monkeypatch):
+    vvmq_live = _make_vvmq(tmp_path, "vvmq_live", "live", eq_dir)
+    vvmq_test = _make_vvmq(tmp_path, "vvmq_test", "test", eq_dir)
+    vvmq_emu = _make_vvmq(tmp_path, "vvmq_emu", "emu", eq_dir)
+    _install(
+        monkeypatch,
+        {
+            "LIVE": _env_with_vvmq("LIVE", vvmq_live, eqpath=None),
+            "TEST": _env_with_vvmq("TEST", vvmq_test, eqpath=None),
+            "EMU": _env_with_vvmq("EMU", vvmq_emu, eqpath=None, active_server="lazarus"),
+        },
+    )
+
+    config.self_heal_eqpath()
+
+    assert spy == [_healed(eq_dir, "LIVE"), _healed(eq_dir, "TEST")]
 
 
 # --- the @format linchpin ---------------------------------------------------

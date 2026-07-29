@@ -192,6 +192,8 @@ def self_heal_eqpath() -> None:
     for env in ENV_TOKENS:
         try:
             env_settings = settings.from_env(env)
+            if env == "EMU" and env_settings.get("ACTIVE_SERVER"):
+                continue  # AutoLogin's shared EMU path isn't tied to the active server.
             stored = env_settings.get("EQPATH")
             if stored and detecteq.is_valid_eq_dir(stored):
                 continue  # heal only when blank or broken

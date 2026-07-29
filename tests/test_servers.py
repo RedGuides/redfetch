@@ -68,8 +68,8 @@ def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
     """Real-data smoke: every known entry in the shipped bundle validates.
 
     Pins the bundle's contract: valid slug, short label, ships unconfigured, and
-    (when present) an HTTPS getting-started guide, a host:port eqhost, and an
-    HTTPS patcher URL with a bare-filename exe.
+    (when present) a verbatim login-list shortname, an HTTPS getting-started
+    guide, a host:port eqhost, and an HTTPS patcher URL with a bare-filename exe.
     """
     _install_settings(tmp_path, monkeypatch)
     for env in config.ENV_TOKENS:
@@ -79,6 +79,10 @@ def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
             assert len(entry["label"]) <= 19, f"'{slug}' label too long for the UI"
             assert not entry.get("opt_in"), f"'{slug}' must ship opt_in = false"
             assert not entry.get("eqpath"), f"'{slug}' must not ship an eqpath"
+            shortname = entry.get("shortname")
+            if shortname:
+                # verbatim login-list value; autologin matching lowercases both sides
+                assert shortname == shortname.strip(), f"'{slug}' shortname has stray whitespace"
             guide = entry.get("guide")
             if guide:
                 assert guide.startswith("https://"), f"'{slug}' guide must be HTTPS"
