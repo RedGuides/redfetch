@@ -20,6 +20,9 @@ CATEGORY_MAP = {
     25: "lua"
 }
 
+# Client environments (dynaconf envs). Also for server slugs.
+ENV_TOKENS = ("LIVE", "TEST", "EMU")
+
 # Resource to MQ version
 VANILLA_MAP = {
     1974: "LIVE",
@@ -186,7 +189,7 @@ def self_heal_eqpath() -> None:
     """Fill a blank or broken EQ PATH from autologin's login.db, per env."""
     from redfetch import utils, detecteq
 
-    for env in ("LIVE", "TEST", "EMU"):
+    for env in ENV_TOKENS:
         try:
             env_settings = settings.from_env(env)
             stored = env_settings.get("EQPATH")
@@ -273,7 +276,7 @@ def remove_breadcrumb() -> None:
 def switch_environment(new_env):
     """Switch the environment and update the settings."""
     if settings is None:
-        raise RuntimeError("Configuration has not been initialized. Call initialize_config() first.")
+        raise RuntimeError("Configuration has not been initialized.")
 
     # Update the .env file first
     write_env_to_file(new_env)
@@ -297,7 +300,7 @@ def switch_environment(new_env):
 def select_environment_in_memory(new_env):
     """Select `new_env` for this process only, without persisting to the .env file."""
     if settings is None:
-        raise RuntimeError("Configuration has not been initialized. Call initialize_config() first.")
+        raise RuntimeError("Configuration has not been initialized.")
 
     settings.setenv(new_env)
     settings.ENV = new_env
@@ -482,7 +485,7 @@ def update_setting(setting_path, setting_value, env=None):
     """Update a specific setting in the settings.local.toml file and in memory,
     optionally within a specific environment."""
     if settings is None or config_dir is None:
-        raise RuntimeError("Configuration has not been initialized. Call initialize_config() first.")
+        raise RuntimeError("Configuration has not been initialized.")
 
     config_file = os.path.join(config_dir, 'settings.local.toml')
     ensure_config_file_exists(config_file)
@@ -528,6 +531,55 @@ def update_setting(setting_path, setting_value, env=None):
     settings.reload()
 
     print("Configuration saved.")
+
+
+# Emu servers ("multipath")
+
+# Server slugs are used as TOML keys and CLI arguments, so no weird chars.
+SERVER_SLUG_RE = re.compile(r"[a-z0-9_-]+")
+
+
+def validate_server_slug(slug: str, *, must_be_new: bool = False) -> str:
+    """Slugs share one namespace across all clients, keep em unique."""
+    if not slug or not isinstance(slug, str):
+        raise ValueError("Server name can't be empty.")
+    if not SERVER_SLUG_RE.fullmatch(slug):
+        raise ValueError(
+            f"Invalid server name '{slug}': use lowercase letters, digits, '-' or '_'."
+        )
+    if slug.upper() in ENV_TOKENS:
+        raise ValueError(f"'{slug}' is a reserved name (client environment).")
+    if must_be_new:
+        for env in ENV_TOKENS:
+            if slug in list_servers(env):
+                raise ValueError(f"Server name '{slug}' is already in use ({env}).")
+    return slug
+
+
+def list_servers(env: str = "EMU") -> dict[str, dict]:
+    """Slug to server table, as plain dicts."""
+    servers = settings.from_env(env).get("SERVERS") or {}
+    if not isinstance(servers, dict):
+        return {}
+    return {
+        str(slug): _to_plain(table)
+        for slug, table in servers.items()
+        if isinstance(table, dict)
+    }
+
+
+def get_active_server(env: str = "EMU") -> str | None:
+    """The active server slug for a client env, or None when no server is active."""
+    slug = settings.from_env(env).get("ACTIVE_SERVER")
+    return str(slug) if slug else None
+
+
+def is_server_configured(slug: str, env: str = "EMU") -> bool:
+    """True when a locally configured server's opted in with an eqpath."""
+    server = list_servers(env).get(slug)
+    if not server:
+        return False
+    return bool(server.get("opt_in")) and bool(str(server.get("eqpath") or "").strip())
 
 
 def write_env_to_file(new_env):

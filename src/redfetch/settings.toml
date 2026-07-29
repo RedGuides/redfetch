@@ -301,3 +301,13 @@ staff_pick = true
 [EMU.SPECIAL_RESOURCES.973]
 opt_in = true
 staff_pick = true
+
+# Known emu servers
+
+[EMU.SERVERS.lazarus]
+label = "Project Lazarus"
+opt_in = false
+guide = "https://www.lazaruseq.com/pages/getting-started-guide"
+eqhost = "login.eqemulator.net:5999"
+patcher_url = "https://www.lazaruseq.com/lazarus-patcher-windows.zip"
+patcher_exe = "LazarusPatcherCLI.exe"
