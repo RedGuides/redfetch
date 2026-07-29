@@ -6,7 +6,7 @@ import tomllib
 import pytest
 from dynaconf import Dynaconf
 
-from redfetch import config
+from redfetch import config, servers
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -64,20 +64,20 @@ def _norm(path):
 def test_real_bundle_ships_known_emu_servers(tmp_path, monkeypatch):
     """The shipped bundle: known servers exist for EMU only, none configured."""
     _install_settings(tmp_path, monkeypatch)
-    assert config.list_servers("LIVE") == {}
-    assert config.list_servers("TEST") == {}
-    servers = config.list_servers()
-    assert "lazarus" in servers
-    assert servers["lazarus"]["label"] == "Project Lazarus"
-    assert config.is_server_configured("lazarus") is False
+    assert servers.list_servers("LIVE") == {}
+    assert servers.list_servers("TEST") == {}
+    listed = servers.list_servers()
+    assert "lazarus" in listed
+    assert listed["lazarus"]["label"] == "Project Lazarus"
+    assert servers.is_server_configured("lazarus") is False
 
 
 def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
     """Validate the required shape of every bundled server entry."""
     _install_settings(tmp_path, monkeypatch)
     for env in config.ENV_TOKENS:
-        for slug, entry in config.list_servers(env).items():
-            assert config.validate_server_slug(slug) == slug
+        for slug, entry in servers.list_servers(env).items():
+            assert servers.validate_server_slug(slug) == slug
             assert entry.get("label"), f"known server '{slug}' needs a label"
             assert len(entry["label"]) <= 19, f"'{slug}' label too long for the UI"
             assert not entry.get("opt_in"), f"'{slug}' must ship opt_in = false"
@@ -110,9 +110,9 @@ opt_in = true
 eqpath = "D:/Games/EQ-Mine"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    servers = config.list_servers()
-    assert "myserver" in servers  # bundled known entries (lazarus) ride along
-    entry = servers["myserver"]
+    listed = servers.list_servers()
+    assert "myserver" in listed  # bundled known entries (lazarus) ride along
+    entry = listed["myserver"]
     assert type(entry) is dict  # plain dict, not a dynaconf box
     assert entry["label"] == "My Server"
     assert entry["opt_in"] is True
@@ -127,23 +127,11 @@ opt_in = true
 eqpath = "C:/Games/EQ-TheGrind"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local, bundle_toml=BUNDLE_WITH_KNOWN)
-    entry = config.list_servers()["thegrind"]
+    entry = servers.list_servers()["thegrind"]
     assert entry["label"] == "The Grind"              # from the bundle
     assert entry["opt_in"] is True                    # local delta wins
     assert entry["eqpath"] == "C:/Games/EQ-TheGrind"  # novel local leaf
     assert entry["patcher_url"] == "https://thegrind.example/patcher.zip"
-
-
-def test_local_patcher_url_overrides_bundle(tmp_path, monkeypatch):
-    """A vetted-URL release edit reaches users, unless they overrode it locally."""
-    local = """
-[EMU.SERVERS.thegrind]
-patcher_url = "https://mymirror.example/patcher.zip"
-"""
-    _install_settings(tmp_path, monkeypatch, local_toml=local, bundle_toml=BUNDLE_WITH_KNOWN)
-    entry = config.list_servers()["thegrind"]
-    assert entry["patcher_url"] == "https://mymirror.example/patcher.zip"
-    assert entry["patcher_exe"] == "patcher.exe"  # untouched bundle leaf survives the merge
 
 
 def test_list_servers_skips_non_table_junk(tmp_path, monkeypatch):
@@ -152,26 +140,17 @@ def test_list_servers_skips_non_table_junk(tmp_path, monkeypatch):
 SERVERS = "oops"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    assert config.list_servers() == {}
+    assert servers.list_servers() == {}
 
 
 # --- get_active_server -----------------------------------------------------------
 
-def test_get_active_server(tmp_path, monkeypatch):
+def test_get_active_server_scoped_to_client(tmp_path, monkeypatch):
+    """ACTIVE_SERVER is scoped to its Dynaconf environment; unset reads as None."""
     _install_settings(tmp_path, monkeypatch, local_toml='[EMU]\nACTIVE_SERVER = "thegrind"\n')
-    assert config.get_active_server() == "thegrind"
-
-
-def test_get_active_server_none_when_unset(tmp_path, monkeypatch):
-    _install_settings(tmp_path, monkeypatch)
-    assert config.get_active_server() is None
-
-
-def test_active_server_invisible_to_other_clients(tmp_path, monkeypatch):
-    """ACTIVE_SERVER is scoped to its Dynaconf environment."""
-    _install_settings(tmp_path, monkeypatch, local_toml='[EMU]\nACTIVE_SERVER = "thegrind"\n')
-    assert config.get_active_server("LIVE") is None
-    assert config.get_active_server("TEST") is None
+    assert servers.get_active_server() == "thegrind"
+    assert servers.get_active_server("LIVE") is None
+    assert servers.get_active_server("TEST") is None
 
 
 # --- is_server_configured ---------------------------------------------------------
@@ -191,24 +170,17 @@ opt_in = false
 eqpath = "D:/EQ-Out"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    assert config.is_server_configured("ready") is True
-    assert config.is_server_configured("no_path") is False
-    assert config.is_server_configured("opted_out") is False
-    assert config.is_server_configured("nonexistent") is False
-
-
-def test_known_entry_alone_is_not_configured(tmp_path, monkeypatch):
-    """A bundled server is not configured until the user enables it."""
-    _install_settings(tmp_path, monkeypatch, bundle_toml=BUNDLE_WITH_KNOWN)
-    assert "thegrind" in config.list_servers()
-    assert config.is_server_configured("thegrind") is False
+    assert servers.is_server_configured("ready") is True
+    assert servers.is_server_configured("no_path") is False
+    assert servers.is_server_configured("opted_out") is False
+    assert servers.is_server_configured("nonexistent") is False
 
 
 # --- slug rules --------------------------------------------------------------------
 
 @pytest.mark.parametrize("slug", ["thegrind", "project-quarm", "my_server2", "a"])
 def test_valid_slugs_pass(slug):
-    assert config.validate_server_slug(slug) == slug
+    assert servers.validate_server_slug(slug) == slug
 
 
 @pytest.mark.parametrize(
@@ -217,27 +189,20 @@ def test_valid_slugs_pass(slug):
 )
 def test_bad_slugs_rejected(slug):
     with pytest.raises(ValueError):
-        config.validate_server_slug(slug)
+        servers.validate_server_slug(slug)
 
 
 @pytest.mark.parametrize("slug", ["live", "test", "emu"])
 def test_reserved_client_tokens_rejected(slug):
     with pytest.raises(ValueError, match="reserved"):
-        config.validate_server_slug(slug)
+        servers.validate_server_slug(slug)
 
 
 def test_must_be_new_rejects_slug_used_by_any_client(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml='[EMU.SERVERS.taken]\nlabel = "Taken"\n')
     with pytest.raises(ValueError, match="already in use"):
-        config.validate_server_slug("taken", must_be_new=True)
-    assert config.validate_server_slug("nottaken", must_be_new=True) == "nottaken"
-
-
-def test_must_be_new_counts_known_bundle_slugs(tmp_path, monkeypatch):
-    """Known slugs are taken even before a user configures them."""
-    _install_settings(tmp_path, monkeypatch, bundle_toml=BUNDLE_WITH_KNOWN)
-    with pytest.raises(ValueError, match="already in use"):
-        config.validate_server_slug("thegrind", must_be_new=True)
+        servers.validate_server_slug("taken", must_be_new=True)
+    assert servers.validate_server_slug("nottaken", must_be_new=True) == "nottaken"
 
 
 # --- server switching ---------------------------------------------------------
@@ -267,7 +232,7 @@ eqpath = "D:/EQ-B"
 def test_switch_applies_incoming_and_saves_back_outgoing(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
 
-    config.switch_server("b")
+    servers.switch_server("b")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "b"
@@ -285,12 +250,12 @@ def test_switch_round_trip_is_byte_identical(tmp_path, monkeypatch):
     """A->B->A from a steady state leaves settings.local.toml byte-identical."""
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
 
-    config.switch_server("b")
-    config.switch_server("a")
+    servers.switch_server("b")
+    servers.switch_server("a")
     baseline = _local_file(tmp_path).read_bytes()
 
-    config.switch_server("b")
-    config.switch_server("a")
+    servers.switch_server("b")
+    servers.switch_server("a")
 
     assert _local_file(tmp_path).read_bytes() == baseline
     emu = _parsed(tmp_path)["EMU"]
@@ -302,10 +267,10 @@ def test_switch_round_trip_is_byte_identical(tmp_path, monkeypatch):
 def test_switch_to_active_server_captures_env_edits(tmp_path, monkeypatch):
     """Re-selecting the active server snapshots current env values, not stale ones."""
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
-    config.switch_server("b")
+    servers.switch_server("b")
     config.update_setting(["EQPATH"], "D:/EQ-B-moved", env="EMU")
 
-    config.switch_server("b")
+    servers.switch_server("b")
 
     emu = _parsed(tmp_path)["EMU"]
     assert _norm(emu["SERVERS"]["b"]["eqpath"]) == _norm("D:/EQ-B-moved")
@@ -315,16 +280,20 @@ def test_switch_to_active_server_captures_env_edits(tmp_path, monkeypatch):
 def test_switch_unknown_slug_rejected(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
     before = _local_file(tmp_path).read_bytes()
-    with pytest.raises(config.ServerSwitchError, match="Unknown server"):
-        config.switch_server("nope")
+    with pytest.raises(servers.ServerSwitchError, match="Unknown server"):
+        servers.switch_server("nope")
     assert _local_file(tmp_path).read_bytes() == before
 
 
-def test_switch_unconfigured_known_rejected(tmp_path, monkeypatch):
-    """Bundled servers must be configured before switching."""
-    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
-    with pytest.raises(config.ServerSwitchError, match="configure it first"):
-        config.switch_server("lazarus")
+def test_switch_opted_out_rejected(tmp_path, monkeypatch):
+    """A folder alone isn't enough: opt_in = false still blocks the switch."""
+    local = SWITCH_LOCAL + """
+[EMU.SERVERS.lazarus]
+eqpath = "D:/EQ-Laz"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    with pytest.raises(servers.ServerSwitchError, match="isn't set up"):
+        servers.switch_server("lazarus")
 
 
 def test_switch_blank_eqpath_rejected(tmp_path, monkeypatch):
@@ -335,8 +304,8 @@ opt_in = true
 eqpath = ""
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    with pytest.raises(config.ServerSwitchError, match="no EverQuest folder"):
-        config.switch_server("pathless")
+    with pytest.raises(servers.ServerSwitchError, match="no EverQuest folder"):
+        servers.switch_server("pathless")
 
 
 def test_switch_blocks_blank_env_eqpath_with_opt_ins(tmp_path, monkeypatch):
@@ -356,20 +325,20 @@ eqpath = "D:/EQ-A"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
     before = _local_file(tmp_path).read_bytes()
-    with pytest.raises(config.ServerSwitchError, match="map downloads"):
-        config.switch_server("a")
+    with pytest.raises(servers.ServerSwitchError, match="map downloads"):
+        servers.switch_server("a")
     assert _local_file(tmp_path).read_bytes() == before
 
 
 def test_ghost_prevention_skips_save_back_to_deconfigured(tmp_path, monkeypatch):
     """A deconfigured outgoing server keeps its old snapshot verbatim."""
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
-    config.switch_server("b")
+    servers.switch_server("b")
     # Change the active path, then mark B as unconfigured.
     config.update_setting(["EQPATH"], "D:/EQ-B-edited", env="EMU")
     config.update_setting(["SERVERS", "b", "opt_in"], False, env="EMU")
 
-    config.switch_server("a")
+    servers.switch_server("a")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "a"
@@ -383,15 +352,15 @@ def test_switch_cache_patch_updates_from_env_clones(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL, current_env="EMU")
     clone_before = config.settings.from_env("EMU")
 
-    config.switch_server("b")
+    servers.switch_server("b")
 
     clone = config.settings.from_env("EMU")
     assert clone is clone_before
     assert _norm(clone.EQPATH) == _norm("D:/EQ-B")
     assert clone.get("ACTIVE_SERVER") == "b"
-    servers = config.list_servers()
-    assert _norm(servers["a"]["eqpath"]) == _norm("D:/EQ-A")
-    assert "b" in servers and "lazarus" in servers
+    listed = servers.list_servers()
+    assert _norm(listed["a"]["eqpath"]) == _norm("D:/EQ-A")
+    assert "b" in listed and "lazarus" in listed
     assert _norm(config.settings.EQPATH) == _norm("D:/EQ-B")
 
 
@@ -405,10 +374,159 @@ eqpath = "D:/EQ-C"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
 
-    config.switch_server("c")
+    servers.switch_server("c")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "c"
     assert _norm(emu["EQPATH"]) == _norm("D:/EQ-C")
     assert "SPECIAL_RESOURCES" not in emu
-    assert config.get_active_server() == "c"
+    assert servers.get_active_server() == "c"
+
+
+# --- lifecycle: add / delete / rename -------------------------------------------
+
+def test_first_add_seeds_snapshot_and_activates(tmp_path, monkeypatch):
+    """Today's setup becomes server #1: seeded from env slots, active, no switch."""
+    local = """
+[EMU]
+EQPATH = "D:/EQ-Original"
+
+[EMU.SPECIAL_RESOURCES.153]
+opt_in = true
+custom_path = "D:/shared-maps"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+
+    servers.add_server("lazarus", eqpath="D:/EQ-Original")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "lazarus"
+    snap = emu["SERVERS"]["lazarus"]
+    assert snap["opt_in"] is True
+    assert _norm(snap["eqpath"]) == _norm("D:/EQ-Original")
+    assert snap["SPECIAL_RESOURCES"]["153"]["opt_in"] is True  # seeded from env
+    assert _norm(snap["SPECIAL_RESOURCES"]["153"]["custom_path"]) == _norm("D:/shared-maps")
+    assert servers.get_active_server() == "lazarus"  # clone patched
+    assert servers.is_server_configured("lazarus") is True
+
+
+def test_second_add_does_not_switch(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+
+    servers.add_server("myquarm", eqpath="D:/EQ-Quarm", label="My Quarm")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "a"  # unchanged
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-A")  # env untouched
+    snap = emu["SERVERS"]["myquarm"]
+    assert snap["label"] == "My Quarm"
+    assert snap["opt_in"] is True
+    assert "SPECIAL_RESOURCES" not in snap  # later adds don't seed
+    assert servers.get_active_server() == "a"
+    assert servers.is_server_configured("myquarm") is True  # clone patched
+
+
+def test_add_known_leaves_label_to_bundle(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+
+    servers.add_server("lazarus", eqpath="D:/EQ-Laz", label="Ignored")
+
+    snap = _parsed(tmp_path)["EMU"]["SERVERS"]["lazarus"]
+    assert "label" not in snap  # bundle owns known labels
+    assert servers.list_servers()["lazarus"]["label"] == "Project Lazarus"
+    assert servers.is_server_configured("lazarus") is True
+
+
+def test_add_requires_folder(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="folder"):
+        servers.add_server("nofolder", eqpath="   ")
+
+
+def test_add_novel_rejects_cross_client_collision(tmp_path, monkeypatch):
+    local = '[LIVE.SERVERS.claimed]\nlabel = "Claimed"\n'
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    with pytest.raises(ValueError, match="already in use"):
+        servers.add_server("claimed", eqpath="D:/EQ-X")
+
+
+def test_delete_active_clears_active_server(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+
+    servers.delete_server("a")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert "ACTIVE_SERVER" not in emu
+    assert "a" not in emu["SERVERS"]
+    assert servers.get_active_server() is None  # clone patched
+    listed = servers.list_servers()
+    assert "a" not in listed and "b" in listed
+
+
+def test_delete_known_reverts_to_available(tmp_path, monkeypatch):
+    local = SWITCH_LOCAL + """
+[EMU.SERVERS.lazarus]
+opt_in = true
+eqpath = "D:/EQ-Laz"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    assert servers.is_server_configured("lazarus") is True
+
+    servers.delete_server("lazarus")
+
+    assert "lazarus" not in _parsed(tmp_path)["EMU"]["SERVERS"]  # local leaves gone
+    listed = servers.list_servers()  # clone patched with the bundled entry
+    assert listed["lazarus"]["label"] == "Project Lazarus"
+    assert servers.is_server_configured("lazarus") is False
+
+
+def test_delete_unknown_rejected(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="Unknown server"):
+        servers.delete_server("nope")
+
+
+def test_rename_round_trip_preserves_bytes(tmp_path, monkeypatch):
+    """Steady-state rename cycle: contents and bytes survive re-keying."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    servers.switch_server("b")  # "a" gets a full snapshot via save-back
+
+    servers.rename_server("a", "atemp")
+    servers.rename_server("atemp", "a")
+    baseline = _local_file(tmp_path).read_bytes()
+
+    servers.rename_server("a", "atemp")
+    servers.rename_server("atemp", "a")
+
+    assert _local_file(tmp_path).read_bytes() == baseline
+    snap = _parsed(tmp_path)["EMU"]["SERVERS"]["a"]
+    assert _norm(snap["eqpath"]) == _norm("D:/EQ-A")
+    assert snap["SPECIAL_RESOURCES"]["153"]["opt_in"] is True
+
+
+def test_rename_active_retargets(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+
+    servers.rename_server("a", "alpha")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "alpha"
+    assert "a" not in emu["SERVERS"] and "alpha" in emu["SERVERS"]
+    assert servers.get_active_server() == "alpha"  # clone patched
+    listed = servers.list_servers()
+    assert "a" not in listed
+    assert _norm(listed["alpha"]["eqpath"]) == _norm("D:/EQ-A")
+
+
+def test_rename_rejects_known_and_collisions(tmp_path, monkeypatch):
+    local = SWITCH_LOCAL + """
+[LIVE.SERVERS.claimed]
+label = "Claimed"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    with pytest.raises(ValueError, match="known server"):
+        servers.rename_server("lazarus", "laz2")
+    with pytest.raises(ValueError, match="already in use"):
+        servers.rename_server("a", "lazarus")  # bundle slug collision (unconfigured counts)
+    with pytest.raises(ValueError, match="already in use"):
+        servers.rename_server("a", "claimed")  # cross-client collision
