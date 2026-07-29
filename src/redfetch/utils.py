@@ -124,8 +124,8 @@ def get_current_download_folder() -> str:
 def get_eq_maps_status() -> str | None:
     """Get the status of EQ maps (Brewall's and Good's)."""
     special_resources = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES
-    brewall_opt_in = special_resources.get('153', {}).get('opt_in', False)
-    good_opt_in = special_resources.get('303', {}).get('opt_in', False)
+    brewall_opt_in = special_resources.get(config.MAPS_MAP["brewall"], {}).get('opt_in', False)
+    good_opt_in = special_resources.get(config.MAPS_MAP["good"], {}).get('opt_in', False)
 
     if brewall_opt_in and good_opt_in:
         return "all"

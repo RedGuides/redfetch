@@ -1,10 +1,7 @@
-"""SERVERS / ACTIVE_SERVER accessors and slug rules (emu multipath, Phase 1).
-
-Read helpers only in this commit: nothing at runtime consumes these keys yet.
-The switch/lifecycle writers grow into this file in later commits.
-"""
+"""Tests for emulator server profiles and switching."""
 import os
 import re
+import tomllib
 
 import pytest
 from dynaconf import Dynaconf
@@ -14,8 +11,7 @@ from redfetch import config
 
 # --- fixtures ----------------------------------------------------------------
 
-# Fixture standing in for known entries, so merge tests don't depend on which
-# real entries ship in settings.toml; shape matches the emu-multipath-plan.md data model.
+# Stable bundled-server fixture for merge tests.
 BUNDLE_WITH_KNOWN = """
 [EMU.SERVERS.thegrind]
 label = "The Grind"
@@ -25,13 +21,12 @@ patcher_exe = "patcher.exe"
 """
 
 
-def _install_settings(tmp_path, monkeypatch, local_toml="", bundle_toml=None, env="EMU"):
-    """Real Dynaconf over (bundle, local) files, installed as config.settings.
-
-    bundle_toml=None uses the real bundled settings.toml; a string uses a fixture
-    bundle instead (the known-servers case).
-    """
+def _install_settings(tmp_path, monkeypatch, local_toml="", bundle_toml=None, env="EMU",
+                      current_env=None):
+    """Install a real Dynaconf instance backed by temporary settings files."""
     monkeypatch.setenv("REDFETCH_DATA_DIR", str(tmp_path))
+    if current_env:
+        monkeypatch.setenv("REDFETCH_ENV", current_env)
     if bundle_toml is None:
         bundle = os.path.join(config.script_dir, "settings.toml")
     else:
@@ -48,7 +43,20 @@ def _install_settings(tmp_path, monkeypatch, local_toml="", bundle_toml=None, en
     )
     real.ENV = env
     monkeypatch.setattr(config, "settings", real)
+    monkeypatch.setattr(config, "config_dir", str(tmp_path))
     return real
+
+
+def _local_file(tmp_path):
+    return tmp_path / "settings.local.toml"
+
+
+def _parsed(tmp_path):
+    return tomllib.loads(_local_file(tmp_path).read_text(encoding="utf-8"))
+
+
+def _norm(path):
+    return os.path.normpath(path)
 
 
 # --- list_servers --------------------------------------------------------------
@@ -65,12 +73,7 @@ def test_real_bundle_ships_known_emu_servers(tmp_path, monkeypatch):
 
 
 def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
-    """Real-data smoke: every known entry in the shipped bundle validates.
-
-    Pins the bundle's contract: valid slug, short label, ships unconfigured, and
-    (when present) a verbatim login-list shortname, an HTTPS getting-started
-    guide, a host:port eqhost, and an HTTPS patcher URL with a bare-filename exe.
-    """
+    """Validate the required shape of every bundled server entry."""
     _install_settings(tmp_path, monkeypatch)
     for env in config.ENV_TOKENS:
         for slug, entry in config.list_servers(env).items():
@@ -81,7 +84,7 @@ def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
             assert not entry.get("eqpath"), f"'{slug}' must not ship an eqpath"
             shortname = entry.get("shortname")
             if shortname:
-                # verbatim login-list value; autologin matching lowercases both sides
+                # AutoLogin compares server names case-insensitively.
                 assert shortname == shortname.strip(), f"'{slug}' shortname has stray whitespace"
             guide = entry.get("guide")
             if guide:
@@ -165,7 +168,7 @@ def test_get_active_server_none_when_unset(tmp_path, monkeypatch):
 
 
 def test_active_server_invisible_to_other_clients(tmp_path, monkeypatch):
-    """environments=True scopes ACTIVE_SERVER under [EMU]; LIVE/TEST structurally can't see it."""
+    """ACTIVE_SERVER is scoped to its Dynaconf environment."""
     _install_settings(tmp_path, monkeypatch, local_toml='[EMU]\nACTIVE_SERVER = "thegrind"\n')
     assert config.get_active_server("LIVE") is None
     assert config.get_active_server("TEST") is None
@@ -195,7 +198,7 @@ eqpath = "D:/EQ-Out"
 
 
 def test_known_entry_alone_is_not_configured(tmp_path, monkeypatch):
-    """Bundled existence isn't configuration — the ghost-prevention predicate."""
+    """A bundled server is not configured until the user enables it."""
     _install_settings(tmp_path, monkeypatch, bundle_toml=BUNDLE_WITH_KNOWN)
     assert "thegrind" in config.list_servers()
     assert config.is_server_configured("thegrind") is False
@@ -235,3 +238,177 @@ def test_must_be_new_counts_known_bundle_slugs(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, bundle_toml=BUNDLE_WITH_KNOWN)
     with pytest.raises(ValueError, match="already in use"):
         config.validate_server_slug("thegrind", must_be_new=True)
+
+
+# --- server switching ---------------------------------------------------------
+
+# Two configured servers; A starts active with custom map settings.
+SWITCH_LOCAL = """
+[EMU]
+EQPATH = "D:/EQ-A"
+ACTIVE_SERVER = "a"
+
+[EMU.SPECIAL_RESOURCES.153]
+opt_in = true
+custom_path = "D:/shared-maps"
+
+[EMU.SERVERS.a]
+label = "Server A"
+opt_in = true
+eqpath = "D:/EQ-A"
+
+[EMU.SERVERS.b]
+label = "Server B"
+opt_in = true
+eqpath = "D:/EQ-B"
+"""
+
+
+def test_switch_applies_incoming_and_saves_back_outgoing(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+
+    config.switch_server("b")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "b"
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-B")
+    # A's current map settings were saved to its profile.
+    snap = emu["SERVERS"]["a"]
+    assert _norm(snap["eqpath"]) == _norm("D:/EQ-A")
+    assert snap["SPECIAL_RESOURCES"]["153"]["opt_in"] is True
+    assert _norm(snap["SPECIAL_RESOURCES"]["153"]["custom_path"]) == _norm("D:/shared-maps")
+    # B's missing map settings inherited defaults and were pruned.
+    assert "SPECIAL_RESOURCES" not in emu
+
+
+def test_switch_round_trip_is_byte_identical(tmp_path, monkeypatch):
+    """A->B->A from a steady state leaves settings.local.toml byte-identical."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+
+    config.switch_server("b")
+    config.switch_server("a")
+    baseline = _local_file(tmp_path).read_bytes()
+
+    config.switch_server("b")
+    config.switch_server("a")
+
+    assert _local_file(tmp_path).read_bytes() == baseline
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "a"
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-A")
+    assert emu["SPECIAL_RESOURCES"]["153"]["opt_in"] is True
+
+
+def test_switch_to_active_server_captures_env_edits(tmp_path, monkeypatch):
+    """Re-selecting the active server snapshots current env values, not stale ones."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    config.switch_server("b")
+    config.update_setting(["EQPATH"], "D:/EQ-B-moved", env="EMU")
+
+    config.switch_server("b")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert _norm(emu["SERVERS"]["b"]["eqpath"]) == _norm("D:/EQ-B-moved")
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-B-moved")
+
+
+def test_switch_unknown_slug_rejected(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    before = _local_file(tmp_path).read_bytes()
+    with pytest.raises(config.ServerSwitchError, match="Unknown server"):
+        config.switch_server("nope")
+    assert _local_file(tmp_path).read_bytes() == before
+
+
+def test_switch_unconfigured_known_rejected(tmp_path, monkeypatch):
+    """Bundled servers must be configured before switching."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    with pytest.raises(config.ServerSwitchError, match="configure it first"):
+        config.switch_server("lazarus")
+
+
+def test_switch_blank_eqpath_rejected(tmp_path, monkeypatch):
+    local = SWITCH_LOCAL + """
+[EMU.SERVERS.pathless]
+label = "Pathless"
+opt_in = true
+eqpath = ""
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    with pytest.raises(config.ServerSwitchError, match="no EverQuest folder"):
+        config.switch_server("pathless")
+
+
+def test_switch_blocks_blank_env_eqpath_with_opt_ins(tmp_path, monkeypatch):
+    """Reject an active profile with maps enabled but no EQ path."""
+    local = """
+[EMU]
+EQPATH = ""
+ACTIVE_SERVER = "a"
+
+[EMU.SPECIAL_RESOURCES.153]
+opt_in = true
+
+[EMU.SERVERS.a]
+label = "Server A"
+opt_in = true
+eqpath = "D:/EQ-A"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    before = _local_file(tmp_path).read_bytes()
+    with pytest.raises(config.ServerSwitchError, match="map downloads"):
+        config.switch_server("a")
+    assert _local_file(tmp_path).read_bytes() == before
+
+
+def test_ghost_prevention_skips_save_back_to_deconfigured(tmp_path, monkeypatch):
+    """A deconfigured outgoing server keeps its old snapshot verbatim."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    config.switch_server("b")
+    # Change the active path, then mark B as unconfigured.
+    config.update_setting(["EQPATH"], "D:/EQ-B-edited", env="EMU")
+    config.update_setting(["SERVERS", "b", "opt_in"], False, env="EMU")
+
+    config.switch_server("a")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "a"
+    b_snap = emu["SERVERS"]["b"]
+    assert _norm(b_snap["eqpath"]) == _norm("D:/EQ-B")  # save-back dropped
+    assert b_snap["opt_in"] is False
+
+
+def test_switch_cache_patch_updates_from_env_clones(tmp_path, monkeypatch):
+    """Refresh cached environment views and the current EMU settings object."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL, current_env="EMU")
+    clone_before = config.settings.from_env("EMU")
+
+    config.switch_server("b")
+
+    clone = config.settings.from_env("EMU")
+    assert clone is clone_before
+    assert _norm(clone.EQPATH) == _norm("D:/EQ-B")
+    assert clone.get("ACTIVE_SERVER") == "b"
+    servers = config.list_servers()
+    assert _norm(servers["a"]["eqpath"]) == _norm("D:/EQ-A")
+    assert "b" in servers and "lazarus" in servers
+    assert _norm(config.settings.EQPATH) == _norm("D:/EQ-B")
+
+
+def test_active_server_kept_when_snapshot_equals_defaults(tmp_path, monkeypatch):
+    """ACTIVE_SERVER survives when all other values match their defaults."""
+    local = """
+[EMU.SERVERS.c]
+label = "Server C"
+opt_in = true
+eqpath = "D:/EQ-C"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+
+    config.switch_server("c")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "c"
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-C")
+    assert "SPECIAL_RESOURCES" not in emu
+    assert config.get_active_server() == "c"

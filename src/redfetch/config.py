@@ -35,6 +35,11 @@ MYSEQ_MAP = {
     164: "TEST"
 }
 
+MAPS_MAP = {
+    "brewall": "153",
+    "good": "303",
+}
+
 # to make settings.local.toml easier to read, names are added in comments
 RESOURCE_NAMES = {
     "1974": "Very Vanilla MQ Live",
@@ -333,9 +338,19 @@ def load_config(file_path):
         raise ValidationError(f"Error loading config file {file_path}: {e}")
 
 
+def _descend_tables(table, keys):
+    for key in keys:
+        if key not in table:
+            table[key] = tomlkit.table()
+        table = table[key]
+    return table
+
+
 def _annotate_special_resource_comments(toml_text: str) -> str:
     """Add a `# friendly-name` comment above each known SPECIAL_RESOURCES section."""
-    section_pattern = re.compile(r"^\[(?:DEFAULT|LIVE|TEST|EMU)\.SPECIAL_RESOURCES\.(\d+)\]\s*$")
+    section_pattern = re.compile(
+        r"^\[(?:DEFAULT|LIVE|TEST|EMU)(?:\.SERVERS\.[A-Za-z0-9_-]+)?\.SPECIAL_RESOURCES\.(\d+)\]\s*$"
+    )
 
     new_lines = []
     for line in toml_text.splitlines():
@@ -501,11 +516,7 @@ def update_setting(setting_path, setting_value, env=None):
         config_data[env] = tomlkit.table()
 
     # Navigate to the correct setting based on the path within the specified environment
-    current_data = config_data[env]
-    for key in setting_path[:-1]:
-        if key not in current_data:
-            current_data[key] = tomlkit.table()
-        current_data = current_data[key]
+    current_data = _descend_tables(config_data[env], setting_path[:-1])
 
     # Debugging output
     config_key = '.'.join(setting_path)
@@ -535,14 +546,13 @@ def update_setting(setting_path, setting_value, env=None):
     print("Configuration saved.")
 
 
-# Emu servers ("multipath")
+# Emulator server profiles
 
-# Server slugs are used as TOML keys and CLI arguments, so no weird chars.
+# Slugs must work as bare TOML keys and CLI arguments.
 SERVER_SLUG_RE = re.compile(r"[a-z0-9_-]+")
 
 
 def validate_server_slug(slug: str, *, must_be_new: bool = False) -> str:
-    """Slugs share one namespace across all clients, keep em unique."""
     if not slug or not isinstance(slug, str):
         raise ValueError("Server name can't be empty.")
     if not SERVER_SLUG_RE.fullmatch(slug):
@@ -559,7 +569,7 @@ def validate_server_slug(slug: str, *, must_be_new: bool = False) -> str:
 
 
 def list_servers(env: str = "EMU") -> dict[str, dict]:
-    """Slug to server table, as plain dicts."""
+    """Return server profiles keyed by slug as plain dictionaries."""
     servers = settings.from_env(env).get("SERVERS") or {}
     if not isinstance(servers, dict):
         return {}
@@ -571,17 +581,146 @@ def list_servers(env: str = "EMU") -> dict[str, dict]:
 
 
 def get_active_server(env: str = "EMU") -> str | None:
-    """The active server slug for a client env, or None when no server is active."""
     slug = settings.from_env(env).get("ACTIVE_SERVER")
     return str(slug) if slug else None
 
 
 def is_server_configured(slug: str, env: str = "EMU") -> bool:
-    """True when a locally configured server's opted in with an eqpath."""
     server = list_servers(env).get(slug)
     if not server:
         return False
     return bool(server.get("opt_in")) and bool(str(server.get("eqpath") or "").strip())
+
+
+class ServerSwitchError(ValueError):
+    """Blocked server switch."""
+
+ 
+SERVER_SLOT_PATHS = (
+    ("EQPATH",),
+    *(
+        ("SPECIAL_RESOURCES", resource_id, leaf)
+        for resource_id in MAPS_MAP.values()
+        for leaf in ("opt_in", "custom_path")
+    ),
+)
+
+
+def _slot_snapshot_path(slot):
+    return ("eqpath",) if slot == ("EQPATH",) else slot
+
+
+def _normalize_slot_value(slot, value):
+    return bool(value) if slot[-1] == "opt_in" else str(value or "")
+
+
+def _read_env_slot(env_settings, slot):
+    current = env_settings.get(slot[0])
+    for key in slot[1:]:
+        if current is None or not hasattr(current, "get"):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _walk_get(mapping, keys):
+    """Read a nested mapping while ignoring key case."""
+    current = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        if key in current:
+            current = current[key]
+            continue
+        lowered = key.lower()
+        for candidate, value in current.items():
+            if isinstance(candidate, str) and candidate.lower() == lowered:
+                current = value
+                break
+        else:
+            return None
+    return current
+
+
+def switch_server(slug: str) -> None:
+    """Switch the active emu server."""
+    if settings is None or config_dir is None:
+        raise RuntimeError("Configuration has not been initialized.")
+
+    slug = validate_server_slug(slug)
+    incoming = list_servers("EMU").get(slug)
+    if incoming is None:
+        raise ServerSwitchError(f"Unknown server '{slug}'.")
+    if not str(incoming.get("eqpath") or "").strip():
+        raise ServerSwitchError(
+            f"Server '{slug}' has no EverQuest folder yet — configure it first."
+        )
+    if not incoming.get("opt_in"):
+        raise ServerSwitchError(f"Server '{slug}' isn't set up — configure it first.")
+
+    outgoing = get_active_server("EMU")
+    emu_view = settings.from_env("EMU")
+    base_emu = _base_settings().from_env("EMU")
+
+    config_file = os.path.join(config_dir, "settings.local.toml")
+    ensure_config_file_exists(config_file)
+    doc = load_config(config_file)
+    if "EMU" not in doc:
+        doc["EMU"] = tomlkit.table()
+    emu_table = doc["EMU"]
+
+    written = {}
+
+    # Don't recreate a deleted outgoing server.
+    saved_back = None
+    if outgoing and is_server_configured(outgoing):
+        saved_back = {
+            slot: _normalize_slot_value(slot, _read_env_slot(emu_view, slot))
+            for slot in SERVER_SLOT_PATHS
+        }
+        for slot, value in saved_back.items():
+            snap_path = ("SERVERS", outgoing) + _slot_snapshot_path(slot)
+            _descend_tables(emu_table, snap_path[:-1])[snap_path[-1]] = value
+            written[".".join(snap_path)] = value
+    elif outgoing:
+        print(f"'{outgoing}' is no longer configured; its settings won't be saved back.")
+
+    # Missing profile values inherit the bundled EMU defaults.
+    for slot in SERVER_SLOT_PATHS:
+        if outgoing == slug and saved_back is not None:
+            value = saved_back[slot]
+        else:
+            value = _walk_get(incoming, _slot_snapshot_path(slot))
+            if value is None:
+                value = _read_env_slot(base_emu, slot)
+            value = _normalize_slot_value(slot, value)
+        _descend_tables(emu_table, slot[:-1])[slot[-1]] = value
+        written[".".join(slot)] = value
+
+    # Avoid writing maps to <drive>:\maps.
+    if not written["EQPATH"].strip() and any(
+        written[f"SPECIAL_RESOURCES.{resource_id}.opt_in"] for resource_id in MAPS_MAP.values()
+    ):
+        raise ServerSwitchError(
+            f"Server '{slug}' has no EverQuest folder but map downloads are enabled — "
+            "set its EQ folder first."
+        )
+
+    emu_table["ACTIVE_SERVER"] = slug
+    written["ACTIVE_SERVER"] = slug
+
+    save_config(config_file, doc)
+    settings.reload()
+
+    # reload() leaves from_env() caches stale.
+    emu_clone = settings.from_env("EMU")
+    mirror_base = str(getattr(settings, "current_env", "")).upper() == "EMU"
+    for key, value in written.items():
+        emu_clone.set(key, value)
+        if mirror_base:
+            settings.set(key, value)
+
+    print(f"Active server: {slug}")
 
 
 def write_env_to_file(new_env):

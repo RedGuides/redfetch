@@ -1502,8 +1502,8 @@ class Redfetch(App):
             brewall_opt_in = selected_value in ["brewall", "all"]
             good_opt_in = selected_value in ["good", "all"]
 
-        config.update_setting(['SPECIAL_RESOURCES', '153', 'opt_in'], brewall_opt_in, env=self.current_env)
-        config.update_setting(['SPECIAL_RESOURCES', '303', 'opt_in'], good_opt_in, env=self.current_env)
+        config.update_setting(['SPECIAL_RESOURCES', config.MAPS_MAP["brewall"], 'opt_in'], brewall_opt_in, env=self.current_env)
+        config.update_setting(['SPECIAL_RESOURCES', config.MAPS_MAP["good"], 'opt_in'], good_opt_in, env=self.current_env)
 
         if selected_value is None or selected_value == Select.NULL:
             self.notify("EQ Maps settings cleared")
