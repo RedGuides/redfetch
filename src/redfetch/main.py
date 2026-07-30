@@ -19,6 +19,7 @@ from redfetch import meta
 from redfetch import net
 from redfetch import post_update
 from redfetch import processes
+from redfetch import servers
 from redfetch import utils
 from redfetch import push
 from redfetch import sync
@@ -533,17 +534,50 @@ def config_command(
 
 @app.command(
     "server",
-    help="Switch the current server/environment to [green]LIVE[/green], [yellow]TEST[/yellow], or [cyan]EMU[/cyan].",
+    help="Switch the current server: [green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan], or an emu server by name.",
     rich_help_panel="🍔 Configuration"
 )
 def server_command(
-    env: Env = typer.Argument(..., metavar="SERVER", case_sensitive=False, help="Server to use: [green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]"),
+    env: str = typer.Argument(..., metavar="SERVER", help="[green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan], or an emu server name (e.g. [cyan]lazarus[/cyan])"),
 ):
     config.initialize_config()
-    config.switch_environment(env.value)
-    console.print(f"Environment updated to {env.value}.")
-    console.print("New complete configuration:")
-    typer.echo(config.settings.from_env(env.value).as_dict())
+
+    value = env.strip()
+    token = value.upper()
+    if token in config.ENV_TOKENS:
+        config.switch_environment(token)
+        console.print(f"Environment updated to {token}.")
+        console.print("New complete configuration:")
+        typer.echo(config.settings.from_env(token).as_dict())
+        return
+
+    try:
+        slug = servers.validate_server_slug(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    listed = servers.list_servers("EMU")
+    if slug not in listed:
+        valid = ", ".join([*config.ENV_TOKENS, *sorted(listed)])
+        raise typer.BadParameter(f"Unknown server '{slug}'. Valid servers: {valid}.")
+
+    if not servers.is_server_configured(slug):
+        label = listed[slug].get("label") or slug
+        folder = Prompt.ask(f"EverQuest folder for [bold]{label}[/bold]")
+        try:
+            servers.add_server(slug, eqpath=folder)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+
+    # never persist an emu server slug as REDFETCH_ENV.
+    if config.settings.ENV != "EMU":
+        config.switch_environment("EMU")
+
+    try:
+        servers.switch_server(slug)
+    except servers.ServerSwitchError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command("show", hidden=True)

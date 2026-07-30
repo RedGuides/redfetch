@@ -95,8 +95,8 @@ To run redfetch from the command line:
 >   - `SETTING_PATH` - Dot-separated setting path (e.g., SPECIAL_RESOURCES.1974.opt_in)
 >   - `VALUE` - New value for the setting
 >   - `--server` / `-s` - Server to apply the change in (LIVE, TEST, EMU)
-> - `server <SERVER>` - Switch the current server/environment to LIVE, TEST, or EMU.
->   - `SERVER` - Server to use: LIVE, TEST, EMU
+> - `server <SERVER>` - Switch the current server: LIVE, TEST, EMU, or an emu server by name.
+>   - `SERVER` - LIVE, TEST, EMU, or an emu server name (e.g. lazarus)
 > - `status` - Show the configuration for the current or specified server.
 >   - `--server` / `-s` - Server to show (defaults to current)
 >
