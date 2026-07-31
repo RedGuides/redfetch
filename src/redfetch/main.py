@@ -553,16 +553,17 @@ def server_command(
 
     try:
         slug = servers.validate_server_slug(value.lower())
+        server_env = servers.env_for_slug(slug)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    listed = servers.list_servers("EMU")
-    if slug not in listed:
-        valid = ", ".join([*config.ENV_TOKENS, *sorted(listed)])
+    if server_env is None:
+        known = {s for e in config.MULTI_SERVER_ENVS for s in servers.list_servers(e)}
+        valid = ", ".join([*config.ENV_TOKENS, *sorted(known)])
         raise typer.BadParameter(f"Unknown server '{slug}'. Valid servers: {valid}.")
 
-    if not servers.is_server_configured(slug):
-        label = listed[slug].get("label") or slug
+    if not servers.is_server_configured(slug, server_env):
+        label = servers.list_servers(server_env)[slug].get("label") or slug
         try:
             folder = Prompt.ask(f"EverQuest folder for [bold]{label}[/bold]")
         except (KeyboardInterrupt, EOFError):
@@ -570,14 +571,14 @@ def server_command(
             console.print(f"[red]'{slug}' isn't set up; it needs an EverQuest folder.[/red]")
             raise typer.Exit(1)
         try:
-            servers.add_server(slug, eqpath=folder)
+            servers.add_server(slug, env=server_env, eqpath=folder)
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
         console.print(f"Server '{slug}' added.")
 
-    # never persist an emu server slug as REDFETCH_ENV.
-    if config.settings.ENV != "EMU":
-        config.switch_environment("EMU")
+    # never persist a server slug as REDFETCH_ENV.
+    if config.settings.ENV != server_env:
+        config.switch_environment(server_env)
 
     try:
         notices = servers.switch_server(slug)

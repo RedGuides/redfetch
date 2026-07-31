@@ -23,6 +23,9 @@ CATEGORY_MAP = {
 # Client environments (dynaconf envs). Also for server slugs.
 ENV_TOKENS = ("LIVE", "TEST", "EMU")
 
+# Envs whose server domain servers.py manages (switchable server profiles).
+MULTI_SERVER_ENVS = ("EMU",)
+
 # Resource to MQ version
 VANILLA_MAP = {
     1974: "LIVE",
@@ -197,8 +200,9 @@ def self_heal_eqpath() -> None:
     for env in ENV_TOKENS:
         try:
             env_settings = settings.from_env(env)
-            if env == "EMU" and env_settings.get("ACTIVE_SERVER"):
-                continue  # AutoLogin's shared EMU path isn't tied to the active server.
+            # Spelled inline: config must not import servers.
+            if env in MULTI_SERVER_ENVS and env_settings.get("ACTIVE_SERVER"):
+                continue  # AutoLogin's shared emu path isn't tied to the active server.
             stored = env_settings.get("EQPATH")
             if stored and detecteq.is_valid_eq_dir(stored):
                 continue  # heal only when blank or broken

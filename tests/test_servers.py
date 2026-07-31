@@ -20,10 +20,21 @@ patcher_url = "https://thegrind.example/patcher.zip"
 patcher_exe = "patcher.exe"
 """
 
+# A second multi-server client (paired with monkeypatched MULTI_SERVER_ENVS).
+BUNDLE_TWO_CLIENTS = BUNDLE_WITH_KNOWN + """
+[TOB.SERVERS.veeshan]
+label = "Veeshan"
+opt_in = false
+"""
+
 
 def _install_settings(tmp_path, monkeypatch, local_toml="", bundle_toml=None, env="EMU",
                       current_env=None):
-    """Install a real Dynaconf instance backed by temporary settings files."""
+    """Install a real Dynaconf instance backed by temporary settings files.
+
+    A fixture bundle also swaps config._base_settings_cache, so mutator tests
+    prune/validate against the fixture rather than the real bundle.
+    """
     monkeypatch.setenv("REDFETCH_DATA_DIR", str(tmp_path))
     if current_env:
         monkeypatch.setenv("REDFETCH_ENV", current_env)
@@ -33,6 +44,13 @@ def _install_settings(tmp_path, monkeypatch, local_toml="", bundle_toml=None, en
         bundle_file = tmp_path / "bundle.toml"
         bundle_file.write_text(bundle_toml, encoding="utf-8")
         bundle = str(bundle_file)
+        fixture_base = Dynaconf(
+            settings_files=[bundle],
+            environments=True,
+            merge_enabled=True,
+            env_switcher="REDFETCH_ENV",
+        )
+        monkeypatch.setattr(config, "_base_settings_cache", fixture_base)
     local = tmp_path / "settings.local.toml"
     local.write_text(local_toml, encoding="utf-8")
     real = Dynaconf(
@@ -66,10 +84,10 @@ def test_real_bundle_ships_known_emu_servers(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch)
     assert servers.list_servers("LIVE") == {}
     assert servers.list_servers("TEST") == {}
-    listed = servers.list_servers()
+    listed = servers.list_servers("EMU")
     assert "lazarus" in listed
     assert listed["lazarus"]["label"] == "Project Lazarus"
-    assert servers.is_server_configured("lazarus") is False
+    assert servers.is_server_configured("lazarus", "EMU") is False
 
 
 def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
@@ -110,7 +128,7 @@ opt_in = true
 eqpath = "D:/Games/EQ-Mine"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    listed = servers.list_servers()
+    listed = servers.list_servers("EMU")
     assert "myserver" in listed  # bundled known entries (lazarus) ride along
     entry = listed["myserver"]
     assert type(entry) is dict  # plain dict, not a dynaconf box
@@ -127,7 +145,7 @@ opt_in = true
 eqpath = "C:/Games/EQ-TheGrind"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local, bundle_toml=BUNDLE_WITH_KNOWN)
-    entry = servers.list_servers()["thegrind"]
+    entry = servers.list_servers("EMU")["thegrind"]
     assert entry["label"] == "The Grind"              # from the bundle
     assert entry["opt_in"] is True                    # local delta wins
     assert entry["eqpath"] == "C:/Games/EQ-TheGrind"  # novel local leaf
@@ -140,7 +158,7 @@ def test_list_servers_skips_non_table_junk(tmp_path, monkeypatch):
 SERVERS = "oops"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    assert servers.list_servers() == {}
+    assert servers.list_servers("EMU") == {}
 
 
 # --- get_active_server -----------------------------------------------------------
@@ -148,7 +166,7 @@ SERVERS = "oops"
 def test_get_active_server_scoped_to_client(tmp_path, monkeypatch):
     """ACTIVE_SERVER is scoped to its Dynaconf environment; unset reads as None."""
     _install_settings(tmp_path, monkeypatch, local_toml='[EMU]\nACTIVE_SERVER = "thegrind"\n')
-    assert servers.get_active_server() == "thegrind"
+    assert servers.get_active_server("EMU") == "thegrind"
     assert servers.get_active_server("LIVE") is None
     assert servers.get_active_server("TEST") is None
 
@@ -170,10 +188,10 @@ opt_in = false
 eqpath = "D:/EQ-Out"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    assert servers.is_server_configured("ready") is True
-    assert servers.is_server_configured("no_path") is False
-    assert servers.is_server_configured("opted_out") is False
-    assert servers.is_server_configured("nonexistent") is False
+    assert servers.is_server_configured("ready", "EMU") is True
+    assert servers.is_server_configured("no_path", "EMU") is False
+    assert servers.is_server_configured("opted_out", "EMU") is False
+    assert servers.is_server_configured("nonexistent", "EMU") is False
 
 
 # --- is_known_server ----------------------------------------------------------
@@ -181,9 +199,59 @@ eqpath = "D:/EQ-Out"
 def test_is_known_server_distinguishes_bundle_from_local(tmp_path, monkeypatch):
     local = '[EMU.SERVERS.myserver]\nlabel = "My Server"\n'
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    assert servers.is_known_server("lazarus") is True
-    assert servers.is_known_server("myserver") is False
-    assert servers.is_known_server("nonexistent") is False
+    assert servers.is_known_server("lazarus", "EMU") is True
+    assert servers.is_known_server("myserver", "EMU") is False
+    assert servers.is_known_server("nonexistent", "EMU") is False
+
+
+# --- multi-server seam ---------------------------------------------------------
+
+def test_is_multi_server_predicate(monkeypatch):
+    assert servers.is_multi_server("EMU") is True
+    assert servers.is_multi_server("LIVE") is False
+    assert servers.is_multi_server("TEST") is False
+    # Uniqueness sweeps and the heal loop iterate ENV_TOKENS; a multi-server
+    # env missing from it would silently escape both.
+    assert set(config.MULTI_SERVER_ENVS) <= set(config.ENV_TOKENS)
+    monkeypatch.setattr(config, "MULTI_SERVER_ENVS", ("EMU", "TOB"))
+    assert servers.is_multi_server("TOB") is True
+
+
+def test_env_for_slug_unique_resolution(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch, bundle_toml=BUNDLE_TWO_CLIENTS)
+    monkeypatch.setattr(config, "MULTI_SERVER_ENVS", ("EMU", "TOB"))
+    assert servers.env_for_slug("thegrind") == "EMU"
+    assert servers.env_for_slug("veeshan") == "TOB"
+    assert servers.env_for_slug("nope") is None
+
+
+def test_env_for_slug_ambiguous_raises(tmp_path, monkeypatch):
+    """The same slug under two envs: hand-edits bypass add-path uniqueness."""
+    local = '[TOB.SERVERS.thegrind]\nlabel = "Impostor"\n'
+    _install_settings(tmp_path, monkeypatch, local_toml=local, bundle_toml=BUNDLE_TWO_CLIENTS)
+    monkeypatch.setattr(config, "MULTI_SERVER_ENVS", ("EMU", "TOB"))
+    with pytest.raises(ValueError, match="ambiguous"):
+        servers.env_for_slug("thegrind")
+
+
+def test_switch_server_derives_env_from_slug(tmp_path, monkeypatch):
+    """switch_server writes to the slug's own env, not a hardcoded one."""
+    local = """
+[TOB.SERVERS.veeshan]
+opt_in = true
+eqpath = "D:/EQ-Veeshan"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local, bundle_toml=BUNDLE_TWO_CLIENTS)
+    monkeypatch.setattr(config, "MULTI_SERVER_ENVS", ("EMU", "TOB"))
+
+    servers.switch_server("veeshan")
+
+    parsed = _parsed(tmp_path)
+    assert parsed["TOB"]["ACTIVE_SERVER"] == "veeshan"
+    assert _norm(parsed["TOB"]["EQPATH"]) == _norm("D:/EQ-Veeshan")
+    assert "EMU" not in parsed  # the other multi-server env untouched
+    assert servers.get_active_server("TOB") == "veeshan"
+    assert servers.get_active_server("EMU") is None
 
 
 # --- slug rules --------------------------------------------------------------------
@@ -369,7 +437,7 @@ def test_switch_refreshes_from_env_views(tmp_path, monkeypatch):
     assert clone is not clone_before  # stale clone dropped, not patched
     assert _norm(clone.EQPATH) == _norm("D:/EQ-B")
     assert clone.get("ACTIVE_SERVER") == "b"
-    listed = servers.list_servers()
+    listed = servers.list_servers("EMU")
     assert _norm(listed["a"]["eqpath"]) == _norm("D:/EQ-A")
     assert "b" in listed and "lazarus" in listed
     assert _norm(config.settings.EQPATH) == _norm("D:/EQ-B")
@@ -407,7 +475,7 @@ eqpath = "D:/EQ-C"
     assert emu["ACTIVE_SERVER"] == "c"
     assert _norm(emu["EQPATH"]) == _norm("D:/EQ-C")
     assert "SPECIAL_RESOURCES" not in emu
-    assert servers.get_active_server() == "c"
+    assert servers.get_active_server("EMU") == "c"
 
 
 # --- lifecycle: add / delete / rename -------------------------------------------
@@ -424,7 +492,7 @@ custom_path = "D:/shared-maps"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
 
-    servers.add_server("lazarus", eqpath="D:/EQ-Original")
+    servers.add_server("lazarus", env="EMU", eqpath="D:/EQ-Original")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "lazarus"
@@ -433,14 +501,14 @@ custom_path = "D:/shared-maps"
     assert _norm(snap["eqpath"]) == _norm("D:/EQ-Original")
     assert snap["SPECIAL_RESOURCES"]["153"]["opt_in"] is True  # seeded from env
     assert _norm(snap["SPECIAL_RESOURCES"]["153"]["custom_path"]) == _norm("D:/shared-maps")
-    assert servers.get_active_server() == "lazarus"  # fresh view
-    assert servers.is_server_configured("lazarus") is True
+    assert servers.get_active_server("EMU") == "lazarus"  # fresh view
+    assert servers.is_server_configured("lazarus", "EMU") is True
 
 
 def test_second_add_does_not_switch(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
 
-    servers.add_server("myquarm", eqpath="D:/EQ-Quarm", label="My Quarm")
+    servers.add_server("myquarm", env="EMU", eqpath="D:/EQ-Quarm", label="My Quarm")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "a"  # unchanged
@@ -449,8 +517,8 @@ def test_second_add_does_not_switch(tmp_path, monkeypatch):
     assert snap["label"] == "My Quarm"
     assert snap["opt_in"] is True
     assert "SPECIAL_RESOURCES" not in snap  # later adds don't seed
-    assert servers.get_active_server() == "a"
-    assert servers.is_server_configured("myquarm") is True  # fresh view
+    assert servers.get_active_server("EMU") == "a"
+    assert servers.is_server_configured("myquarm", "EMU") is True  # fresh view
 
 
 def test_add_on_active_slug_writes_through_env_eqpath(tmp_path, monkeypatch):
@@ -458,7 +526,7 @@ def test_add_on_active_slug_writes_through_env_eqpath(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
     config.update_setting(["SERVERS", "a", "opt_in"], False, env="EMU")
 
-    servers.add_server("a", eqpath="D:/EQ-A-New")
+    servers.add_server("a", env="EMU", eqpath="D:/EQ-A-New")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "a"
@@ -473,37 +541,44 @@ def test_add_on_active_slug_writes_through_env_eqpath(tmp_path, monkeypatch):
 def test_add_known_leaves_label_to_bundle(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
 
-    servers.add_server("lazarus", eqpath="D:/EQ-Laz", label="Ignored")
+    servers.add_server("lazarus", env="EMU", eqpath="D:/EQ-Laz", label="Ignored")
 
     snap = _parsed(tmp_path)["EMU"]["SERVERS"]["lazarus"]
     assert "label" not in snap  # bundle owns known labels
-    assert servers.list_servers()["lazarus"]["label"] == "Project Lazarus"
-    assert servers.is_server_configured("lazarus") is True
+    assert servers.list_servers("EMU")["lazarus"]["label"] == "Project Lazarus"
+    assert servers.is_server_configured("lazarus", "EMU") is True
 
 
 def test_add_requires_folder(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="folder"):
-        servers.add_server("nofolder", eqpath="   ")
+        servers.add_server("nofolder", env="EMU", eqpath="   ")
+
+
+def test_add_rejects_single_server_env(tmp_path, monkeypatch):
+    """The server domain only exists for multi-server clients."""
+    _install_settings(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="switchable servers"):
+        servers.add_server("stray", env="LIVE", eqpath="D:/EQ-X")
 
 
 def test_add_novel_rejects_cross_client_collision(tmp_path, monkeypatch):
     local = '[LIVE.SERVERS.claimed]\nlabel = "Claimed"\n'
     _install_settings(tmp_path, monkeypatch, local_toml=local)
     with pytest.raises(ValueError, match="already in use"):
-        servers.add_server("claimed", eqpath="D:/EQ-X")
+        servers.add_server("claimed", env="EMU", eqpath="D:/EQ-X")
 
 
 def test_delete_active_clears_active_server(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
 
-    servers.delete_server("a")
+    servers.delete_server("a", env="EMU")
 
     emu = _parsed(tmp_path)["EMU"]
     assert "ACTIVE_SERVER" not in emu
     assert "a" not in emu["SERVERS"]
-    assert servers.get_active_server() is None  # fresh view
-    listed = servers.list_servers()
+    assert servers.get_active_server("EMU") is None  # fresh view
+    listed = servers.list_servers("EMU")
     assert "a" not in listed and "b" in listed
 
 
@@ -514,20 +589,20 @@ opt_in = true
 eqpath = "D:/EQ-Laz"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
-    assert servers.is_server_configured("lazarus") is True
+    assert servers.is_server_configured("lazarus", "EMU") is True
 
-    servers.delete_server("lazarus")
+    servers.delete_server("lazarus", env="EMU")
 
     assert "lazarus" not in _parsed(tmp_path)["EMU"]["SERVERS"]  # local leaves gone
-    listed = servers.list_servers()  # fresh view shows the bundled entry
+    listed = servers.list_servers("EMU")  # fresh view shows the bundled entry
     assert listed["lazarus"]["label"] == "Project Lazarus"
-    assert servers.is_server_configured("lazarus") is False
+    assert servers.is_server_configured("lazarus", "EMU") is False
 
 
 def test_delete_unknown_rejected(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="Unknown server"):
-        servers.delete_server("nope")
+        servers.delete_server("nope", env="EMU")
 
 
 def test_rename_round_trip_preserves_bytes(tmp_path, monkeypatch):
@@ -535,12 +610,12 @@ def test_rename_round_trip_preserves_bytes(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
     servers.switch_server("b")  # "a" gets a full snapshot via save-back
 
-    servers.rename_server("a", "atemp")
-    servers.rename_server("atemp", "a")
+    servers.rename_server("a", "atemp", env="EMU")
+    servers.rename_server("atemp", "a", env="EMU")
     baseline = _local_file(tmp_path).read_bytes()
 
-    servers.rename_server("a", "atemp")
-    servers.rename_server("atemp", "a")
+    servers.rename_server("a", "atemp", env="EMU")
+    servers.rename_server("atemp", "a", env="EMU")
 
     assert _local_file(tmp_path).read_bytes() == baseline
     snap = _parsed(tmp_path)["EMU"]["SERVERS"]["a"]
@@ -551,13 +626,13 @@ def test_rename_round_trip_preserves_bytes(tmp_path, monkeypatch):
 def test_rename_active_retargets(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
 
-    servers.rename_server("a", "alpha")
+    servers.rename_server("a", "alpha", env="EMU")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "alpha"
     assert "a" not in emu["SERVERS"] and "alpha" in emu["SERVERS"]
-    assert servers.get_active_server() == "alpha"  # fresh view
-    listed = servers.list_servers()
+    assert servers.get_active_server("EMU") == "alpha"  # fresh view
+    listed = servers.list_servers("EMU")
     assert "a" not in listed
     assert _norm(listed["alpha"]["eqpath"]) == _norm("D:/EQ-A")
 
@@ -569,8 +644,8 @@ label = "Claimed"
 """
     _install_settings(tmp_path, monkeypatch, local_toml=local)
     with pytest.raises(ValueError, match="known server"):
-        servers.rename_server("lazarus", "laz2")
+        servers.rename_server("lazarus", "laz2", env="EMU")
     with pytest.raises(ValueError, match="already in use"):
-        servers.rename_server("a", "lazarus")  # bundle slug collision (unconfigured counts)
+        servers.rename_server("a", "lazarus", env="EMU")  # bundle slug collision (unconfigured counts)
     with pytest.raises(ValueError, match="already in use"):
-        servers.rename_server("a", "claimed")  # cross-client collision
+        servers.rename_server("a", "claimed", env="EMU")  # cross-client collision

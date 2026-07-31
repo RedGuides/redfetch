@@ -162,25 +162,28 @@ class ProfileSelect(Select[str]):
         self.set_options(options)
 
 
-def configured_profiles() -> list[tuple[str, str]]:
-    """(slug, label) for each EMU server that's fully set up."""
+def configured_profiles(env: str) -> list[tuple[str, str]]:
+    """(slug, label) for each of the env's servers that's fully set up."""
     return [
         (slug, entry.get("label") or slug)
-        for slug, entry in sorted(servers.list_servers().items())
-        if servers.is_server_configured(slug)
+        for slug, entry in sorted(servers.list_servers(env).items())
+        if servers.is_server_configured(slug, env)
     ]
 
 
 def build_profile_rows() -> list[tuple[Text, str]]:
-    """Dropdown rows: the three environments, then indented EMU profiles.
+    """Dropdown rows: each client environment, then its indented servers.
 
     Prompts double as the collapsed label, so keep them clean — no glyphs or
     active markers. The overlay highlights the current value on its own.
     """
-    rows: list[tuple[Text, str]] = [
-        (Text(env.capitalize(), style="bold"), env) for env in config.ENV_TOKENS
-    ]
-    rows.extend((Text(f"  {label}"), slug) for slug, label in configured_profiles())
+    rows: list[tuple[Text, str]] = []
+    for env in config.ENV_TOKENS:
+        rows.append((Text(env.capitalize(), style="bold"), env))
+        if servers.is_multi_server(env):
+            rows.extend(
+                (Text(f"  {label}"), slug) for slug, label in configured_profiles(env)
+            )
     return rows
 
 
@@ -381,7 +384,7 @@ class FetchTab(ScrollableContainer):
         self.watch(self.app, "is_level_2", self._refresh_welcome)
 
     def _refresh_welcome(self) -> None:
-        app: "Redfetch" = self.app  # type: ignore[assignment]
+        app = self.app
         if not app.username:
             return  # keep the compose default until identity resolves
         if app.is_level_2 is True:
@@ -394,7 +397,7 @@ class FetchTab(ScrollableContainer):
 
     def _watched_button_state(self) -> tuple[str, str, str | None, bool]:
         """Derive button state; a ``None`` variant preserves transient styling."""
-        app: "Redfetch" = self.app  # type: ignore[assignment]
+        app = self.app
         if app.mq_down is None:
             return "Checking MQ status...📞", "Please wait while we check MQ status.", None, True
         if app.mq_down:
@@ -429,7 +432,7 @@ class FetchTab(ScrollableContainer):
 
     def _recompute(self) -> None:
         """Apply current app state to widgets."""
-        app: "Redfetch" = self.app  # type: ignore[assignment]
+        app = self.app
         busy = app.is_updating
         interface_running = app.interface_running
         download_folder = app.download_folder
@@ -681,7 +684,7 @@ class SettingsTab(ScrollableContainer):
 
     def _recompute(self) -> None:
         """Derive every Settings widget from app state + per-env config."""
-        app: "Redfetch" = self.app  # type: ignore[assignment]
+        app = self.app
         busy = app.is_updating or app.interface_running
 
         # Disable entire tab while busy
@@ -903,18 +906,20 @@ class ServersTab(ScrollableContainer):
         return option_list.get_option_at_index(option_list.highlighted).id
 
     def _recompute(self) -> None:
-        app: "Redfetch" = self.app  # type: ignore[assignment]
+        app = self.app
         self.disabled = app.is_updating or app.interface_running
-        if app.current_env != "EMU":
+        if not servers.is_multi_server(app.current_env):
             return
         self._rebuild_list()
         self._refresh_buttons()
 
     def _rebuild_list(self) -> None:
+        app = self.app
+        env = app.current_env
         option_list = self.query_one("#server_list", OptionList)
         previous = self._highlighted_slug()
-        listed = servers.list_servers()
-        active = servers.get_active_server()
+        listed = servers.list_servers(env)
+        active = servers.get_active_server(env)
         option_list.clear_options()
         slugs = sorted(listed)
         for slug in slugs:
@@ -923,11 +928,11 @@ class ServersTab(ScrollableContainer):
             eqpath = str(entry.get("eqpath") or "")
             if slug == active:
                 # The active snapshot lags live settings until switch-away.
-                eqpath = str(self.app.eq_path or "")
+                eqpath = str(app.eq_path or "")
                 prompt = f"[green]●[/green] [b]{label}[/b]  [dim]{eqpath}[/dim]"
-            elif servers.is_server_configured(slug):
+            elif servers.is_server_configured(slug, env):
                 prompt = f"○ {label}  [dim]{eqpath}[/dim]"
-            elif servers.is_known_server(slug):
+            elif servers.is_known_server(slug, env):
                 prompt = f"[dim]  {label} — available[/dim]"
             else:
                 prompt = f"○ {label}  [dim]— not set up[/dim]"
@@ -938,10 +943,11 @@ class ServersTab(ScrollableContainer):
             option_list.highlighted = 0
 
     def _refresh_buttons(self) -> None:
+        env = self.app.current_env
         slug = self._highlighted_slug()
-        active = servers.get_active_server()
-        known = bool(slug) and servers.is_known_server(slug)
-        configured = bool(slug) and servers.is_server_configured(slug)
+        active = servers.get_active_server(env)
+        known = bool(slug) and servers.is_known_server(slug, env)
+        configured = bool(slug) and servers.is_server_configured(slug, env)
         self.query_one("#server_switch", Button).disabled = not slug or slug == active
         self.query_one("#server_rename", Button).disabled = not slug or known
         # Unconfigured known profiles have nothing to delete.
@@ -966,24 +972,27 @@ class ServersTab(ScrollableContainer):
 
     def _busy(self) -> bool:
         """Re-check the busy gate"""
-        app: "Redfetch" = self.app  # type: ignore[assignment]
+        app = self.app
         if app.is_updating or app.interface_running:
             app.notify("redfetch is busy; try again when it finishes.", severity="warning")
             return True
         return False
 
     def _switch(self, slug: str) -> None:
-        if slug == servers.get_active_server():
+        app = self.app
+        env = app.current_env
+        if slug == servers.get_active_server(env):
             return
-        if not servers.is_server_configured(slug):
+        if not servers.is_server_configured(slug, env):
             # CLI parity: prompt for the folder
             self._configure_server(slug, switch_after=True)
             return
-        self.app.switch_active_server(slug)
+        app.switch_active_server(slug)
 
     def _configure_server(self, slug: str, *, switch_after: bool) -> None:
         """Configure a known or custom server from its EQ folder."""
-        label = servers.list_servers().get(slug, {}).get("label") or slug
+        env = self.app.current_env
+        label = servers.list_servers(env).get(slug, {}).get("label") or slug
 
         def picked(path: Path | None) -> None:
             if self._busy():
@@ -992,7 +1001,7 @@ class ServersTab(ScrollableContainer):
                 self.app.notify("No folder selected.", severity="warning")
                 return
             try:
-                servers.add_server(slug, eqpath=str(path))
+                servers.add_server(slug, env=env, eqpath=str(path))
             except ValueError as exc:
                 self.app.notify(str(exc), severity="error")
                 return
@@ -1006,17 +1015,18 @@ class ServersTab(ScrollableContainer):
 
     @on(Button.Pressed, "#server_add")
     def handle_add_pressed(self, event: Button.Pressed) -> None:
+        env = self.app.current_env
         available = [
             (entry.get("label") or slug, slug)
-            for slug, entry in sorted(servers.list_servers().items())
-            if servers.is_known_server(slug) and not servers.is_server_configured(slug)
+            for slug, entry in sorted(servers.list_servers(env).items())
+            if servers.is_known_server(slug, env) and not servers.is_server_configured(slug, env)
         ]
 
         def done(result: dict | None) -> None:
             if not result or self._busy():
                 return
             try:
-                servers.add_server(result["slug"], eqpath=result["eqpath"], label=result["label"])
+                servers.add_server(result["slug"], env=env, eqpath=result["eqpath"], label=result["label"])
             except ValueError as exc:
                 self.app.notify(str(exc), severity="error")
                 return
@@ -1027,6 +1037,7 @@ class ServersTab(ScrollableContainer):
 
     @on(Button.Pressed, "#server_rename")
     def handle_rename_pressed(self, event: Button.Pressed) -> None:
+        env = self.app.current_env
         slug = self._highlighted_slug()
         if not slug:
             return
@@ -1035,7 +1046,7 @@ class ServersTab(ScrollableContainer):
             if not new_slug or new_slug == slug or self._busy():
                 return
             try:
-                servers.rename_server(slug, new_slug)
+                servers.rename_server(slug, new_slug, env=env)
             except ValueError as exc:
                 self.app.notify(str(exc), severity="error")
                 return
@@ -1046,18 +1057,19 @@ class ServersTab(ScrollableContainer):
 
     @on(Button.Pressed, "#server_delete")
     def handle_delete_pressed(self, event: Button.Pressed) -> None:
+        env = self.app.current_env
         slug = self._highlighted_slug()
         if not slug:
             return
-        label = servers.list_servers().get(slug, {}).get("label") or slug
-        known = servers.is_known_server(slug)
-        is_active = servers.get_active_server() == slug
+        label = servers.list_servers(env).get(slug, {}).get("label") or slug
+        known = servers.is_known_server(slug, env)
+        is_active = servers.get_active_server(env) == slug
 
         def done(confirmed: bool | None) -> None:
             if not confirmed or self._busy():
                 return
             try:
-                servers.delete_server(slug)
+                servers.delete_server(slug, env=env)
             except ValueError as exc:
                 self.app.notify(str(exc), severity="error")
                 return
@@ -1186,7 +1198,7 @@ class AccountTab(ScrollableContainer):
         self.watch(self.app, "is_level_2", self._refresh_account_state)
 
     def _refresh_account_state(self) -> None:
-        app: "Redfetch" = self.app  # type: ignore[assignment]
+        app = self.app
         self.query_one("#btn_ding", Button).display = app.is_level_2 is not True
         if not app.username:
             return  # keep the "Loading..." compose default until the level check resolves
@@ -1417,7 +1429,10 @@ class Redfetch(App):
         # Initialize reactive state from config
         self.download_folder = config.settings.from_env(self.current_env).DOWNLOAD_FOLDER or ""
         self.eq_path = config.settings.from_env(self.current_env).EQPATH or ""
-        self.active_server = servers.get_active_server() if self.current_env == "EMU" else None
+        self.active_server = (
+            servers.get_active_server(self.current_env)
+            if servers.is_multi_server(self.current_env) else None
+        )
 
         # Set app title
         self.title = "  redfetch"
@@ -1453,7 +1468,9 @@ class Redfetch(App):
         # Update environment-specific download folder via helper
         self.download_folder = utils.get_current_download_folder()
 
-        self.active_server = servers.get_active_server() if new == "EMU" else None
+        self.active_server = (
+            servers.get_active_server(new) if servers.is_multi_server(new) else None
+        )
         self.apply_servers_tab_visibility()
 
         # Apply theme for new environment
@@ -1786,12 +1803,12 @@ class Redfetch(App):
     #
 
     def apply_servers_tab_visibility(self) -> None:
-        """Show the Servers tab only for EMU."""
+        """Show the Servers tab only for multi-server clients."""
         main_screen = self._base_main_screen()
         if not main_screen:
             return
         tabbed = main_screen.query_one(TabbedContent)
-        if self.current_env == "EMU":
+        if servers.is_multi_server(self.current_env):
             tabbed.show_tab("servers")
         else:
             tabbed.hide_tab("servers")
@@ -1801,7 +1818,10 @@ class Redfetch(App):
         settings_for_env = config.settings.from_env(self.current_env)
         self.eq_path = settings_for_env.EQPATH or ""
         self.download_folder = utils.get_current_download_folder()
-        self.active_server = servers.get_active_server() if self.current_env == "EMU" else None
+        self.active_server = (
+            servers.get_active_server(self.current_env)
+            if servers.is_multi_server(self.current_env) else None
+        )
         self.update_count = None  # the plan behind the badge changed
         main_screen = self._base_main_screen()
         if main_screen:
@@ -1811,7 +1831,7 @@ class Redfetch(App):
             main_screen.query_one(ServersTab)._recompute()
 
     def switch_active_server(self, slug: str) -> None:
-        if slug == servers.get_active_server():
+        if slug == servers.get_active_server(self.current_env):
             # Ignore mount-time events for the active profile.
             return
         if self.is_updating or self.interface_running:
@@ -1824,19 +1844,28 @@ class Redfetch(App):
         for notice in notices or []:
             self.notify(notice, severity="warning")
         self.refresh_after_server_change()
-        label = servers.list_servers().get(slug, {}).get("label") or slug
+        label = servers.list_servers(self.current_env).get(slug, {}).get("label") or slug
         self.notify(f"Server: {label}")
 
     def handle_profile_selected(self, value: str) -> None:
-        """Handle an environment token or an EMU profile slug."""
+        """Handle an environment token or a server profile slug."""
         if value in config.ENV_TOKENS:
             self.current_env = value
             return
-        if self.current_env != "EMU":
-            # Profile slugs always belong to EMU.
+        try:
+            target_env = servers.env_for_slug(value)
+        except ValueError as exc:  # ambiguous slug (hand-edited collision)
+            self.notify(str(exc), severity="error")
+            self.refresh_after_server_change()
+            return
+        if target_env is None:
+            self.notify(f"Unknown server '{value}'.", severity="error")
+            self.refresh_after_server_change()
+            return
+        if self.current_env != target_env:
             self._suppress_env_notify = True
             try:
-                self.current_env = "EMU"  # The watcher is synchronous.
+                self.current_env = target_env  # The watcher is synchronous.
             finally:
                 self._suppress_env_notify = False
         self.switch_active_server(value)

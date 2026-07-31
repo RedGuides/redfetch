@@ -53,6 +53,11 @@ def test_legacy_switch_env_enum_still_accepted(cli_env):
     assert calls == [("client", "TEST")]
 
 
+def test_env_enum_pins_env_tokens():
+    """The CLI's client-token axis stays in lockstep with config.ENV_TOKENS."""
+    assert set(Env) == set(config.ENV_TOKENS)
+
+
 # Emulator server slugs
 
 def test_slug_dispatches_to_switch_server(cli_env, monkeypatch):
