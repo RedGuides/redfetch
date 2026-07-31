@@ -176,6 +176,16 @@ eqpath = "D:/EQ-Out"
     assert servers.is_server_configured("nonexistent") is False
 
 
+# --- is_known_server ----------------------------------------------------------
+
+def test_is_known_server_distinguishes_bundle_from_local(tmp_path, monkeypatch):
+    local = '[EMU.SERVERS.myserver]\nlabel = "My Server"\n'
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    assert servers.is_known_server("lazarus") is True
+    assert servers.is_known_server("myserver") is False
+    assert servers.is_known_server("nonexistent") is False
+
+
 # --- slug rules --------------------------------------------------------------------
 
 @pytest.mark.parametrize("slug", ["thegrind", "project-quarm", "my_server2", "a"])

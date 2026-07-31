@@ -12,12 +12,14 @@ import httpx
 from dynaconf import ValidationError
 from textual_fspicker import SelectDirectory
 from rich.console import detect_legacy_windows
+from rich.text import Text
 
 # textual framework
 from textual import work, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar, RadioSet, RadioButton, Checkbox
+from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar, RadioSet, RadioButton, Checkbox, OptionList
+from textual.widgets.option_list import Option
 from textual.events import Print
 from textual.containers import ScrollableContainer, Center, CenterMiddle, Grid, ItemGrid, Vertical, Horizontal
 from textual.reactive import reactive
@@ -37,6 +39,7 @@ from redfetch import processes
 from redfetch import utils
 from redfetch import meta
 from redfetch import navmesh
+from redfetch import servers
 from redfetch import sync
 from redfetch import shortcuts
 from redfetch import desktop_shortcut
@@ -44,7 +47,7 @@ from redfetch.sync_types import ExecutionPlan, SyncEvent, SyncOutcome
 from redfetch.runtime_errors import display_fatal_error
 
 # for dev mode, from root dir:
-# "hatch shell dev" 
+# "hatch shell dev"
 # "textual run --dev .\src\redfetch\main.py"
 
 
@@ -135,28 +138,95 @@ def staff_picks_enabled(env: str) -> bool:
     return bool(staff_ids) and all(specials.get(rid, {}).get("opt_in", False) for rid in staff_ids)
 
 
+class ProfileSelect(Select[str]):
+    """The server profile dropdown."""
+
+    def __init__(self, options: list[tuple[Text, str]], value: str, widget_id: str) -> None:
+        super().__init__(
+            options,
+            id=widget_id,
+            classes="bordertitles",
+            value=value,
+            prompt="Select server type",
+            allow_blank=False,
+            tooltip=(
+                "The type of EQ server. Live and Test are official servers, "
+                "while Emu is for unofficial servers."
+            ),
+        )
+        self.profile_rows = options
+
+    def replace_options(self, options: list[tuple[Text, str]]) -> None:
+        """Replace options; callers preserve selection and suppress ``Changed``."""
+        self.profile_rows = options
+        self.set_options(options)
+
+
+def configured_profiles() -> list[tuple[str, str]]:
+    """(slug, label) for each EMU server that's fully set up."""
+    return [
+        (slug, entry.get("label") or slug)
+        for slug, entry in sorted(servers.list_servers().items())
+        if servers.is_server_configured(slug)
+    ]
+
+
+def build_profile_rows() -> list[tuple[Text, str]]:
+    """Dropdown rows: the three environments, then indented EMU profiles.
+
+    Prompts double as the collapsed label, so keep them clean — no glyphs or
+    active markers. The overlay highlights the current value on its own.
+    """
+    rows: list[tuple[Text, str]] = [
+        (Text(env.capitalize(), style="bold"), env) for env in config.ENV_TOKENS
+    ]
+    rows.extend((Text(f"  {label}"), slug) for slug, label in configured_profiles())
+    return rows
+
+
+def derived_profile_value(app, options) -> str:
+    """Return a selection guaranteed to exist in ``options``."""
+    derived = app.active_server or app.current_env
+    if derived not in {value for _, value in options}:
+        derived = app.current_env
+    return derived
+
+
+def sync_profile_select(tab: ScrollableContainer, select_id: str) -> None:
+    """Refresh a profile dropdown without emitting ``Changed``."""
+    app = tab.app
+    select = tab.query_one(f"#{select_id}", ProfileSelect)
+    options = build_profile_rows()
+    derived = derived_profile_value(app, options)
+    with tab.prevent(Select.Changed):
+        # Text equality is plain-text based; rows only change on add/rename/delete.
+        if select.profile_rows != options:
+            select.replace_options(options)
+        if select.value != derived:
+            select.value = derived
+
+
 class FetchTab(ScrollableContainer):
     """Content for the Fetch tab."""
+
+    # Limit n/N to the Fetch tab.
+    BINDINGS = [
+        ("n", "search_next"),
+        ("N", "search_prev"),
+    ]
 
     def compose(self) -> ComposeResult:
         # Determine input verb based on terminal
         input_verb = "Enter" if detect_legacy_windows() else "Paste"
-        current_env = self.app.current_env
 
         # Simple vertical layout: controls on top, big log on the bottom
         with Vertical(id="fetch_layout"):
             with Grid(id="fetch_grid"):
-                yield Select[str](
-                    [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
-                    id="server_type_fetch",
-                    classes="bordertitles",
-                    value=current_env,
-                    prompt="Select server type",
-                    allow_blank=False,
-                    tooltip=(
-                        "The type of EQ server. Live and Test are official servers, "
-                        "while Emu is for unofficial servers."
-                    ),
+                profile_rows = build_profile_rows()
+                yield ProfileSelect(
+                    profile_rows,
+                    derived_profile_value(self.app, profile_rows),
+                    "server_type_fetch",
                 )
                 with CenterMiddle(id="centermiddle_welcome"):
                     with Center(id="center_welcome"):
@@ -275,8 +345,7 @@ class FetchTab(ScrollableContainer):
         if term != self._log_search_term:
             self._rebuild_log_search_matches(term)
 
-    def handle_log_search_next(self) -> None:
-        """Move to the next search match in the log."""
+    def _step_search(self, delta: int) -> None:
         self._ensure_log_search_matches_current_term()
 
         if not self._log_search_matches:
@@ -287,25 +356,15 @@ class FetchTab(ScrollableContainer):
             return
 
         self._log_search_index = (
-            self._log_search_index + 1
+            self._log_search_index + delta
         ) % len(self._log_search_matches)
         self._show_current_log_search_result()
 
-    def handle_log_search_prev(self) -> None:
-        """Move to the previous search match in the log."""
-        self._ensure_log_search_matches_current_term()
+    def action_search_next(self) -> None:
+        self._step_search(1)
 
-        if not self._log_search_matches:
-            if self._log_search_term:
-                self.app.notify(f"'{self._log_search_term}' not found in log.")
-            else:
-                self.app.notify("Enter a search term first.")
-            return
-
-        self._log_search_index = (
-            self._log_search_index - 1
-        ) % len(self._log_search_matches)
-        self._show_current_log_search_result()
+    def action_search_prev(self) -> None:
+        self._step_search(-1)
 
     def reset_log_search_state(self) -> None:
         """Reset all log search state for this tab."""
@@ -315,7 +374,8 @@ class FetchTab(ScrollableContainer):
 
     def on_mount(self) -> None:
         for attr in ("mq_down", "is_updating", "progress_visible", "interface_running",
-                     "download_folder", "current_env", "_offer_active", "update_count", "watched_flash"):
+                     "download_folder", "current_env", "active_server", "_offer_active",
+                     "update_count", "watched_flash"):
             self.watch(self.app, attr, self._recompute)
         self.watch(self.app, "username", self._refresh_welcome)
         self.watch(self.app, "is_level_2", self._refresh_welcome)
@@ -332,57 +392,56 @@ class FetchTab(ScrollableContainer):
             greeting = f"Hey [bold]{app.username}[/bold]!"
         self.query_one("#welcome_label", Label).update(greeting)
 
+    def _watched_button_state(self) -> tuple[str, str, str | None, bool]:
+        """Derive button state; a ``None`` variant preserves transient styling."""
+        app: "Redfetch" = self.app  # type: ignore[assignment]
+        if app.mq_down is None:
+            return "Checking MQ status...📞", "Please wait while we check MQ status.", None, True
+        if app.mq_down:
+            return (
+                "MQ Down: Patch Day 💔",
+                "Very Vanilla MQ is down for patch day, check redguides.com for current status.",
+                "default",
+                True,
+            )
+        if app.is_updating:
+            if app._offer_active:
+                # The update is past its cancellable phase.
+                return "Finishing update... 🏁", "Waiting on the post-update prompts.", None, True
+            return "Stop Update 🛑", "Update in progress. Click to cancel.", None, False
+        base_tooltip = (
+            "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ and other staff picks. "
+            "(Manage watched resources on the website, and opt-in or out of any 'special' resources in settings.local.toml)"
+        )
+        count = app.update_count
+        if count:
+            s = "" if count == 1 else "s"
+            label = f"Easy Update Button 🍦 ({count})"
+            tooltip = f"{count} resource{s} ready to fetch. {base_tooltip}"
+            resting_variant = "primary"
+        else:  # 0 is current; None is unchecked.
+            label = "Easy Update Button 🍦"
+            tooltip = base_tooltip
+            resting_variant = "default" if count == 0 else "primary"
+        # Transient sync feedback overrides the resting variant.
+        variant = app.watched_flash or resting_variant
+        return label, tooltip, variant, not bool(app.download_folder)
+
     def _recompute(self) -> None:
         """Apply current app state to widgets."""
         app: "Redfetch" = self.app  # type: ignore[assignment]
         busy = app.is_updating
         interface_running = app.interface_running
-
-        # Update watched button - depends on mq_down, is_updating, interface_running, download_folder
-        update_watched_button = self.query_one("#update_watched", Button)
-        mq_down = app.mq_down
         download_folder = app.download_folder
-        if mq_down is None:
-            update_watched_button.label = "Checking MQ status...📞"
-            update_watched_button.tooltip = "Please wait while we check MQ status."
-            update_watched_button.disabled = True
-        elif mq_down:
-            update_watched_button.label = "MQ Down: Patch Day 💔"
-            update_watched_button.tooltip = (
-                "Very Vanilla MQ is down for patch day, check redguides.com for current status."
-            )
-            update_watched_button.disabled = True
-            update_watched_button.variant = "default"
-        else:
-            if app.is_updating:
-                if app._offer_active:
-                    # sync already finished; the restart/offer flow can't be cancelled
-                    update_watched_button.label = "Finishing update... 🏁"
-                    update_watched_button.tooltip = "Waiting on the post-update prompts."
-                    update_watched_button.disabled = True
-                else:
-                    update_watched_button.label = "Stop Update 🛑"
-                    update_watched_button.tooltip = "Update in progress. Click to cancel."
-                    update_watched_button.disabled = False
-            else:
-                base_tooltip = (
-                    "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ and other staff picks. "
-                    "(Manage watched resources on the website, and opt-in or out of any 'special' resources in settings.local.toml)"
-                )
-                count = app.update_count
-                if count:  # known and > 0: badge it
-                    update_watched_button.label = f"Easy Update Button 🍦 ({count})"
-                    s = "" if count == 1 else "s"
-                    update_watched_button.tooltip = f"{count} resource{s} ready to fetch. {base_tooltip}"
-                    resting_variant = "primary"
-                else:  # 0 = up to date (calm)
-                    update_watched_button.label = "Easy Update Button 🍦"
-                    update_watched_button.tooltip = base_tooltip
-                    resting_variant = "default" if count == 0 else "primary"
-                # a post-sync flash ("success"/"error") wins briefly; otherwise the count-derived resting variant
-                update_watched_button.variant = app.watched_flash or resting_variant
-                update_watched_button.disabled = busy or not bool(download_folder)
-            update_watched_button.refresh(layout=True)
+
+        update_watched_button = self.query_one("#update_watched", Button)
+        label, tooltip, variant, disabled = self._watched_button_state()
+        update_watched_button.label = label
+        update_watched_button.tooltip = tooltip
+        if variant is not None:
+            update_watched_button.variant = variant
+        update_watched_button.disabled = disabled
+        update_watched_button.refresh(layout=True)
 
         # Progress bar and resource-id input are a pair: bar shown ⇒ input hidden.
         progress_bar = self.query_one("#update_progress", ProgressBar)
@@ -400,13 +459,9 @@ class FetchTab(ScrollableContainer):
             busy or not bool(download_folder) or not bool(resource_input.value)
         )
 
-        # Server type select on Fetch tab
-        server_type_fetch = self.query_one("#server_type_fetch", Select)
+        server_type_fetch = self.query_one("#server_type_fetch", ProfileSelect)
         server_type_fetch.disabled = busy or interface_running
-        if server_type_fetch.value != app.current_env:
-            # Prevent recursive Select.Changed events when we sync from app state
-            with self.prevent(Select.Changed):
-                server_type_fetch.value = app.current_env
+        sync_profile_select(self, "server_type_fetch")
 
     #
     # Event handlers for widgets on this tab
@@ -429,11 +484,11 @@ class FetchTab(ScrollableContainer):
 
     @on(Button.Pressed, "#log_search_next")
     def handle_log_search_next_pressed(self, event: Button.Pressed) -> None:
-        self.handle_log_search_next()
+        self._step_search(1)
 
     @on(Button.Pressed, "#log_search_prev")
     def handle_log_search_prev_pressed(self, event: Button.Pressed) -> None:
-        self.handle_log_search_prev()
+        self._step_search(-1)
 
     @on(Button.Pressed, "#copy_log")
     def handle_copy_log_pressed(self, event: Button.Pressed) -> None:
@@ -443,21 +498,21 @@ class FetchTab(ScrollableContainer):
     def handle_clear_log_pressed(self, event: Button.Pressed) -> None:
         self.app.handle_clear_log()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "resource_id_input":
-            self.app.handle_update_resource_id()
-        elif event.input.id == "log_search":
-            self.handle_log_search_next()
+    @on(Input.Submitted, "#resource_id_input")
+    def handle_resource_id_submitted(self, event: Input.Submitted) -> None:
+        self.app.handle_update_resource_id()
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "resource_id_input":
-            update_button = self.query_one("#update_resource_id", Button)
-            update_button.disabled = not bool(event.value)
+    @on(Input.Submitted, "#log_search")
+    def handle_log_search_submitted(self, event: Input.Submitted) -> None:
+        self._step_search(1)
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "server_type_fetch":
-            new_env = event.value
-            self.app.current_env = new_env
+    @on(Input.Changed, "#resource_id_input")
+    def handle_resource_id_changed(self, event: Input.Changed) -> None:
+        self._recompute()
+
+    @on(Select.Changed, "#server_type_fetch")
+    def handle_server_type_fetch_changed(self, event: Select.Changed) -> None:
+        self.app.handle_profile_selected(event.value)
 
 
 class SettingsTab(ScrollableContainer):
@@ -468,17 +523,11 @@ class SettingsTab(ScrollableContainer):
         current_env = self.app.current_env
 
         with ItemGrid(id="dropdowns_grid"):
-            yield Select[str](
-                [("Live", "LIVE"), ("Test", "TEST"), ("Emu", "EMU")],
-                id="server_type",
-                classes="bordertitles",
-                value=current_env,
-                prompt="Select server type",
-                allow_blank=False,
-                tooltip=(
-                    "The type of EQ server. Live and Test are official servers, "
-                    "while Emu is for unofficial servers."
-                ),
+            profile_rows = build_profile_rows()
+            yield ProfileSelect(
+                profile_rows,
+                derived_profile_value(self.app, profile_rows),
+                "server_type",
             )
         with ItemGrid(id="inputs_grid", classes="bordertitles"):
             yield Button(
@@ -622,12 +671,12 @@ class SettingsTab(ScrollableContainer):
 
     def on_mount(self) -> None:
         # recompute's per-env helpers to read the new env.
-        for attr in ("current_env", "download_folder", "eq_path", "is_updating", "interface_running"):
+        for attr in ("current_env", "active_server", "download_folder", "eq_path",
+                     "is_updating", "interface_running"):
             self.watch(self.app, attr, self._recompute)
 
     def on_show(self) -> None:
         # Only the shortcut switch needs an fs re-probe; _recompute would clobber path-input text
- 
         self._refresh_desktop_shortcut()
 
     def _recompute(self) -> None:
@@ -643,12 +692,7 @@ class SettingsTab(ScrollableContainer):
         self.query_one("#vvmq_path_input", Input).disabled = not has_download
         self.query_one("#select_vvmq_path", Button).disabled = not has_download
 
-        # Server type select on Settings tab
-        server_type = self.query_one("#server_type", Select)
-        if server_type.value != app.current_env:
-            # Prevent recursive Select.Changed events when we sync from app state
-            with self.prevent(Select.Changed):
-                server_type.value = app.current_env
+        sync_profile_select(self, "server_type")
 
         # EQ maps select - depends on eq_path
         eq_maps_select = self.query_one("#eq_maps", Select)
@@ -769,43 +813,252 @@ class SettingsTab(ScrollableContainer):
     def handle_uninstall_pressed(self, event: Button.Pressed) -> None:
         self.app.handle_uninstall()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id in ["dl_path_input", "eq_path_input", "vvmq_path_input"]:
-            input_value = event.input.value.strip()
-            self.app.handle_input_update(event.input.id, input_value)
+    @on(Input.Submitted, "#dl_path_input, #eq_path_input, #vvmq_path_input")
+    def handle_path_submitted(self, event: Input.Submitted) -> None:
+        self.app.handle_input_update(event.input.id, event.input.value.strip())
 
-    def on_switch_changed(self, event: Switch.Changed) -> None:
-        if event.switch.id == "myseq":
-            self.app.handle_toggle_myseq(event.value)
-        elif event.switch.id == "staff_picks":
-            self.app.handle_toggle_staff_picks(event.value)
-        elif event.switch.id == "navmesh":
-            self.app.handle_toggle_navmesh(event.value)
-        elif event.switch.id == "auto_update":
-            self.app.handle_toggle_auto_update(event.value)
-        elif event.switch.id == "desktop_shortcut":
-            self.app.handle_toggle_desktop_shortcut(event.value)
+    @on(Switch.Changed, "#myseq")
+    def handle_myseq_changed(self, event: Switch.Changed) -> None:
+        self.app.handle_toggle_myseq(event.value)
 
-    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        value = TRISTATE_OPTIONS[event.index][1]
-        if event.radio_set.id == "auto_run_vvmq":
-            self.app.handle_toggle_auto_run_vvmq(value)
+    @on(Switch.Changed, "#staff_picks")
+    def handle_staff_picks_changed(self, event: Switch.Changed) -> None:
+        self.app.handle_toggle_staff_picks(event.value)
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "eq_maps":
-            new_value = event.value
-            if new_value != self.app.get_current_eq_maps_value():
-                self.app.update_eq_maps_settings(new_value)
+    @on(Switch.Changed, "#navmesh")
+    def handle_navmesh_changed(self, event: Switch.Changed) -> None:
+        self.app.handle_toggle_navmesh(event.value)
 
-        if event.select.id == "server_type":
-            new_env = event.value
-            self.app.current_env = new_env
+    @on(Switch.Changed, "#auto_update")
+    def handle_auto_update_changed(self, event: Switch.Changed) -> None:
+        self.app.handle_toggle_auto_update(event.value)
+
+    @on(Switch.Changed, "#desktop_shortcut")
+    def handle_desktop_shortcut_changed(self, event: Switch.Changed) -> None:
+        self.app.handle_toggle_desktop_shortcut(event.value)
+
+    @on(RadioSet.Changed, "#auto_run_vvmq")
+    def handle_auto_run_vvmq_changed(self, event: RadioSet.Changed) -> None:
+        self.app.handle_toggle_auto_run_vvmq(TRISTATE_OPTIONS[event.index][1])
+
+    @on(Select.Changed, "#eq_maps")
+    def handle_eq_maps_changed(self, event: Select.Changed) -> None:
+        if event.value != self.app.get_current_eq_maps_value():
+            self.app.update_eq_maps_settings(event.value)
+
+    @on(Select.Changed, "#server_type")
+    def handle_server_type_changed(self, event: Select.Changed) -> None:
+        self.app.handle_profile_selected(event.value)
 
     @on(Checkbox.Changed, "#post_update_launch Checkbox")
     def on_launch_toggle_changed(self, event: Checkbox.Changed) -> None:
         target = (event.checkbox.id or "").removeprefix("launch_")
         if target:
             self.app.handle_toggle_post_update_launch(target, event.value)
+
+
+class ServersTab(ScrollableContainer):
+    """Manage EMU server profiles."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="servers_layout"):
+            yield OptionList(id="server_list")
+            with Horizontal(id="server_actions"):
+                yield Button(
+                    "Switch",
+                    id="server_switch",
+                    variant="primary",
+                    tooltip="Make the selected server active, restoring its folder and map choices.",
+                )
+                yield Button(
+                    "Add",
+                    id="server_add",
+                    variant="default",
+                    tooltip="Set up a known emu server, or add your own.",
+                )
+                yield Button(
+                    "Rename",
+                    id="server_rename",
+                    variant="default",
+                    tooltip="Rename a custom server. Known server names come from redfetch.",
+                )
+                yield Button(
+                    "Delete",
+                    id="server_delete",
+                    variant="error",
+                    tooltip="Remove a custom server, or reset a known one back to available.",
+                )
+
+    def on_mount(self) -> None:
+        for attr in ("is_updating", "interface_running", "current_env", "active_server", "eq_path"):
+            self.watch(self.app, attr, self._recompute)
+
+    def on_show(self) -> None:
+        self._recompute()  # Pick up external config edits.
+
+    def _highlighted_slug(self) -> str | None:
+        option_list = self.query_one("#server_list", OptionList)
+        if option_list.highlighted is None:
+            return None
+        return option_list.get_option_at_index(option_list.highlighted).id
+
+    def _recompute(self) -> None:
+        app: "Redfetch" = self.app  # type: ignore[assignment]
+        self.disabled = app.is_updating or app.interface_running
+        if app.current_env != "EMU":
+            return
+        self._rebuild_list()
+        self._refresh_buttons()
+
+    def _rebuild_list(self) -> None:
+        option_list = self.query_one("#server_list", OptionList)
+        previous = self._highlighted_slug()
+        listed = servers.list_servers()
+        active = servers.get_active_server()
+        option_list.clear_options()
+        slugs = sorted(listed)
+        for slug in slugs:
+            entry = listed[slug]
+            label = entry.get("label") or slug  # Tolerate hand-edited entries.
+            eqpath = str(entry.get("eqpath") or "")
+            if slug == active:
+                # The active snapshot lags live settings until switch-away.
+                eqpath = str(self.app.eq_path or "")
+                prompt = f"[green]●[/green] [b]{label}[/b]  [dim]{eqpath}[/dim]"
+            elif servers.is_server_configured(slug):
+                prompt = f"○ {label}  [dim]{eqpath}[/dim]"
+            elif servers.is_known_server(slug):
+                prompt = f"[dim]  {label} — available[/dim]"
+            else:
+                prompt = f"○ {label}  [dim]— not set up[/dim]"
+            option_list.add_option(Option(Text.from_markup(prompt), id=slug))
+        if previous in slugs:
+            option_list.highlighted = slugs.index(previous)
+        elif slugs:
+            option_list.highlighted = 0
+
+    def _refresh_buttons(self) -> None:
+        slug = self._highlighted_slug()
+        active = servers.get_active_server()
+        known = bool(slug) and servers.is_known_server(slug)
+        configured = bool(slug) and servers.is_server_configured(slug)
+        self.query_one("#server_switch", Button).disabled = not slug or slug == active
+        self.query_one("#server_rename", Button).disabled = not slug or known
+        # Unconfigured known profiles have nothing to delete.
+        self.query_one("#server_delete", Button).disabled = not slug or (known and not configured)
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        self._refresh_buttons()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_id:
+            self._switch(event.option_id)
+
+    #
+    # Actions
+    #
+
+    @on(Button.Pressed, "#server_switch")
+    def handle_switch_pressed(self, event: Button.Pressed) -> None:
+        slug = self._highlighted_slug()
+        if slug:
+            self._switch(slug)
+
+    def _switch(self, slug: str) -> None:
+        if slug == servers.get_active_server():
+            return
+        if servers.is_known_server(slug) and not servers.is_server_configured(slug):
+            self._configure_known(slug, switch_after=True)
+            return
+        self.app.switch_active_server(slug)
+
+    def _configure_known(self, slug: str, *, switch_after: bool) -> None:
+        """Configure a known profile from its EQ folder."""
+        label = servers.list_servers().get(slug, {}).get("label") or slug
+
+        def picked(path: Path | None) -> None:
+            if not path:
+                self.app.notify("No folder selected.", severity="warning")
+                return
+            try:
+                servers.add_server(slug, eqpath=str(path))
+            except ValueError as exc:
+                self.app.notify(str(exc), severity="error")
+                return
+            self.app.notify(f"{label} set up.")
+            self.app.refresh_after_server_change()
+            if switch_after:
+                # add_server activates the first profile.
+                self.app.switch_active_server(slug)
+
+        self.app.push_screen(SelectDirectory(location=Path.home()), callback=picked)
+
+    @on(Button.Pressed, "#server_add")
+    def handle_add_pressed(self, event: Button.Pressed) -> None:
+        available = [
+            (entry.get("label") or slug, slug)
+            for slug, entry in sorted(servers.list_servers().items())
+            if servers.is_known_server(slug) and not servers.is_server_configured(slug)
+        ]
+
+        def done(result: dict | None) -> None:
+            if not result:
+                return
+            try:
+                servers.add_server(result["slug"], eqpath=result["eqpath"], label=result["label"])
+            except ValueError as exc:
+                self.app.notify(str(exc), severity="error")
+                return
+            self.app.notify(f"Server '{result['slug']}' added.")
+            self.app.refresh_after_server_change()
+
+        self.app.push_screen(AddServerScreen(available), done)
+
+    @on(Button.Pressed, "#server_rename")
+    def handle_rename_pressed(self, event: Button.Pressed) -> None:
+        slug = self._highlighted_slug()
+        if not slug:
+            return
+
+        def done(new_slug: str | None) -> None:
+            if not new_slug or new_slug == slug:
+                return
+            try:
+                servers.rename_server(slug, new_slug)
+            except ValueError as exc:
+                self.app.notify(str(exc), severity="error")
+                return
+            self.app.notify(f"Server '{slug}' renamed to '{new_slug}'.")
+            self.app.refresh_after_server_change()
+
+        self.app.push_screen(RenameServerScreen(slug), done)
+
+    @on(Button.Pressed, "#server_delete")
+    def handle_delete_pressed(self, event: Button.Pressed) -> None:
+        slug = self._highlighted_slug()
+        if not slug:
+            return
+        label = servers.list_servers().get(slug, {}).get("label") or slug
+        known = servers.is_known_server(slug)
+        is_active = servers.get_active_server() == slug
+
+        def done(confirmed: bool | None) -> None:
+            if not confirmed:
+                return
+            try:
+                servers.delete_server(slug)
+            except ValueError as exc:
+                self.app.notify(str(exc), severity="error")
+                return
+            if known:
+                self.app.notify(f"{label} reset; it's back in the available list.")
+            else:
+                self.app.notify(f"{label} removed.")
+            self.app.refresh_after_server_change()
+
+        self.app.push_screen(
+            ConfirmDeleteServerScreen(label, known=known, is_active=is_active), done
+        )
 
 
 class ShortcutsTab(ScrollableContainer):
@@ -974,6 +1227,9 @@ class MainScreen(Screen):
             with TabPane("Settings", id="settings"):
                 yield SettingsTab(id="settings_scroll")
 
+            with TabPane("Servers", id="servers"):
+                yield ServersTab(id="servers_scroll")
+
             with TabPane("Shortcuts", id="shortcuts"):
                 yield ShortcutsTab(id="shortcuts_scroll")
 
@@ -998,6 +1254,9 @@ class MainScreen(Screen):
         self.query_one("#executables_grid").border_title = "Executables ⚡"
         self.query_one("#folders_grid").border_title = "Folders 📁"
         self.query_one("#files_grid").border_title = "Files 📎"
+        self.query_one("#server_list").border_title = "Emu servers"
+        # The environment watcher does not run at mount.
+        self.app.apply_servers_tab_visibility()
         # Initial widget state is applied by each tab's own on_mount watch wiring (init=True).
 
     #
@@ -1021,6 +1280,8 @@ class Redfetch(App):
     download_folder: reactive[str] = reactive("")
     eq_path: reactive[str] = reactive("")
     current_env: reactive[str] = reactive(config.settings.ENV)
+    # Selected EMU profile, or None outside EMU.
+    active_server: reactive[str | None] = reactive(None)
     # User account identity and permissions: set reactively by background workers, observed by AccountTab for live updates
     username: reactive[str] = reactive("")
     is_level_2: reactive[bool | None] = reactive(None)
@@ -1034,6 +1295,9 @@ class Redfetch(App):
     # This state tracks whether an offer is actively displayed; it's reactive to trigger FetchTab updates when changed.
     _offer_active: reactive[bool] = reactive(False)
 
+    # Avoid an intermediate environment toast during profile selection.
+    _suppress_env_notify: bool = False
+
     CSS_PATH = "terminal_ui.tcss"
 
     MODES = {"main": MainScreen}
@@ -1045,8 +1309,6 @@ class Redfetch(App):
         ("ctrl+s", "cycle_server_type", "Server Type"),
         Binding("ctrl+r", "start_interface", "RG.com Interface", tooltip="Download resources while you browse redguides.com"),
         Binding("ctrl+r", "stop_interface", "Stop Interface", tooltip="Other buttons are disabled until you stop the interface"),
-        ("n", "search_next"),
-        ("N", "search_prev"),
     ]
 
     def _handle_exception(self, error: Exception) -> None:
@@ -1144,6 +1406,7 @@ class Redfetch(App):
         # Initialize reactive state from config
         self.download_folder = config.settings.from_env(self.current_env).DOWNLOAD_FOLDER or ""
         self.eq_path = config.settings.from_env(self.current_env).EQPATH or ""
+        self.active_server = servers.get_active_server() if self.current_env == "EMU" else None
 
         # Set app title
         self.title = "  redfetch"
@@ -1161,9 +1424,8 @@ class Redfetch(App):
     #
     # Watchers
     #
-    # Only current_env is watched reactively at the App (Application) level;
-    # all other reactive values are watched and updated directly by the tab Views themselves
-    # (using self.watch), so they remain live and responsive even when the MainScreen is not visible.
+    # Only current_env is watched at the App level. The other reactives are
+    # watched by their own tab Views, so they stay live even when MainScreen isn't showing.
 
     def watch_current_env(self, old: str, new: str) -> None:
         """Handle changes to the current environment."""
@@ -1180,6 +1442,9 @@ class Redfetch(App):
         # Update environment-specific download folder via helper
         self.download_folder = utils.get_current_download_folder()
 
+        self.active_server = servers.get_active_server() if new == "EMU" else None
+        self.apply_servers_tab_visibility()
+
         # Apply theme for new environment
         new_theme = settings_for_env.get('THEME', 'textual-dark')
         self.theme = new_theme
@@ -1188,7 +1453,8 @@ class Redfetch(App):
         self.update_count = None
 
         self.check_mq_status_worker()
-        self.notify(f"Server type changed to: {new}")
+        if not self._suppress_env_notify:
+            self.notify(f"Server type changed to: {new}")
 
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
@@ -1234,7 +1500,7 @@ class Redfetch(App):
         if self.is_updating or self.interface_running:
             return
 
-        order = ["LIVE", "TEST", "EMU"]
+        order = config.ENV_TOKENS
         try:
             index = order.index(self.current_env)
         except ValueError:
@@ -1254,18 +1520,6 @@ class Redfetch(App):
                 search_input.focus()
             except Exception:
                 pass
-
-    def action_search_next(self) -> None:
-        """Keyboard action: go to next log search match."""
-        main_screen = self._get_main_screen()
-        if main_screen:
-            main_screen.query_one(FetchTab).handle_log_search_next()
-
-    def action_search_prev(self) -> None:
-        """Keyboard action: go to previous log search match."""
-        main_screen = self._get_main_screen()
-        if main_screen:
-            main_screen.query_one(FetchTab).handle_log_search_prev()
 
     def action_cycle_theme(self) -> None:
         """Cycle to the next theme."""
@@ -1319,7 +1573,7 @@ class Redfetch(App):
                     config.update_setting(['EQPATH'], input_value, env=self.current_env)
                     self.eq_path = input_value
                     self.notify("EverQuest folder updated" if input_value else "EverQuest folder cleared")
-                    
+
                     eq_maps_select = main_screen.query_one("#eq_maps", Select)
                     eq_maps_select.disabled = not bool(input_value)
                     eq_maps_select.value = self.get_current_eq_maps_value()
@@ -1517,6 +1771,66 @@ class Redfetch(App):
         return eq_maps_status if eq_maps_status else Select.NULL
 
     #
+    # Server profile handling (emu multipath)
+    #
+
+    def apply_servers_tab_visibility(self) -> None:
+        """Show the Servers tab only for EMU."""
+        main_screen = self._base_main_screen()
+        if not main_screen:
+            return
+        tabbed = main_screen.query_one(TabbedContent)
+        if self.current_env == "EMU":
+            tabbed.show_tab("servers")
+        else:
+            tabbed.hide_tab("servers")
+
+    def refresh_after_server_change(self) -> None:
+        """Refresh tabs even when a profile switch leaves watched values unchanged."""
+        settings_for_env = config.settings.from_env(self.current_env)
+        self.eq_path = settings_for_env.EQPATH or ""
+        self.download_folder = utils.get_current_download_folder()
+        self.active_server = servers.get_active_server() if self.current_env == "EMU" else None
+        main_screen = self._base_main_screen()
+        if main_screen:
+            main_screen.query_one(FetchTab)._recompute()
+            main_screen.query_one(SettingsTab)._recompute()
+            main_screen.query_one(ShortcutsTab)._recompute()
+            main_screen.query_one(ServersTab)._recompute()
+
+    def switch_active_server(self, slug: str) -> None:
+        if slug == servers.get_active_server():
+            # Ignore mount-time events for the active profile.
+            return
+        if self.is_updating or self.interface_running:
+            return
+        try:
+            servers.switch_server(slug)
+        except (servers.ServerSwitchError, ValueError) as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self.refresh_after_server_change()
+        label = servers.list_servers().get(slug, {}).get("label") or slug
+        self.notify(f"Server: {label}")
+
+    def handle_profile_selected(self, value: str) -> None:
+        """Handle an environment token or an EMU profile slug."""
+        if value in config.ENV_TOKENS:
+            self.current_env = value
+            return
+        if self.current_env != "EMU":
+            # Profile slugs always belong to EMU.
+            self._suppress_env_notify = True
+            try:
+                self.current_env = "EMU"  # The watcher is synchronous.
+            finally:
+                self._suppress_env_notify = False
+        self.switch_active_server(value)
+        if self.active_server != value:
+            # Restore dropdowns if the switch was blocked.
+            self.refresh_after_server_change()
+
+    #
     # File/folder operations
     #
 
@@ -1646,7 +1960,6 @@ class Redfetch(App):
                 if main_screen:
                     self.update_complete(worker.result, main_screen.query_one("#update_watched", Button))
                 # Use pending.decision (not worker.result)
-         
                 if pending is not None and pending.decision is not post_update.Decision.NONE:
                     self._offer_active = True  # holds is_updating until the offer worker finishes
                     self._post_update_worker(pending)
@@ -1840,7 +2153,7 @@ class Redfetch(App):
 
     def cancel_redguides_interface(self):
         self.workers.cancel_group(self, "interface_group")
-    
+
     def handle_toggle_desktop_shortcut(self, value: bool) -> None:
         """Ensure the Desktop shortcut is enabled/disabled (Windows-only)."""
         if sys.platform != "win32":
@@ -1899,7 +2212,7 @@ class Redfetch(App):
         from redfetch.listener import run_server_async
         await run_server_async(db_name, headers, category_map)
         return True
-    
+
     @work
     async def load_startup_status(self):
         """Set the account level, the update badge, and print an update summary at startup."""
@@ -2062,15 +2375,178 @@ class RunVVMQScreen(ModalScreen):
             widgets.append(Center(Button("Never", variant="default", id="nevermq")))
         yield Grid(*widgets, id="dialog", classes="two_row" if restart else "")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "yesmq":
-            self.dismiss(self.RESPONSE_RUN)
-        elif event.button.id == "alwaysmq":
-            self.dismiss(self.RESPONSE_ALWAYS)
-        elif event.button.id == "nevermq":
-            self.dismiss(self.RESPONSE_NEVER)
+    @on(Button.Pressed, "#yesmq")
+    def handle_yes_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.RESPONSE_RUN)
+
+    @on(Button.Pressed, "#alwaysmq")
+    def handle_always_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.RESPONSE_ALWAYS)
+
+    @on(Button.Pressed, "#nevermq")
+    def handle_never_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.RESPONSE_NEVER)
+
+    @on(Button.Pressed, "#nomq")
+    def handle_no_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.RESPONSE_SKIP)
+
+
+class AddServerScreen(ModalScreen[dict | None]):
+    """Collect a known or custom server profile."""
+
+    CUSTOM = "__custom__"
+    BINDINGS = [("escape", "dismiss", "Cancel")]
+
+    def __init__(self, available: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self._available = available
+
+    def compose(self) -> ComposeResult:
+        options = [*self._available, ("Custom server…", self.CUSTOM)]
+        with Vertical(id="server_dialog"):
+            yield Label("Add an emu server", id="server_dialog_title")
+            yield Select[str](options, id="add_known", allow_blank=False, value=options[0][1])
+            yield Input(placeholder="Name (e.g. The Grind)", id="add_label")
+            yield Input(placeholder="Short name: a-z 0-9 - _ (e.g. thegrind)", id="add_slug")
+            with Horizontal(id="add_folder_row"):
+                yield Input(placeholder="EverQuest folder for this server", id="add_folder")
+                yield Button("Browse", id="add_browse", variant="default")
+            yield Label("", id="server_dialog_error")
+            with Horizontal(id="server_dialog_buttons"):
+                yield Button("Add", id="add_confirm", variant="primary")
+                yield Button("Cancel", id="add_cancel", variant="default")
+
+    def on_mount(self) -> None:
+        self._sync_mode()
+
+    def _is_custom(self) -> bool:
+        return self.query_one("#add_known", Select).value == self.CUSTOM
+
+    def _sync_mode(self) -> None:
+        custom = self._is_custom()
+        self.query_one("#add_label", Input).display = custom
+        self.query_one("#add_slug", Input).display = custom
+
+    @on(Select.Changed, "#add_known")
+    def handle_known_changed(self, event: Select.Changed) -> None:
+        self._sync_mode()
+
+    @on(Button.Pressed, "#add_browse")
+    def handle_browse(self, event: Button.Pressed) -> None:
+        current = self.query_one("#add_folder", Input).value.strip()
+        start = Path(current) if current and Path(current).is_dir() else Path.home()
+
+        def picked(path: Path | None) -> None:
+            if path:
+                self.query_one("#add_folder", Input).value = str(path)
+
+        self.app.push_screen(SelectDirectory(location=start), callback=picked)
+
+    def _confirm(self) -> None:
+        error = self.query_one("#server_dialog_error", Label)
+        folder = self.query_one("#add_folder", Input).value.strip()
+        if self._is_custom():
+            slug = self.query_one("#add_slug", Input).value.strip()
+            label = self.query_one("#add_label", Input).value.strip() or None
+            try:
+                servers.validate_server_slug(slug, must_be_new=True)
+            except ValueError as exc:
+                error.update(str(exc))
+                return
         else:
-            self.dismiss(self.RESPONSE_SKIP)
+            slug = str(self.query_one("#add_known", Select).value)
+            label = None
+        if not folder:
+            error.update("Choose the EverQuest folder for this server.")
+            return
+        self.dismiss({"slug": slug, "label": label, "eqpath": folder})
+
+    @on(Button.Pressed, "#add_confirm")
+    def handle_confirm(self, event: Button.Pressed) -> None:
+        self._confirm()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._confirm()
+
+    @on(Button.Pressed, "#add_cancel")
+    def handle_cancel(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+
+class RenameServerScreen(ModalScreen[str | None]):
+    """Rename a custom server profile."""
+
+    BINDINGS = [("escape", "dismiss", "Cancel")]
+
+    def __init__(self, slug: str) -> None:
+        super().__init__()
+        self._slug = slug
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="server_dialog"):
+            yield Label(f"Rename '{self._slug}'", id="server_dialog_title")
+            yield Input(placeholder="New short name: a-z 0-9 - _", id="rename_slug")
+            yield Label("", id="server_dialog_error")
+            with Horizontal(id="server_dialog_buttons"):
+                yield Button("Rename", id="rename_confirm", variant="primary")
+                yield Button("Cancel", id="rename_cancel", variant="default")
+
+    def _confirm(self) -> None:
+        new_slug = self.query_one("#rename_slug", Input).value.strip()
+        try:
+            servers.validate_server_slug(new_slug, must_be_new=True)
+        except ValueError as exc:
+            self.query_one("#server_dialog_error", Label).update(str(exc))
+            return
+        self.dismiss(new_slug)
+
+    @on(Button.Pressed, "#rename_confirm")
+    def handle_confirm(self, event: Button.Pressed) -> None:
+        self._confirm()
+
+    @on(Button.Pressed, "#rename_cancel")
+    def handle_cancel(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._confirm()
+
+
+class ConfirmDeleteServerScreen(ModalScreen[bool]):
+    """Confirm a profile reset or deletion."""
+
+    BINDINGS = [("escape", "dismiss", "Cancel")]
+
+    def __init__(self, label: str, *, known: bool, is_active: bool) -> None:
+        super().__init__()
+        self._label = label
+        self._known = known
+        self._is_active = is_active
+
+    def compose(self) -> ComposeResult:
+        if self._known:
+            message = (
+                f"Reset {self._label}? Your folder and map choices for it are removed, "
+                "and it goes back to the available list."
+            )
+        else:
+            message = f"Delete {self._label}? Its settings are removed from settings.local.toml."
+        if self._is_active:
+            message += "\n\nThis is your active server, so no server will be active afterward."
+        with Vertical(id="server_dialog"):
+            yield Label(message, id="server_dialog_title")
+            with Horizontal(id="server_dialog_buttons"):
+                yield Button("Reset" if self._known else "Delete", id="delete_confirm", variant="error")
+                yield Button("Cancel", id="delete_cancel", variant="default")
+
+    @on(Button.Pressed, "#delete_confirm")
+    def handle_confirm(self, event: Button.Pressed) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#delete_cancel")
+    def handle_cancel(self, event: Button.Pressed) -> None:
+        self.dismiss(False)
 
 
 class UninstallScreen(ModalScreen):
@@ -2088,11 +2564,13 @@ class UninstallScreen(ModalScreen):
             id="uninstall_dialog",
         )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "yes_uninstall":
-            self.dismiss(self.RESPONSE_YES)
-        else:
-            self.dismiss(self.RESPONSE_NO)
+    @on(Button.Pressed, "#yes_uninstall")
+    def handle_yes_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.RESPONSE_YES)
+
+    @on(Button.Pressed, "#no_uninstall")
+    def handle_no_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.RESPONSE_NO)
 
 
 def run_textual_ui():

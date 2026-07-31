@@ -65,6 +65,11 @@ def is_server_configured(slug: str, env: str = "EMU") -> bool:
     return bool(server.get("opt_in")) and bool(str(server.get("eqpath") or "").strip())
 
 
+def is_known_server(slug: str, env: str = "EMU") -> bool:
+    """True when the slug ships in the bundled settings.toml."""
+    return slug in _bundle_servers(env)
+
+
 def _bundle_servers(env: str = "EMU") -> dict[str, dict]:
     """Known servers shipped in the bundled settings.toml."""
     servers = config._base_settings().from_env(env).get("SERVERS") or {}

@@ -199,6 +199,13 @@ Label {
     column-span: 4;
 }
 
+/* Server rows need more width than the dropdown itself.
+   SelectOverlay is a private Textual widget  */
+#server_type > SelectOverlay,
+#server_type_fetch > SelectOverlay {
+    width: 34;
+}
+
 /* Settings boxes are label/control (or button/input) pairs */
 #inputs_grid {
     margin-top: 1;
@@ -343,6 +350,88 @@ Label {
     background: $primary-background-darken-1;
 }
 
+/* Servers Tab */
+
+#servers_scroll {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#servers_layout {
+    height: auto;
+}
+
+#server_list {
+    height: auto;
+    max-height: 20;
+    margin-bottom: 1;
+    padding: 0 1;
+    border: round $secondary-background;
+    border-title-color: $text-secondary;
+    border-title-style: bold;
+}
+
+#server_actions {
+    height: auto;
+}
+
+#server_actions Button {
+    margin-right: 2;
+    min-width: 12;
+}
+
+/* Server dialogs (add / rename / delete) */
+
+AddServerScreen, RenameServerScreen, ConfirmDeleteServerScreen {
+    align: center top;
+    background: $background-darken-2 70%;
+}
+
+#server_dialog {
+    margin: 4 1;
+    padding: 1 2;
+    width: 62;
+    height: auto;
+    border: thick $primary-background-darken-3;
+    background: $surface;
+}
+
+#server_dialog > * {
+    margin-bottom: 1;
+}
+
+#server_dialog_title {
+    width: 1fr;
+    content-align: center middle;
+}
+
+#server_dialog_error {
+    color: $text-error;
+    width: 1fr;
+}
+
+#add_folder_row {
+    height: auto;
+}
+
+#add_folder_row Input {
+    width: 1fr;
+}
+
+#add_folder_row Button {
+    margin-left: 1;
+}
+
+#server_dialog_buttons {
+    height: auto;
+    align-horizontal: center;
+}
+
+#server_dialog_buttons Button {
+    margin: 0 1;
+    min-width: 14;
+}
+
 /* Account Grid */
 
 #account_label {
@@ -479,7 +568,7 @@ UninstallScreen Button {
 #uninstall_message {
     color: $text-error;
     column-span: 2;
-    height: 40;
+    height: 1fr;
     width: 100%;
     content-align: center middle;
 }
