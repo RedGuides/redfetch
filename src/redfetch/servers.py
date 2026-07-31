@@ -143,9 +143,10 @@ def _save_reload_patch(path, doc, written):
             config.settings.set(key, value)
 
 
-def switch_server(slug: str) -> None:
-    """Switch the active emu server."""
+def switch_server(slug: str) -> list[str]:
+    """Switch the active emu server"""
     _require_init()
+    notices = []
 
     slug = validate_server_slug(slug)
     incoming = list_servers("EMU").get(slug)
@@ -179,7 +180,9 @@ def switch_server(slug: str) -> None:
             config._descend_tables(emu_table, snap_path[:-1])[snap_path[-1]] = value
             written[".".join(snap_path)] = value
     elif outgoing:
-        print(f"'{outgoing}' is no longer configured; its settings won't be saved back.")
+        notices.append(
+            f"'{outgoing}' is no longer configured. Its settings won't be saved back."
+        )
 
     # Missing profile values inherit the bundled EMU defaults.
     for slot in SERVER_SLOT_PATHS:
@@ -207,7 +210,7 @@ def switch_server(slug: str) -> None:
     written["ACTIVE_SERVER"] = slug
 
     _save_reload_patch(path, doc, written)
-    print(f"Active server: {slug}")
+    return notices
 
 
 def add_server(slug: str, *, eqpath: str, label: str | None = None,
@@ -254,9 +257,12 @@ def add_server(slug: str, *, eqpath: str, label: str | None = None,
         emu_table["ACTIVE_SERVER"] = slug
         written["EQPATH"] = eqpath
         written["ACTIVE_SERVER"] = slug
+    elif slug == get_active_server():
+        # The env slots hold the active server's values
+        config._descend_tables(doc, ("EMU",))["EQPATH"] = eqpath
+        written["EQPATH"] = eqpath
 
     _save_reload_patch(path, doc, written)
-    print(f"Server '{slug}' added." + (" Now active." if first else ""))
 
 
 def delete_server(slug: str) -> None:
@@ -282,7 +288,6 @@ def delete_server(slug: str) -> None:
         written["ACTIVE_SERVER"] = None
 
     _save_reload_patch(path, doc, written)
-    print(f"Server '{slug}' removed.")
 
 
 def rename_server(old: str, new: str) -> None:
@@ -312,4 +317,3 @@ def rename_server(old: str, new: str) -> None:
         written["ACTIVE_SERVER"] = new
 
     _save_reload_patch(path, doc, written)
-    print(f"Server '{old}' renamed to '{new}'.")

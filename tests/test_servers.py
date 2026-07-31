@@ -348,8 +348,9 @@ def test_ghost_prevention_skips_save_back_to_deconfigured(tmp_path, monkeypatch)
     config.update_setting(["EQPATH"], "D:/EQ-B-edited", env="EMU")
     config.update_setting(["SERVERS", "b", "opt_in"], False, env="EMU")
 
-    servers.switch_server("a")
+    notices = servers.switch_server("a")
 
+    assert any("won't be saved back" in notice for notice in notices)
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "a"
     b_snap = emu["SERVERS"]["b"]
@@ -434,6 +435,23 @@ def test_second_add_does_not_switch(tmp_path, monkeypatch):
     assert "SPECIAL_RESOURCES" not in snap  # later adds don't seed
     assert servers.get_active_server() == "a"
     assert servers.is_server_configured("myquarm") is True  # clone patched
+
+
+def test_add_on_active_slug_writes_through_env_eqpath(tmp_path, monkeypatch):
+    """Re-adding the active server updates the env slot, not just the snapshot."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    config.update_setting(["SERVERS", "a", "opt_in"], False, env="EMU")
+
+    servers.add_server("a", eqpath="D:/EQ-A-New")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert emu["ACTIVE_SERVER"] == "a"
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-A-New")
+    assert _norm(emu["SERVERS"]["a"]["eqpath"]) == _norm("D:/EQ-A-New")
+    # The next switch-away saves back the new folder, not a stale env slot.
+    servers.switch_server("b")
+    a_snap = _parsed(tmp_path)["EMU"]["SERVERS"]["a"]
+    assert _norm(a_snap["eqpath"]) == _norm("D:/EQ-A-New")
 
 
 def test_add_known_leaves_label_to_bundle(tmp_path, monkeypatch):

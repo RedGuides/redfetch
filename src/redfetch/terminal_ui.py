@@ -964,19 +964,30 @@ class ServersTab(ScrollableContainer):
         if slug:
             self._switch(slug)
 
+    def _busy(self) -> bool:
+        """Re-check the busy gate"""
+        app: "Redfetch" = self.app  # type: ignore[assignment]
+        if app.is_updating or app.interface_running:
+            app.notify("redfetch is busy; try again when it finishes.", severity="warning")
+            return True
+        return False
+
     def _switch(self, slug: str) -> None:
         if slug == servers.get_active_server():
             return
-        if servers.is_known_server(slug) and not servers.is_server_configured(slug):
-            self._configure_known(slug, switch_after=True)
+        if not servers.is_server_configured(slug):
+            # CLI parity: prompt for the folder
+            self._configure_server(slug, switch_after=True)
             return
         self.app.switch_active_server(slug)
 
-    def _configure_known(self, slug: str, *, switch_after: bool) -> None:
-        """Configure a known profile from its EQ folder."""
+    def _configure_server(self, slug: str, *, switch_after: bool) -> None:
+        """Configure a known or custom server from its EQ folder."""
         label = servers.list_servers().get(slug, {}).get("label") or slug
 
         def picked(path: Path | None) -> None:
+            if self._busy():
+                return
             if not path:
                 self.app.notify("No folder selected.", severity="warning")
                 return
@@ -1002,7 +1013,7 @@ class ServersTab(ScrollableContainer):
         ]
 
         def done(result: dict | None) -> None:
-            if not result:
+            if not result or self._busy():
                 return
             try:
                 servers.add_server(result["slug"], eqpath=result["eqpath"], label=result["label"])
@@ -1021,7 +1032,7 @@ class ServersTab(ScrollableContainer):
             return
 
         def done(new_slug: str | None) -> None:
-            if not new_slug or new_slug == slug:
+            if not new_slug or new_slug == slug or self._busy():
                 return
             try:
                 servers.rename_server(slug, new_slug)
@@ -1043,7 +1054,7 @@ class ServersTab(ScrollableContainer):
         is_active = servers.get_active_server() == slug
 
         def done(confirmed: bool | None) -> None:
-            if not confirmed:
+            if not confirmed or self._busy():
                 return
             try:
                 servers.delete_server(slug)
@@ -1791,6 +1802,7 @@ class Redfetch(App):
         self.eq_path = settings_for_env.EQPATH or ""
         self.download_folder = utils.get_current_download_folder()
         self.active_server = servers.get_active_server() if self.current_env == "EMU" else None
+        self.update_count = None  # the plan behind the badge changed
         main_screen = self._base_main_screen()
         if main_screen:
             main_screen.query_one(FetchTab)._recompute()
@@ -1805,10 +1817,12 @@ class Redfetch(App):
         if self.is_updating or self.interface_running:
             return
         try:
-            servers.switch_server(slug)
+            notices = servers.switch_server(slug)
         except (servers.ServerSwitchError, ValueError) as exc:
             self.notify(str(exc), severity="error")
             return
+        for notice in notices or []:
+            self.notify(notice, severity="warning")
         self.refresh_after_server_change()
         label = servers.list_servers().get(slug, {}).get("label") or slug
         self.notify(f"Server: {label}")

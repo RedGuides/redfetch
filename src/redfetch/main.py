@@ -552,7 +552,7 @@ def server_command(
         return
 
     try:
-        slug = servers.validate_server_slug(value)
+        slug = servers.validate_server_slug(value.lower())
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -563,21 +563,30 @@ def server_command(
 
     if not servers.is_server_configured(slug):
         label = listed[slug].get("label") or slug
-        folder = Prompt.ask(f"EverQuest folder for [bold]{label}[/bold]")
+        try:
+            folder = Prompt.ask(f"EverQuest folder for [bold]{label}[/bold]")
+        except (KeyboardInterrupt, EOFError):
+            # headless/no-stdin: can't configure interactively
+            console.print(f"[red]'{slug}' isn't set up; it needs an EverQuest folder.[/red]")
+            raise typer.Exit(1)
         try:
             servers.add_server(slug, eqpath=folder)
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
+        console.print(f"Server '{slug}' added.")
 
     # never persist an emu server slug as REDFETCH_ENV.
     if config.settings.ENV != "EMU":
         config.switch_environment("EMU")
 
     try:
-        servers.switch_server(slug)
+        notices = servers.switch_server(slug)
     except servers.ServerSwitchError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
+    for notice in notices or []:
+        console.print(f"[yellow]{notice}[/yellow]")
+    console.print(f"Active server: {slug}")
 
 
 @app.command("show", hidden=True)
