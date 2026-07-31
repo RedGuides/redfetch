@@ -312,3 +312,12 @@ guide = "https://www.lazaruseq.com/pages/getting-started-guide"
 eqhost = "login.eqemulator.net:5999"
 patcher_url = "https://www.lazaruseq.com/lazarus-patcher-windows.zip"
 patcher_exe = "LazarusPatcherCLI.exe"
+
+[EMU.SERVERS.ascendant]
+label = "Ascendant"
+shortname = "ascendant"
+opt_in = false
+guide = "https://ascendanteq.com/getting-started"
+eqhost = "login.eqemulator.dev:5999"
+patcher_url = "https://downloads.ascendanteq.com/EQAscendant.zip"
+patcher_exe = "EQAscendant.exe"
