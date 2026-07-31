@@ -358,21 +358,37 @@ def test_ghost_prevention_skips_save_back_to_deconfigured(tmp_path, monkeypatch)
     assert b_snap["opt_in"] is False
 
 
-def test_switch_cache_patch_updates_from_env_clones(tmp_path, monkeypatch):
-    """Refresh cached environment views and the current EMU settings object."""
+def test_switch_refreshes_from_env_views(tmp_path, monkeypatch):
+    """Switch invalidates cached env views; subsequent reads are fresh."""
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL, current_env="EMU")
     clone_before = config.settings.from_env("EMU")
 
     servers.switch_server("b")
 
     clone = config.settings.from_env("EMU")
-    assert clone is clone_before
+    assert clone is not clone_before  # stale clone dropped, not patched
     assert _norm(clone.EQPATH) == _norm("D:/EQ-B")
     assert clone.get("ACTIVE_SERVER") == "b"
     listed = servers.list_servers()
     assert _norm(listed["a"]["eqpath"]) == _norm("D:/EQ-A")
     assert "b" in listed and "lazarus" in listed
     assert _norm(config.settings.EQPATH) == _norm("D:/EQ-B")
+
+
+def test_dynaconf_clone_cache_semantics(tmp_path):
+    """Tripwire: reload() leaves from_env() clones stale; clearing env_cache
+    restores freshness. Fails loudly if dynaconf changes either behavior."""
+    settings_file = tmp_path / "settings.toml"
+    settings_file.write_text('[emu]\nvalue = "old"\n', encoding="utf-8")
+    s = Dynaconf(settings_files=[str(settings_file)], environments=True, merge_enabled=True)
+    assert s.from_env("EMU").VALUE == "old"
+
+    settings_file.write_text('[emu]\nvalue = "new"\n', encoding="utf-8")
+    s.reload()
+    assert s.from_env("EMU").VALUE == "old"  # clones survive reload()
+
+    s.__core__.config.env_cache.clear()
+    assert s.from_env("EMU").VALUE == "new"  # cleared cache rebuilds fresh
 
 
 def test_active_server_kept_when_snapshot_equals_defaults(tmp_path, monkeypatch):
@@ -417,7 +433,7 @@ custom_path = "D:/shared-maps"
     assert _norm(snap["eqpath"]) == _norm("D:/EQ-Original")
     assert snap["SPECIAL_RESOURCES"]["153"]["opt_in"] is True  # seeded from env
     assert _norm(snap["SPECIAL_RESOURCES"]["153"]["custom_path"]) == _norm("D:/shared-maps")
-    assert servers.get_active_server() == "lazarus"  # clone patched
+    assert servers.get_active_server() == "lazarus"  # fresh view
     assert servers.is_server_configured("lazarus") is True
 
 
@@ -434,11 +450,11 @@ def test_second_add_does_not_switch(tmp_path, monkeypatch):
     assert snap["opt_in"] is True
     assert "SPECIAL_RESOURCES" not in snap  # later adds don't seed
     assert servers.get_active_server() == "a"
-    assert servers.is_server_configured("myquarm") is True  # clone patched
+    assert servers.is_server_configured("myquarm") is True  # fresh view
 
 
 def test_add_on_active_slug_writes_through_env_eqpath(tmp_path, monkeypatch):
-    """Re-adding the active server updates the env slot, not just the snapshot."""
+    """Re-adding the active server updates both snapshot and env slot."""
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
     config.update_setting(["SERVERS", "a", "opt_in"], False, env="EMU")
 
@@ -448,7 +464,7 @@ def test_add_on_active_slug_writes_through_env_eqpath(tmp_path, monkeypatch):
     assert emu["ACTIVE_SERVER"] == "a"
     assert _norm(emu["EQPATH"]) == _norm("D:/EQ-A-New")
     assert _norm(emu["SERVERS"]["a"]["eqpath"]) == _norm("D:/EQ-A-New")
-    # The next switch-away saves back the new folder, not a stale env slot.
+    # Switch-away saves the new folder, not a stale env slot.
     servers.switch_server("b")
     a_snap = _parsed(tmp_path)["EMU"]["SERVERS"]["a"]
     assert _norm(a_snap["eqpath"]) == _norm("D:/EQ-A-New")
@@ -486,7 +502,7 @@ def test_delete_active_clears_active_server(tmp_path, monkeypatch):
     emu = _parsed(tmp_path)["EMU"]
     assert "ACTIVE_SERVER" not in emu
     assert "a" not in emu["SERVERS"]
-    assert servers.get_active_server() is None  # clone patched
+    assert servers.get_active_server() is None  # fresh view
     listed = servers.list_servers()
     assert "a" not in listed and "b" in listed
 
@@ -503,7 +519,7 @@ eqpath = "D:/EQ-Laz"
     servers.delete_server("lazarus")
 
     assert "lazarus" not in _parsed(tmp_path)["EMU"]["SERVERS"]  # local leaves gone
-    listed = servers.list_servers()  # clone patched with the bundled entry
+    listed = servers.list_servers()  # fresh view shows the bundled entry
     assert listed["lazarus"]["label"] == "Project Lazarus"
     assert servers.is_server_configured("lazarus") is False
 
@@ -540,7 +556,7 @@ def test_rename_active_retargets(tmp_path, monkeypatch):
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "alpha"
     assert "a" not in emu["SERVERS"] and "alpha" in emu["SERVERS"]
-    assert servers.get_active_server() == "alpha"  # clone patched
+    assert servers.get_active_server() == "alpha"  # fresh view
     listed = servers.list_servers()
     assert "a" not in listed
     assert _norm(listed["alpha"]["eqpath"]) == _norm("D:/EQ-A")

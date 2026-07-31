@@ -129,18 +129,10 @@ def _load_local():
     return path, config.load_config(path)
 
 
-def _save_reload_patch(path, doc, written):
-    """Persist one batched write, then patch dynaconf's caches per key."""
+def _save_and_reload(path, doc):
+    """Persist one batched write, then refresh dynaconf from the file."""
     config.save_config(path, doc)
-    config.settings.reload()
-
-    # reload() leaves from_env() caches stale.
-    emu_clone = config.settings.from_env("EMU")
-    mirror_base = str(getattr(config.settings, "current_env", "")).upper() == "EMU"
-    for key, value in written.items():
-        emu_clone.set(key, value)
-        if mirror_base:
-            config.settings.set(key, value)
+    config.reload_settings()
 
 
 def switch_server(slug: str) -> list[str]:
@@ -166,8 +158,6 @@ def switch_server(slug: str) -> list[str]:
     path, doc = _load_local()
     emu_table = config._descend_tables(doc, ("EMU",))
 
-    written = {}
-
     # Don't recreate a deleted outgoing server.
     saved_back = None
     if outgoing and is_server_configured(outgoing):
@@ -178,13 +168,13 @@ def switch_server(slug: str) -> list[str]:
         for slot, value in saved_back.items():
             snap_path = ("SERVERS", outgoing) + _slot_snapshot_path(slot)
             config._descend_tables(emu_table, snap_path[:-1])[snap_path[-1]] = value
-            written[".".join(snap_path)] = value
     elif outgoing:
         notices.append(
             f"'{outgoing}' is no longer configured. Its settings won't be saved back."
         )
 
     # Missing profile values inherit the bundled EMU defaults.
+    applied = {}
     for slot in SERVER_SLOT_PATHS:
         if outgoing == slug and saved_back is not None:
             value = saved_back[slot]
@@ -194,11 +184,11 @@ def switch_server(slug: str) -> list[str]:
                 value = _read_env_slot(base_emu, slot)
             value = _normalize_slot_value(slot, value)
         config._descend_tables(emu_table, slot[:-1])[slot[-1]] = value
-        written[".".join(slot)] = value
+        applied[slot] = value
 
     # Avoid writing maps to <drive>:\maps.
-    if not written["EQPATH"].strip() and any(
-        written[f"SPECIAL_RESOURCES.{resource_id}.opt_in"]
+    if not applied[("EQPATH",)].strip() and any(
+        applied[("SPECIAL_RESOURCES", resource_id, "opt_in")]
         for resource_id in config.MAPS_MAP.values()
     ):
         raise ServerSwitchError(
@@ -207,9 +197,8 @@ def switch_server(slug: str) -> list[str]:
         )
 
     emu_table["ACTIVE_SERVER"] = slug
-    written["ACTIVE_SERVER"] = slug
 
-    _save_reload_patch(path, doc, written)
+    _save_and_reload(path, doc)
     return notices
 
 
@@ -229,18 +218,13 @@ def add_server(slug: str, *, eqpath: str, label: str | None = None,
     first = not any(is_server_configured(s) for s in list_servers())
 
     path, doc = _load_local()
-    written = {}
     snap = config._descend_tables(doc, ("EMU", "SERVERS", slug))
     if label and not known:  # the bundle owns known labels
         snap["label"] = label
-        written[f"SERVERS.{slug}.label"] = label
     snap["opt_in"] = True
     snap["eqpath"] = eqpath
-    written[f"SERVERS.{slug}.opt_in"] = True
-    written[f"SERVERS.{slug}.eqpath"] = eqpath
     if patcher_url:
         snap["patcher_url"] = patcher_url
-        written[f"SERVERS.{slug}.patcher_url"] = patcher_url
 
     if first:
         # Today's setup becomes server #1: seed from the env slots, no switch.
@@ -251,18 +235,14 @@ def add_server(slug: str, *, eqpath: str, label: str | None = None,
             value = _normalize_slot_value(slot, _read_env_slot(emu_view, slot))
             snap_path = _slot_snapshot_path(slot)
             config._descend_tables(snap, snap_path[:-1])[snap_path[-1]] = value
-            written[f"SERVERS.{slug}." + ".".join(snap_path)] = value
         emu_table = config._descend_tables(doc, ("EMU",))
         emu_table["EQPATH"] = eqpath
         emu_table["ACTIVE_SERVER"] = slug
-        written["EQPATH"] = eqpath
-        written["ACTIVE_SERVER"] = slug
     elif slug == get_active_server():
         # The env slots hold the active server's values
         config._descend_tables(doc, ("EMU",))["EQPATH"] = eqpath
-        written["EQPATH"] = eqpath
 
-    _save_reload_patch(path, doc, written)
+    _save_and_reload(path, doc)
 
 
 def delete_server(slug: str) -> None:
@@ -275,19 +255,16 @@ def delete_server(slug: str) -> None:
         raise ValueError(f"Unknown server '{slug}'.")
 
     path, doc = _load_local()
-    written = {}
     emu_table = doc.get("EMU")
     servers_table = emu_table.get("SERVERS") if emu_table is not None else None
     if servers_table is not None:
+        # Known slugs revert to their bundled entry; customs disappear.
         servers_table.pop(slug, None)
-    # Known slugs revert to their bundled entry; customs disappear.
-    written[f"SERVERS.{slug}"] = _bundle_servers().get(slug) if known else None
 
     if get_active_server() == slug and emu_table is not None:
         emu_table.pop("ACTIVE_SERVER", None)
-        written["ACTIVE_SERVER"] = None
 
-    _save_reload_patch(path, doc, written)
+    _save_and_reload(path, doc)
 
 
 def rename_server(old: str, new: str) -> None:
@@ -307,13 +284,9 @@ def rename_server(old: str, new: str) -> None:
     if servers_table is None or old not in servers_table:
         raise ValueError(f"Server '{old}' has no local settings to rename.")
 
-    written = {}
     servers_table[new] = servers_table.pop(old)
-    written[f"SERVERS.{old}"] = None
-    written[f"SERVERS.{new}"] = config._to_plain(servers_table[new])
 
     if get_active_server() == old:
         emu_table["ACTIVE_SERVER"] = new
-        written["ACTIVE_SERVER"] = new
 
-    _save_reload_patch(path, doc, written)
+    _save_and_reload(path, doc)

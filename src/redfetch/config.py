@@ -498,6 +498,15 @@ def _migrate_local_settings(config_dir):
         save_config(config_file, data)
 
 
+def reload_settings():
+    """Reload settings from disk and invalidate from_env() clones.
+
+    useful until a future dynaconf's reload() clears env_cache
+    """
+    settings.reload()
+    settings.__core__.config.env_cache.clear()
+
+
 def update_setting(setting_path, setting_value, env=None):
     """Update a specific setting in the settings.local.toml file and in memory,
     optionally within a specific environment."""
@@ -533,15 +542,10 @@ def update_setting(setting_path, setting_value, env=None):
     else:
         current_data[setting_path[-1]] = setting_value
 
-    # Update the environment using from_env to target the correct environment
-    settings.from_env(env).set(config_key, setting_value)
-    # Update general settings object to keep it in sync
-    settings.set(config_key, setting_value)
-
     print(f"New Value: {setting_value}")
 
     save_config(config_file, config_data)
-    settings.reload()
+    reload_settings()
 
     print("Configuration saved.")
 
