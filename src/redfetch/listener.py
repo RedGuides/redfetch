@@ -9,6 +9,7 @@ from typing import Any
 from aiohttp import web
 
 from redfetch import config
+from redfetch import servers
 from redfetch import store
 from redfetch import sync
 
@@ -37,7 +38,9 @@ async def _get_root_version_local_async(db_name: str, resource_id: str) -> int |
     """Async helper to fetch root version_local for a tracked root install target."""
     db_path = store.get_db_path(db_name)
     try:
-        return await store.fetch_root_version_local(db_path, resource_id)
+        return await store.fetch_root_version_local(
+            db_path, resource_id, servers.active_server_slug(config.settings.ENV)
+        )
     except sqlite3.OperationalError as e:
         if "no such table" in str(e):
             # Table doesn't exist yet; treat as not installed
@@ -151,7 +154,9 @@ async def handle_reset_download_date(request: web.Request) -> web.Response:
         try:
             with store.get_db_connection(db_name) as conn:
                 cursor = conn.cursor()
-                store.reset_versions_for_resource(cursor, str(resource_id))
+                store.reset_versions_for_resource(
+                    cursor, str(resource_id), servers.active_server_slug(config.settings.ENV)
+                )
                 conn.commit()
             return True
         except Exception as e:

@@ -10,6 +10,7 @@ from platformdirs import user_data_dir
 from redfetch import api
 from redfetch import config
 from redfetch import net
+from redfetch import servers
 from redfetch import store
 from redfetch import sync_discovery
 from redfetch import sync_executor
@@ -139,7 +140,8 @@ async def prepare_sync(
 ) -> PreparedSync:
     """Run discovery -> remote snapshot -> planning, returning the plan without executing it."""
     settings_env = config.settings.ENV
-    local_snapshot = await store.load_local_snapshot(db_path)
+    server_slug = servers.active_server_slug(settings_env)
+    local_snapshot = await store.load_local_snapshot(db_path, server_slug)
 
     async with httpx.AsyncClient(
         headers=headers,
@@ -175,6 +177,7 @@ async def prepare_sync(
         local_snapshot=local_snapshot,
         execution_plan=execution_plan,
         sync_info=sync_info,
+        server_slug=server_slug,
     )
 
 
@@ -207,6 +210,7 @@ async def sync(
             target=target,
             action=action,
             remote_state=remote,
+            server_slug=prepared.server_slug,
         ),
     )
 
@@ -218,6 +222,7 @@ async def sync(
             local_snapshot=local_snapshot,
             execution_plan=execution_plan,
             execution_result=execution_result,
+            server_slug=prepared.server_slug,
         )
     except Exception as exc:
         print(f"Warning: failed to record sync state: {exc}")

@@ -8,6 +8,7 @@ import os
 import re
 
 from redfetch import config
+from redfetch import store
 
 
 # Slugs must work as bare TOML keys and CLI arguments.
@@ -79,6 +80,13 @@ def get_active_server(env: str) -> str | None:
     """
     slug = config.settings.from_env(env).get("ACTIVE_SERVER")
     return str(slug) if slug else None
+
+
+def active_server_slug(env: str) -> str:
+    """The slug that keys per-server db rows: '' on single-server envs or when no server is active."""
+    if not is_multi_server(env):
+        return ""
+    return get_active_server(env) or ""
 
 
 def is_server_configured(slug: str, env: str) -> bool:
@@ -291,6 +299,7 @@ def delete_server(slug: str, *, env: str) -> None:
         env_table.pop("ACTIVE_SERVER", None)
 
     _save_and_reload(path, doc)
+    store.purge_server_rows(f"{env}_resources.db", slug)
 
 
 def rename_server(old: str, new: str, *, env: str) -> None:
@@ -316,3 +325,4 @@ def rename_server(old: str, new: str, *, env: str) -> None:
         env_table["ACTIVE_SERVER"] = new
 
     _save_and_reload(path, doc)
+    store.rekey_server_rows(f"{env}_resources.db", old, new)

@@ -23,7 +23,7 @@ from redfetch.sync_types import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def get_db_path(db_name: str) -> str:
@@ -61,11 +61,39 @@ def _ensure_metadata(cursor) -> None:
     try:
         cursor.execute("SELECT schema_version FROM metadata WHERE id = 1")
         row = cursor.fetchone()
-        if row and row[0] is not None and int(row[0]) >= SCHEMA_VERSION:
+        version = int(row[0]) if row and row[0] is not None else 0
+        if version >= SCHEMA_VERSION:
+            return
+        if version == 2:
+            _migrate_v2_add_server_slug(cursor)
             return
     except Exception:
         pass
     _reset_sync_schema(cursor)
+
+
+_V2_COLUMNS = (
+    "target_key, resource_id, parent_id, parent_target_key, root_resource_id, "
+    "target_kind, category_id, title, version_remote, version_local, "
+    "resolved_path, subfolder, flatten, protected_files, remote_status, "
+    "is_special, is_watching, is_licensed, is_explicit, is_dependency"
+)
+
+
+def _migrate_v2_add_server_slug(cursor) -> None:
+    """v2 -> v3: re-key rows by (target_key, server_slug), keeping install state.
+
+    Migrated rows get slug '' — the first server write under a slug promotes
+    its row (see _upsert_download_row), so no attribution pass is needed.
+    """
+    cursor.execute("ALTER TABLE downloads RENAME TO downloads_v2")
+    _ensure_downloads_table(cursor)
+    cursor.execute(
+        f"INSERT INTO downloads ({_V2_COLUMNS}) SELECT {_V2_COLUMNS} FROM downloads_v2"
+    )
+
+    cursor.execute("DROP TABLE downloads_v2")
+    cursor.execute("UPDATE metadata SET schema_version = ? WHERE id = 1", (SCHEMA_VERSION,))
 
 
 def _ensure_downloads_table(cursor) -> None:
@@ -73,7 +101,8 @@ def _ensure_downloads_table(cursor) -> None:
         """
         CREATE TABLE IF NOT EXISTS downloads (
             id INTEGER PRIMARY KEY,
-            target_key TEXT UNIQUE,
+            target_key TEXT NOT NULL,
+            server_slug TEXT NOT NULL DEFAULT '',
             resource_id INTEGER NOT NULL,
             parent_id INTEGER NOT NULL DEFAULT 0,
             parent_target_key TEXT,
@@ -92,7 +121,8 @@ def _ensure_downloads_table(cursor) -> None:
             is_watching INTEGER NOT NULL DEFAULT 0,
             is_licensed INTEGER NOT NULL DEFAULT 0,
             is_explicit INTEGER NOT NULL DEFAULT 0,
-            is_dependency INTEGER NOT NULL DEFAULT 0
+            is_dependency INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(target_key, server_slug)
         )
         """
     )
@@ -130,6 +160,7 @@ def _ensure_navmesh_tables(cursor) -> None:
 
 def _reset_sync_schema(cursor) -> None:
     cursor.execute("DROP TABLE IF EXISTS downloads")
+    cursor.execute("DROP TABLE IF EXISTS downloads_v2")
     cursor.execute("DROP TABLE IF EXISTS resources")
     cursor.execute("DROP TABLE IF EXISTS dependencies")
     cursor.execute("DROP TABLE IF EXISTS metadata")
@@ -158,18 +189,20 @@ def reset_all_versions(cursor) -> None:
     cursor.execute("UPDATE downloads SET version_local = 0")
 
 
-def reset_versions_for_resource(cursor, resource_id: str) -> None:
+def reset_versions_for_resource(cursor, resource_id: str, server_slug: str = "") -> None:
+    """Force a re-download of one resource's rows — the active server's, not every server's."""
     key = f"/{resource_id}/"
     cursor.execute(
         """
         UPDATE downloads
         SET version_local = 0
-        WHERE target_key = ?
-           OR target_key LIKE ?
+        WHERE (target_key = ? OR target_key LIKE ?)
+          AND server_slug IN ('', ?)
         """,
         (
             key,
             f"{key}%",
+            server_slug,
         ),
     )
 
@@ -186,9 +219,17 @@ def _decode_protected_files(raw: str | None) -> list[str]:
     return [str(item) for item in value]
 
 
+def _row_server_slug(root_resource_id: str, server_slug: str) -> str:
+    """Only maps packs live under each server's eqpath, so only their rows key per server."""
+    if str(root_resource_id) in config.MAPS_MAP.values():
+        return server_slug
+    return ""
+
+
 def _row_to_local_state(row: sqlite3.Row | tuple) -> LocalInstallState:
     (
         target_key,
+        server_slug,
         resource_id,
         parent_id,
         parent_target_key,
@@ -212,6 +253,7 @@ def _row_to_local_state(row: sqlite3.Row | tuple) -> LocalInstallState:
 
     return LocalInstallState(
         target_key=str(target_key),
+        server_slug=str(server_slug),
         resource_id=str(resource_id),
         parent_id=str(parent_id) if parent_id not in (None, 0) else None,
         parent_target_key=parent_target_key,
@@ -233,19 +275,22 @@ def _row_to_local_state(row: sqlite3.Row | tuple) -> LocalInstallState:
     )
 
 
-async def load_local_snapshot(db_path: str) -> LocalSnapshot:
+async def load_local_snapshot(db_path: str, server_slug: str = "") -> LocalSnapshot:
     """Load all tracked install targets from the DB so the planner knows what's installed."""
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
         async with conn.execute(
             """
             SELECT
-                target_key, resource_id, parent_id, parent_target_key, root_resource_id,
+                target_key, server_slug, resource_id, parent_id, parent_target_key, root_resource_id,
                 target_kind, category_id, title, version_remote, version_local,
                 resolved_path, subfolder, flatten,
                 protected_files, remote_status,
                 is_special, is_watching, is_licensed, is_explicit, is_dependency
             FROM downloads
-            """
+            WHERE server_slug IN ('', ?)
+            ORDER BY server_slug
+            """,
+            (server_slug,),
         ) as cursor:
             rows = await cursor.fetchall()
 
@@ -275,8 +320,10 @@ async def _upsert_download_row(
     action: PlannedAction | None,
     remote_state: RemoteResourceState | None,
     version_local: int | None,
+    server_slug: str = "",
 ) -> None:
     """Save or overwrite a single download row with the best-known values from each source."""
+    row_slug = _row_server_slug(target.root_resource_id, server_slug)
     flags = _desired_flags(target)
     persisted_category_id = (
         action.category_id
@@ -305,13 +352,13 @@ async def _upsert_download_row(
     await conn.execute(
         """
         INSERT INTO downloads (
-            target_key, resource_id, parent_id, parent_target_key, root_resource_id,
+            target_key, server_slug, resource_id, parent_id, parent_target_key, root_resource_id,
             target_kind, category_id, title, version_remote, version_local,
             resolved_path, subfolder, flatten,
             protected_files, remote_status,
             is_special, is_watching, is_licensed, is_explicit, is_dependency
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(target_key) DO UPDATE SET
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(target_key, server_slug) DO UPDATE SET
             resource_id = excluded.resource_id,
             parent_id = excluded.parent_id,
             parent_target_key = excluded.parent_target_key,
@@ -334,6 +381,7 @@ async def _upsert_download_row(
         """,
         (
             target.target_key,
+            row_slug,
             int(target.resource_id),
             int(target.parent_id) if target.parent_id is not None else 0,
             target.parent_target_key,
@@ -355,6 +403,11 @@ async def _upsert_download_row(
             flags["is_dependency"],
         ),
     )
+    if row_slug:
+        await conn.execute(
+            "DELETE FROM downloads WHERE target_key = ? AND server_slug = ''",
+            (target.target_key,),
+        )
 
 
 async def record_download_success(
@@ -363,6 +416,7 @@ async def record_download_success(
     target: DesiredInstallTarget,
     action: PlannedAction,
     remote_state: RemoteResourceState,
+    server_slug: str = "",
 ) -> None:
     """Persist one target immediately after download so interrupted syncs keep progress."""
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
@@ -372,6 +426,7 @@ async def record_download_success(
             action=action,
             remote_state=remote_state,
             version_local=remote_state.version_id,
+            server_slug=server_slug,
         )
         await conn.commit()
 
@@ -384,6 +439,7 @@ async def record_installed_state(
     local_snapshot: LocalSnapshot,
     execution_plan: ExecutionPlan,
     execution_result: ExecutionResult,
+    server_slug: str = "",
 ) -> None:
     """End-of-run batch write for all outcomes: skips, blocks, and untracks."""
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
@@ -392,7 +448,11 @@ async def record_installed_state(
             existing = local_snapshot.install_targets.get(target_key)
 
             if action.action == "untrack":
-                await conn.execute("DELETE FROM downloads WHERE target_key = ?", (target_key,))
+                # Scoped to the snapshot row's own slug: inactive servers' rows stay.
+                await conn.execute(
+                    "DELETE FROM downloads WHERE target_key = ? AND server_slug = ?",
+                    (target_key, existing.server_slug if existing else ""),
+                )
                 continue
 
             if result_item.outcome == "downloaded":
@@ -400,6 +460,10 @@ async def record_installed_state(
 
             # Keep a failed download's row untouched
             if action.action == "download" and existing is not None:
+                continue
+
+            # A block must not restamp an existing row with this run's context
+            if action.action == "block" and existing is not None:
                 continue
 
             desired_target = desired_set.install_targets.get(target_key)
@@ -419,6 +483,7 @@ async def record_installed_state(
                 action=action,
                 remote_state=remote_state,
                 version_local=version_local,
+                server_slug=server_slug,
             )
 
         await conn.commit()
@@ -433,18 +498,43 @@ def reset_download_dates(cursor) -> None:
         pass  # cache invalidation is best-effort
 
 
-def reset_download_dates_for_resources(db_name: str, resource_ids: Iterable[str]) -> bool:
+def reset_download_dates_for_resources(db_name: str, resource_ids: Iterable[str], server_slug: str = "") -> bool:
     """Force re-download of selected resources without touching anything else."""
     try:
         with get_db_connection(db_name) as conn:
             cursor = conn.cursor()
             for resource_id in resource_ids:
-                reset_versions_for_resource(cursor, resource_id)
+                reset_versions_for_resource(cursor, resource_id, server_slug)
             conn.commit()
         return True
     except Exception as exc:
         print(f"Error resetting download dates: {exc}")
         return False
+
+
+def rekey_server_rows(db_name: str, old_slug: str, new_slug: str) -> None:
+    """Follow a server rename so its per-server rows keep their install state."""
+    if not old_slug or not new_slug:
+        raise ValueError("server slug required")
+    if not os.path.exists(get_db_path(db_name)):
+        return
+    with get_db_connection(db_name) as conn:
+        # renames require an unused name
+        conn.execute("DELETE FROM downloads WHERE server_slug = ?", (new_slug,))
+        conn.execute(
+            "UPDATE downloads SET server_slug = ? WHERE server_slug = ?",
+            (new_slug, old_slug),
+        )
+
+
+def purge_server_rows(db_name: str, slug: str) -> None:
+    """Delete a removed server's rows so they don't linger as unreachable orphans."""
+    if not slug:
+        raise ValueError("server slug required")
+    if not os.path.exists(get_db_path(db_name)):
+        return
+    with get_db_connection(db_name) as conn:
+        conn.execute("DELETE FROM downloads WHERE server_slug = ?", (slug,))
 
 
 async def reset_download_dates_async(db_path: str) -> None:
@@ -461,7 +551,7 @@ async def reset_download_dates_async(db_path: str) -> None:
 def list_resources(cursor) -> list[tuple[int, str]]:
     cursor.execute(
         """
-        SELECT resource_id, title
+        SELECT DISTINCT resource_id, title
         FROM downloads
         WHERE parent_target_key IS NULL
         ORDER BY resource_id
@@ -473,7 +563,7 @@ def list_resources(cursor) -> list[tuple[int, str]]:
 def list_dependencies(cursor) -> list[tuple[int, str]]:
     cursor.execute(
         """
-        SELECT resource_id, title
+        SELECT DISTINCT resource_id, title
         FROM downloads
         WHERE parent_target_key IS NOT NULL
         ORDER BY root_resource_id, target_key
@@ -482,17 +572,18 @@ def list_dependencies(cursor) -> list[tuple[int, str]]:
     return cursor.fetchall()
 
 
-async def fetch_root_version_local(db_path: str, resource_id: str) -> int | None:
+async def fetch_root_version_local(db_path: str, resource_id: str, server_slug: str = "") -> int | None:
     """Return the local version stamp for a resource, or None if not installed."""
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
         async with conn.execute(
             """
             SELECT version_local
             FROM downloads
-            WHERE resource_id = ? AND parent_target_key IS NULL
+            WHERE resource_id = ? AND parent_target_key IS NULL AND server_slug IN ('', ?)
+            ORDER BY server_slug DESC
             LIMIT 1
             """,
-            (int(resource_id),),
+            (int(resource_id), server_slug),
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None

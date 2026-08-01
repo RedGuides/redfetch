@@ -2108,7 +2108,8 @@ class Redfetch(App):
             headers = await auth.get_api_headers()
             if resource_ids:
                 reset_success = await asyncio.to_thread(
-                    store.reset_download_dates_for_resources, db_name, resource_ids
+                    store.reset_download_dates_for_resources, db_name, resource_ids,
+                    servers.active_server_slug(self.current_env),
                 )
                 if not reset_success:
                     return SyncOutcome(success=False)

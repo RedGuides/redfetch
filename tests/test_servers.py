@@ -6,7 +6,7 @@ import tomllib
 import pytest
 from dynaconf import Dynaconf
 
-from redfetch import config, servers
+from redfetch import config, servers, store
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -169,6 +169,19 @@ def test_get_active_server_scoped_to_client(tmp_path, monkeypatch):
     assert servers.get_active_server("EMU") == "thegrind"
     assert servers.get_active_server("LIVE") is None
     assert servers.get_active_server("TEST") is None
+
+
+def test_active_server_slug_for_db_keying(tmp_path, monkeypatch):
+    """'' on single-server envs and when no server is active — never None."""
+    _install_settings(tmp_path, monkeypatch, local_toml='[EMU]\nACTIVE_SERVER = "thegrind"\n')
+    assert servers.active_server_slug("EMU") == "thegrind"
+    assert servers.active_server_slug("LIVE") == ""
+    assert servers.active_server_slug("TEST") == ""
+
+
+def test_active_server_slug_empty_when_unset(tmp_path, monkeypatch):
+    _install_settings(tmp_path, monkeypatch)
+    assert servers.active_server_slug("EMU") == ""
 
 
 # --- is_server_configured ---------------------------------------------------------
@@ -635,6 +648,47 @@ def test_rename_active_retargets(tmp_path, monkeypatch):
     listed = servers.list_servers("EMU")
     assert "a" not in listed
     assert _norm(listed["alpha"]["eqpath"]) == _norm("D:/EQ-A")
+
+
+# --- db row hygiene (C12) ---------------------------------------------------------
+
+def _seed_maps_rows(env, slugs):
+    db_name = f"{env}_resources.db"
+    store.initialize_db(db_name)
+    with store.get_db_connection(db_name) as conn:
+        for slug in slugs:
+            conn.execute(
+                "INSERT INTO downloads (target_key, server_slug, resource_id, root_resource_id,"
+                " target_kind, version_local) VALUES ('/153/', ?, 153, 153, 'root', 7)",
+                (slug,),
+            )
+
+
+def _maps_row_slugs(env):
+    with store.get_db_connection(f"{env}_resources.db") as conn:
+        return [row[0] for row in conn.execute(
+            "SELECT server_slug FROM downloads WHERE target_key = '/153/' ORDER BY server_slug"
+        )]
+
+
+def test_rename_rekeys_db_rows(tmp_path, monkeypatch):
+    """A renamed server keeps its per-server rows; orphans under the new name go."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    _seed_maps_rows("EMU", ["", "a", "alpha"])  # 'alpha' = orphan from a pre-fix delete
+
+    servers.rename_server("a", "alpha", env="EMU")
+
+    assert _maps_row_slugs("EMU") == ["", "alpha"]
+
+
+def test_delete_purges_db_rows(tmp_path, monkeypatch):
+    """A deleted server's rows go with it; env-level rows stay."""
+    _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
+    _seed_maps_rows("EMU", ["", "a"])
+
+    servers.delete_server("a", env="EMU")
+
+    assert _maps_row_slugs("EMU") == [""]
 
 
 def test_rename_rejects_known_and_collisions(tmp_path, monkeypatch):

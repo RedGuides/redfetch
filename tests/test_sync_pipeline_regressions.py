@@ -583,6 +583,195 @@ def test_special_resource_with_unknown_category_still_downloads():
     assert action.resolved_path == expected
 
 
+# --- C12: per-server db keying -----------------------------------------------
+
+def _special_target(resource_id: str, path: str) -> DesiredInstallTarget:
+    return DesiredInstallTarget(
+        target_key=f"/{resource_id}/",
+        resource_id=resource_id,
+        parent_id=None,
+        parent_target_key=None,
+        root_resource_id=resource_id,
+        target_kind="root",
+        sources={"special"},
+        title=f"Resource {resource_id}",
+        category_id=8,
+        resolved_path=path,
+        subfolder=None,
+        flatten=False,
+        protected_files=[],
+        explicit_root=False,
+    )
+
+
+_OUTCOME_BY_ACTION = {"download": "downloaded", "skip": "skipped", "block": "blocked", "untrack": "untracked"}
+
+
+def _run_sync_round(db_path, desired_set, remote_snapshot, server_slug):
+    """Plan + record one run the way sync.sync() drives store, without the network."""
+    snapshot = asyncio.run(store.load_local_snapshot(db_path, server_slug))
+    plan = planner.build_execution_plan(
+        desired_set=desired_set,
+        remote_snapshot=remote_snapshot,
+        local_snapshot=snapshot,
+        settings_env="EMU",
+    )
+    items = {}
+    for key, action in plan.actions.items():
+        if action.action == "download":
+            asyncio.run(store.record_download_success(
+                db_path,
+                target=desired_set.install_targets[key],
+                action=action,
+                remote_state=remote_snapshot.resources[action.resource_id],
+                server_slug=server_slug,
+            ))
+        items[key] = ExecutionResultItem(
+            target_key=key, resource_id=action.resource_id,
+            outcome=_OUTCOME_BY_ACTION[action.action], reason=action.reason,
+        )
+    asyncio.run(store.record_installed_state(
+        db_path,
+        desired_set=desired_set,
+        remote_snapshot=remote_snapshot,
+        local_snapshot=snapshot,
+        execution_plan=plan,
+        execution_result=ExecutionResult(items=items),
+        server_slug=server_slug,
+    ))
+    return plan
+
+
+def test_server_switch_round_trip_skips_shared_maps_redownload(tmp_path):
+    """C12 pin: switching A -> B -> A with a shared opted-in maps pack replans
+    as already_current — each server's row survives the others' switches."""
+    db_path = _db_path(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        store.initialize_schema(conn.cursor())
+        conn.commit()
+
+    remote = RemoteSnapshot(resources={
+        "153": _downloadable_state("153"),
+        "60": _downloadable_state("60"),
+    })
+    vvmq = "C:/emu/VanillaMQ_EMU"
+
+    def desired(maps_path):
+        return _desired_set(_special_target("153", maps_path), _special_target("60", vvmq))
+
+    first_on_a = _run_sync_round(db_path, desired("C:/eq_a/maps"), remote, "servera")
+    assert first_on_a.actions["/153/"].reason == "not_installed"
+
+    on_b = _run_sync_round(db_path, desired("C:/eq_b/maps"), remote, "serverb")
+    assert on_b.actions["/153/"].reason == "not_installed"  # B's first sync ever
+    assert on_b.actions["/60/"].action == "skip"  # env-level special: one shared row
+
+    back_on_a = _run_sync_round(db_path, desired("C:/eq_a/maps"), remote, "servera")
+    assert back_on_a.actions["/153/"].action == "skip"
+    assert back_on_a.actions["/153/"].reason == "already_current"
+    assert back_on_a.actions["/60/"].action == "skip"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT server_slug, resolved_path FROM downloads WHERE target_key = '/153/' ORDER BY server_slug"
+        ).fetchall()
+    assert rows == [("servera", "C:/eq_a/maps"), ("serverb", "C:/eq_b/maps")]
+
+
+def test_legacy_env_level_maps_row_serves_then_promotes(tmp_path):
+    """A migrated (pre-C12) '' row still satisfies the active server's plan,
+    and the run's record pass re-keys it under that server."""
+    db_path = _db_path(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        store.initialize_schema(conn.cursor())
+        conn.execute(
+            """
+            INSERT INTO downloads (target_key, server_slug, resource_id, root_resource_id,
+                                   target_kind, version_local, resolved_path, is_special)
+            VALUES ('/153/', '', 153, 153, 'root', 1234, 'C:/eq_a/maps', 1)
+            """
+        )
+        conn.commit()
+
+    remote = RemoteSnapshot(resources={"153": _downloadable_state("153")})
+    plan = _run_sync_round(
+        db_path, _desired_set(_special_target("153", "C:/eq_a/maps")), remote, "servera"
+    )
+    assert plan.actions["/153/"].action == "skip"
+    assert plan.actions["/153/"].reason == "already_current"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT server_slug FROM downloads WHERE target_key = '/153/'").fetchall()
+    assert rows == [("servera",)]
+
+
+def test_blocked_target_keeps_existing_row_untouched(tmp_path):
+    """A block must not restamp an existing row with this run's path/slug —
+    else the next unblocked run plans already_current and never installs."""
+    db_path = _db_path(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        store.initialize_schema(conn.cursor())
+        conn.execute(
+            """
+            INSERT INTO downloads (target_key, server_slug, resource_id, root_resource_id,
+                                   target_kind, version_local, resolved_path, is_special)
+            VALUES ('/153/', '', 153, 153, 'root', 1234, 'C:/eq_b/maps', 1)
+            """
+        )
+        conn.commit()
+
+    desired = _desired_set(_special_target("153", "C:/eq_a/maps"))
+    blocked = RemoteSnapshot(resources={"153": RemoteResourceState(
+        resource_id="153", title="Resource 153", category_id=8,
+        version_id=1234, status="needs_level_2",
+    )})
+    plan = _run_sync_round(db_path, desired, blocked, "servera")
+    assert plan.actions["/153/"].action == "block"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT server_slug, version_local, resolved_path FROM downloads WHERE target_key = '/153/'"
+        ).fetchall()
+    assert rows == [("", 1234, "C:/eq_b/maps")]
+
+    unblocked = RemoteSnapshot(resources={"153": _downloadable_state("153")})
+    replanned = _run_sync_round(db_path, desired, unblocked, "servera")
+    assert replanned.actions["/153/"].reason == "install_context_changed"
+
+
+def test_untrack_only_touches_the_active_servers_maps_row(tmp_path):
+    """Opting a pack out on one server must not delete the other servers' rows."""
+    db_path = _db_path(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        store.initialize_schema(conn.cursor())
+        conn.commit()
+
+    remote = RemoteSnapshot(resources={
+        "153": _downloadable_state("153"),
+        "60": _downloadable_state("60"),
+    })
+    vvmq = "C:/emu/VanillaMQ_EMU"
+    _run_sync_round(
+        db_path,
+        _desired_set(_special_target("153", "C:/eq_a/maps"), _special_target("60", vvmq)),
+        remote, "servera",
+    )
+    _run_sync_round(
+        db_path,
+        _desired_set(_special_target("153", "C:/eq_b/maps"), _special_target("60", vvmq)),
+        remote, "serverb",
+    )
+
+    opted_out = _run_sync_round(
+        db_path, _desired_set(_special_target("60", vvmq)), remote, "servera"
+    )
+    assert opted_out.actions["/153/"].action == "untrack"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT server_slug FROM downloads WHERE target_key = '/153/'").fetchall()
+    assert rows == [("serverb",)]
+
+
 def test_navmesh_crash_never_voids_the_sync_outcome(monkeypatch, tmp_path):
     """run_sync must return the completed outcome even if navmesh raises outright —
     headless derives its status write (incl. pending_restart) from it."""

@@ -156,7 +156,9 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
     if force:
         with store.get_db_connection(db_name) as conn:
             cursor = conn.cursor()
-            store.reset_versions_for_resource(cursor, rid)
+            store.reset_versions_for_resource(
+                cursor, rid, servers.active_server_slug(config.settings.ENV)
+            )
     console.print(f"Downloading resource {rid}.")
     await sync.run_sync(db_path, headers, [rid])
 

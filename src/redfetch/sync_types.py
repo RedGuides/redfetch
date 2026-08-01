@@ -203,6 +203,7 @@ class SyncInfo(SyncModel):
 class LocalInstallState(TargetIdentity):
     """Local DB record for a single install target."""
 
+    server_slug: str = ""
     title: str | None = None
     category_id: int | None = None
     version_local: int | None = None
@@ -347,6 +348,7 @@ class PreparedSync:
     local_snapshot: LocalSnapshot
     execution_plan: ExecutionPlan
     sync_info: SyncInfo
+    server_slug: str = ""
 
 
 @dataclass(frozen=True, slots=True)
