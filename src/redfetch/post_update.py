@@ -121,7 +121,7 @@ def _launch_loadout(surface: PostUpdateSurface, running: set[str] | None) -> Non
 
 
 async def _cold_start_consent(surface: PostUpdateSurface) -> bool:
-    auto_run = config.settings.from_env(config.settings.ENV).get("AUTO_RUN_VVMQ", None)
+    auto_run = config.active_settings().get("AUTO_RUN_VVMQ", None)
     if auto_run is not None:
         return bool(auto_run)
     choice = await surface.ask_cold_start()

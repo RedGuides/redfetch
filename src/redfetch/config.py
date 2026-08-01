@@ -500,6 +500,14 @@ def _migrate_local_settings(config_dir):
         save_config(config_file, data)
 
 
+def active_settings():
+    """Settings view for the active env.
+
+    Use this instead of bare `settings.X` for env-scoped keys
+    """
+    return settings.from_env(settings.ENV)
+
+
 def reload_settings():
     """Reload settings from disk and invalidate from_env() clones.
 

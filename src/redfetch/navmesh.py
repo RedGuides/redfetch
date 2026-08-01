@@ -46,7 +46,7 @@ def get_navmesh_directory() -> str | None:
 def is_navmesh_enabled() -> bool:
     """Navmesh downloads are opt-out."""
     try:
-        return bool(config.settings.from_env(config.settings.ENV).get("NAVMESH_DOWNLOADS", True))
+        return bool(config.active_settings().get("NAVMESH_DOWNLOADS", True))
     except Exception:
         # unreadable config: fail closed rather than download into an unknown env
         return False
@@ -55,7 +55,7 @@ def is_navmesh_enabled() -> bool:
 def get_protected_navmeshes() -> list[str]:
     """Get list of protected navmesh filenames (case-insensitive) for current env."""
     try:
-        protected = config.settings.from_env(config.settings.ENV).PROTECTED_FILES_BY_RESOURCE.get("navmesh", [])
+        protected = config.active_settings().PROTECTED_FILES_BY_RESOURCE.get("navmesh", [])
         return [f.lower() for f in protected]
     except Exception:
         return []

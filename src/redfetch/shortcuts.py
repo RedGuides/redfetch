@@ -16,7 +16,7 @@ from redfetch import utils
 # Resolve paths lazily so --server can switch environments before launch.
 
 def _eq_dir() -> str | None:
-    return config.settings.from_env(config.settings.ENV).get("EQPATH") or None
+    return config.active_settings().get("EQPATH") or None
 
 
 def _vvmq_config_dir() -> str | None:
@@ -44,33 +44,22 @@ def _seed_meshgen_ini() -> None:
     if not vvmq or not os.path.isdir(vvmq):
         return
 
-    import ctypes
-    from ctypes import wintypes
+    import pywintypes
+    import win32api  # profile API is "legacy" per MS, but the INI is MeshGenerator's contract
 
     try:
         ini = os.path.join(vvmq, "config", "MeshGenerator.ini")
         os.makedirs(os.path.dirname(ini), exist_ok=True)
 
-        k32 = ctypes.windll.kernel32
-        k32.GetPrivateProfileStringW.argtypes = [
-            wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
-            wintypes.LPWSTR, wintypes.DWORD, wintypes.LPCWSTR,
-        ]
-        k32.GetPrivateProfileStringW.restype = wintypes.DWORD
-        k32.WritePrivateProfileStringW.argtypes = [wintypes.LPCWSTR] * 4
-        k32.WritePrivateProfileStringW.restype = wintypes.BOOL
-
         def _seed_if_empty(key: str, value: str | None) -> None:
             if not value:
                 return
-            buf = ctypes.create_unicode_buffer(512)
-            k32.GetPrivateProfileStringW("General", key, "", buf, len(buf), ini)
-            if not buf.value:
-                k32.WritePrivateProfileStringW("General", key, value, ini)
+            if not win32api.GetProfileVal("General", key, "", ini):
+                win32api.WriteProfileVal("General", key, value, ini)
 
         _seed_if_empty("Output Path", vvmq)         # MQ folder = mesh output root
         _seed_if_empty("EverQuest Path", _eq_dir())
-    except OSError:
+    except (OSError, pywintypes.error):  # pywintypes.error is not an OSError
         pass  # unwritable config dir, etc. — MeshGenerator will just prompt as before
 
 

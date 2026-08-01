@@ -3,6 +3,7 @@
 # Standard
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -31,7 +32,7 @@ def _get_pypi_url() -> str:
     env_url = os.getenv("REDFETCH_PYPI_URL")
     if env_url:
         return env_url
-    if "dev" in __version__:
+    if version.parse(__version__).is_devrelease:
         return "https://test.pypi.org/pypi/redfetch/json"
     return "https://pypi.org/pypi/redfetch/json"
 
@@ -483,10 +484,7 @@ def generate_removal_commands(paths: set[Path]) -> list[str]:
             commands.append(f"Remove-Item -LiteralPath '{escaped_path}' -Recurse -Force")
     else:
         console.print("[bold]You can remove these directories by running the following commands in your terminal:[/bold]\n")
-        commands = []
-        for path in ordered:
-            escaped_path = str(path).replace("'", "'\\''")
-            commands.append(f"rm -rf '{escaped_path}'")
+        commands = [f"rm -rf {shlex.quote(str(path))}" for path in ordered]
 
     for command in commands:
         console.print(f"  {command}")

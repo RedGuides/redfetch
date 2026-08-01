@@ -1,5 +1,6 @@
 """Tests for uninstall cleanup."""
 
+import shlex
 from pathlib import Path
 
 import pytest
@@ -157,8 +158,8 @@ def test_unix_command_escapes_single_quotes(tmp_path, monkeypatch):
 
     commands = meta.generate_removal_commands({quirky})
 
-    escaped = str(quirky).replace("'", "'\\''")
-    assert commands == [f"rm -rf '{escaped}'"]
+    # Assert what the shell would see, not the quoting style.
+    assert [shlex.split(command) for command in commands] == [["rm", "-rf", str(quirky)]]
 
 
 def test_batch_script_handles_percent_and_space_paths():

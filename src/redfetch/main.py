@@ -69,7 +69,7 @@ def initialize_db_only(server: Env | None = None):
     """Initialize configuration, auth, and local cache database (no network)."""
     _initialize_auth()
     _apply_server_override(server)
-    db_name = f"{config.settings.ENV}_resources.db"
+    db_name = store.db_name(config.settings.ENV)
     store.initialize_db(db_name)
     db_path = store.get_db_path(db_name)
     return db_name, db_path
@@ -223,7 +223,7 @@ def _headless_update(server: Env | None, force: bool) -> None:
             )
             raise typer.Exit(0)
 
-        db_name = f"{env}_resources.db"
+        db_name = store.db_name(env)
         store.initialize_db(db_name)
         db_path = store.get_db_path(db_name)
 
@@ -348,7 +348,7 @@ def check_command(
             )
             raise typer.Exit(0)
 
-        db_name = f"{env}_resources.db"
+        db_name = store.db_name(env)
         store.initialize_db(db_name)
         db_path = store.get_db_path(db_name)
 
@@ -529,7 +529,7 @@ def config_command(
     setting_path_list = path.split('.')
     config.update_setting(setting_path_list, value, server.value if server else None)
     settings_env = server.value if server else config.settings.ENV
-    db_name = f"{settings_env}_resources.db"
+    db_name = store.db_name(settings_env)
     store.initialize_db(db_name)
     console.print(f"Updated setting {path} to {value}{' for server ' + server.value if server else ''}.")
 
@@ -565,7 +565,7 @@ def server_command(
         raise typer.BadParameter(f"Unknown server '{slug}'. Valid servers: {valid}.")
 
     if not servers.is_server_configured(slug, server_env):
-        label = servers.list_servers(server_env)[slug].get("label") or slug
+        label = servers.server_label(slug, server_env)
         try:
             folder = Prompt.ask(f"EverQuest folder for [bold]{label}[/bold]")
         except (KeyboardInterrupt, EOFError):

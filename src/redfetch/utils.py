@@ -34,7 +34,7 @@ def resolve_special_destination(special_resource: dict | None, download_folder: 
 
 def _resolve_current_special_path(resource_id: str) -> str | None:
     """Resolve the path for a special resource in the current environment."""
-    settings = config.settings.from_env(config.settings.ENV)
+    settings = config.active_settings()
     return resolve_special_destination(
         settings.SPECIAL_RESOURCES.get(resource_id), settings.DOWNLOAD_FOLDER
     )
@@ -65,7 +65,7 @@ def get_vvmq_path() -> str | None:
 def is_auto_update_enabled() -> bool:
     """Whether silent runs may install updates."""
     try:
-        return bool(config.settings.from_env(config.settings.ENV).get("AUTO_UPDATE", True))
+        return bool(config.active_settings().get("AUTO_UPDATE", True))
     except Exception:
         return False
 
@@ -117,12 +117,12 @@ def sweep_stale_update_debris() -> None:
 
 
 def get_current_download_folder() -> str:
-    return os.path.normpath(config.settings.from_env(config.settings.ENV).DOWNLOAD_FOLDER)
+    return os.path.normpath(config.active_settings().DOWNLOAD_FOLDER)
 
 
 def get_eq_maps_status() -> str | None:
     """Get the status of EQ maps (Brewall's and Good's)."""
-    special_resources = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES
+    special_resources = config.active_settings().SPECIAL_RESOURCES
     brewall_opt_in = special_resources.get(config.MAPS_MAP["brewall"], {}).get('opt_in', False)
     good_opt_in = special_resources.get(config.MAPS_MAP["good"], {}).get('opt_in', False)
 

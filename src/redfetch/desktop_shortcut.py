@@ -5,6 +5,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from platformdirs import user_desktop_path
+
 SHORTCUT_FILENAME = "redfetch.lnk"
 
 
@@ -12,14 +14,7 @@ def get_shortcut_path() -> Path:
     """Absolute path to the redfetch desktop shortcut."""
     if sys.platform != "win32":
         raise NotImplementedError("Desktop shortcuts are only supported on Windows.")
-
-    from win32com.shell import shell, shellcon  # type: ignore
-
-    # CSIDL_DESKTOPDIRECTORY is the per-user Desktop path (handles redirection).
-    desktop_dir = Path(
-        shell.SHGetFolderPath(0, shellcon.CSIDL_DESKTOPDIRECTORY, None, 0)
-    )
-    return desktop_dir / SHORTCUT_FILENAME
+    return user_desktop_path() / SHORTCUT_FILENAME
 
 
 def create_shortcut(overwrite: bool = True) -> Path:

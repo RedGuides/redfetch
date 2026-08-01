@@ -7,6 +7,7 @@ import webbrowser
 from contextlib import suppress
 from pathlib import Path
 from itertools import cycle
+from typing import NamedTuple
 
 # third-party
 import httpx
@@ -210,6 +211,13 @@ def sync_profile_select(tab: ScrollableContainer, select_id: str) -> None:
             select.value = derived
 
 
+class WatchedButtonState(NamedTuple):
+    label: str
+    tooltip: str
+    variant: str | None  # None preserves transient styling
+    disabled: bool
+
+
 class FetchTab(ScrollableContainer):
     """Content for the Fetch tab."""
 
@@ -391,23 +399,35 @@ class FetchTab(ScrollableContainer):
             greeting = f"Hey [bold]{app.username}[/bold]!"
         self.query_one("#welcome_label", Label).update(greeting)
 
-    def _watched_button_state(self) -> tuple[str, str, str | None, bool]:
-        """Derive button state; a ``None`` variant preserves transient styling."""
+    def _watched_button_state(self) -> WatchedButtonState:
+        """Derive button state."""
         app = self.app
         if app.mq_down is None:
-            return "Checking MQ status...📞", "Please wait while we check MQ status.", None, True
+            return WatchedButtonState(
+                "Checking MQ status...📞",
+                "Please wait while we check MQ status.",
+                variant=None,
+                disabled=True,
+            )
         if app.mq_down:
-            return (
+            return WatchedButtonState(
                 "MQ Down: Patch Day 💔",
                 "Very Vanilla MQ is down for patch day, check redguides.com for current status.",
-                "default",
-                True,
+                variant="default",
+                disabled=True,
             )
         if app.is_updating:
             if app._offer_active:
                 # The update is past its cancellable phase.
-                return "Finishing update... 🏁", "Waiting on the post-update prompts.", None, True
-            return "Stop Update 🛑", "Update in progress. Click to cancel.", None, False
+                return WatchedButtonState(
+                    "Finishing update... 🏁",
+                    "Waiting on the post-update prompts.",
+                    variant=None,
+                    disabled=True,
+                )
+            return WatchedButtonState(
+                "Stop Update 🛑", "Update in progress. Click to cancel.", variant=None, disabled=False
+            )
         base_tooltip = (
             "Update all resources that you've watched, as well as those we've marked 'special' like Very Vanilla MQ and other staff picks. "
             "(Manage watched resources on the website, and opt-in or out of any 'special' resources in settings.local.toml)"
@@ -424,7 +444,7 @@ class FetchTab(ScrollableContainer):
             resting_variant = "default" if count == 0 else "primary"
         # Transient sync feedback overrides the resting variant.
         variant = app.watched_flash or resting_variant
-        return label, tooltip, variant, not bool(app.download_folder)
+        return WatchedButtonState(label, tooltip, variant, disabled=not bool(app.download_folder))
 
     def _recompute(self) -> None:
         """Apply current app state to widgets."""
@@ -988,7 +1008,7 @@ class ServersTab(ScrollableContainer):
     def _configure_server(self, slug: str, *, switch_after: bool) -> None:
         """Configure a known or custom server from its EQ folder."""
         env = self.app.current_env
-        label = servers.list_servers(env).get(slug, {}).get("label") or slug
+        label = servers.server_label(slug, env)
 
         def picked(path: Path | None) -> None:
             if self._busy():
@@ -1057,7 +1077,7 @@ class ServersTab(ScrollableContainer):
         slug = self._highlighted_slug()
         if not slug:
             return
-        label = servers.list_servers(env).get(slug, {}).get("label") or slug
+        label = servers.server_label(slug, env)
         known = servers.is_known_server(slug, env)
         is_active = servers.get_active_server(env) == slug
 
@@ -1835,7 +1855,7 @@ class Redfetch(App):
         for notice in notices or []:
             self.notify(notice, severity="warning")
         self.refresh_after_server_change()
-        label = servers.list_servers(self.current_env).get(slug, {}).get("label") or slug
+        label = servers.server_label(slug, self.current_env)
         self.notify(f"Server: {label}")
 
     def handle_profile_selected(self, value: str) -> None:
@@ -2093,7 +2113,7 @@ class Redfetch(App):
 
     async def run_synchronization(self, resource_ids=None) -> SyncOutcome:
         try:
-            db_name = f"{self.current_env}_resources.db"
+            db_name = store.db_name(self.current_env)
             await asyncio.to_thread(store.initialize_db, db_name)
             db_path = store.get_db_path(db_name)
             headers = await auth.get_api_headers()
@@ -2214,7 +2234,7 @@ class Redfetch(App):
     async def _reset_downloads_worker(self) -> bool:
         try:
             print("Resetting all download dates")
-            db_name = f"{self.current_env}_resources.db"
+            db_name = store.db_name(self.current_env)
             db_path = store.get_db_path(db_name)
             await store.reset_download_dates_async(db_path)
             self.notify("All download dates have been reset successfully.")
@@ -2231,7 +2251,7 @@ class Redfetch(App):
 
     @work(exclusive=True, group="interface_group")
     async def _prepare_redguides_interface_worker(self) -> bool:
-        db_name = f"{self.current_env}_resources.db"
+        db_name = store.db_name(self.current_env)
         await asyncio.to_thread(store.initialize_db, db_name)
         headers = await auth.get_api_headers()
         category_map = config.CATEGORY_MAP
@@ -2265,7 +2285,7 @@ class Redfetch(App):
             return
 
         try:
-            db_name = f"{self.current_env}_resources.db"
+            db_name = store.db_name(self.current_env)
             await asyncio.to_thread(store.initialize_db, db_name)
             prepared = await sync.prepare_sync(store.get_db_path(db_name), headers)
         except Exception:

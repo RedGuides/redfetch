@@ -15,7 +15,7 @@ import time
 import webbrowser
 from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 # third-party
 import httpx
@@ -41,17 +41,11 @@ _REFRESH_CODE_VERIFIER = "refresh"  # XF 2.3 requires a non-empty code_verifier 
 
 
 def _get_setting(key: str, default=None):
-    """Get a setting from env first, then initialized Dynaconf settings."""
-    env_key = f"REDFETCH_{key}"
-    env_val = os.environ.get(env_key)
-    if env_val not in (None, ""):
-        return env_val
-
-    if config.settings is not None:
-        val = config.settings.get(key, default)
-        return default if val in ("", None) else val
-
-    return default
+    """REDFETCH_* env vars have top precedence thanks to dynaconf."""
+    if config.settings is None:  # standalone-script mode, before config init
+        return os.environ.get(f"REDFETCH_{key}") or default
+    val = config.settings.get(key, default)
+    return default if val in ("", None) else val
 
 
 # ---------------------------------------------------------------------------
@@ -86,12 +80,12 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
-        query = parse_qs(urlparse(self.path).query)
+        query = dict(parse_qsl(urlparse(self.path).query))
 
-        error = query.get("error", [None])[0]
-        error_description = query.get("error_description", [None])[0]
-        code = query.get("code", [None])[0]
-        state = query.get("state", [None])[0]
+        error = query.get("error")
+        error_description = query.get("error_description")
+        code = query.get("code")
+        state = query.get("state")
 
         # Some browsers will request /favicon.ico or similar first; ignore those.
         if not error and (not code or not state):

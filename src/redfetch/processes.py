@@ -14,11 +14,6 @@ import psutil
 
 IS_WINDOWS = sys.platform == "win32"
 
-if IS_WINDOWS:
-    import winreg
-else:
-    winreg = None
-
 _PROC_GONE = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
 
 
@@ -312,13 +307,10 @@ def open_file(folder: str, filename: str) -> str:
         raise FileNotFoundError(f"File not found: {full_path}")
 
     if IS_WINDOWS:
-        file_ext = os.path.splitext(filename)[1].lower()
         try:
-            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, file_ext) as key:
-                winreg.QueryValue(key, "")
-                os.startfile(full_path)  # type: ignore[attr-defined]
+            os.startfile(full_path)  # type: ignore[attr-defined]
             return "with its default program"
-        except OSError:
+        except OSError:  # no file association
             subprocess.Popen(["notepad.exe", full_path])
             return "with Notepad"
 

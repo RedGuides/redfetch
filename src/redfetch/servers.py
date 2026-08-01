@@ -71,6 +71,11 @@ def list_servers(env: str) -> dict[str, dict]:
     }
 
 
+def server_label(slug: str, env: str) -> str:
+    """Display label for a server profile, falling back to its slug."""
+    return list_servers(env).get(slug, {}).get("label") or slug
+
+
 def get_active_server(env: str) -> str | None:
     """The active server slug, or None.
 
@@ -299,7 +304,7 @@ def delete_server(slug: str, *, env: str) -> None:
         env_table.pop("ACTIVE_SERVER", None)
 
     _save_and_reload(path, doc)
-    store.purge_server_rows(f"{env}_resources.db", slug)
+    store.purge_server_rows(store.db_name(env), slug)
 
 
 def rename_server(old: str, new: str, *, env: str) -> None:
@@ -325,4 +330,4 @@ def rename_server(old: str, new: str, *, env: str) -> None:
         env_table["ACTIVE_SERVER"] = new
 
     _save_and_reload(path, doc)
-    store.rekey_server_rows(f"{env}_resources.db", old, new)
+    store.rekey_server_rows(store.db_name(env), old, new)

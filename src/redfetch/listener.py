@@ -175,8 +175,7 @@ async def handle_category_map(request: web.Request) -> web.Response:
 
 
 async def handle_special_resource_ids(request: web.Request) -> web.Response:
-    # from_env, not bare settings: --server swaps settings.ENV at runtime
-    special_resources = config.settings.from_env(config.settings.ENV).SPECIAL_RESOURCES
+    special_resources = config.active_settings().SPECIAL_RESOURCES
     return web.json_response([int(rid) for rid, d in special_resources.items() if d.get('opt_in', False)])
 
 

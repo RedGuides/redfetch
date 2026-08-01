@@ -14,11 +14,11 @@ from rich.panel import Panel
 from rich.prompt import Prompt, Confirm, PromptBase
 from rich.text import Text
 from rich.box import ASCII2
-from tomlkit import table, TOMLDocument
+from tomlkit import TOMLDocument
 
 # Custom
 from redfetch import utils
-from redfetch.config import load_config, save_config
+from redfetch.config import _descend_tables, load_config, save_config
 from redfetch.detecteq import find_everquest_uninstall_location
 
 console = Console()
@@ -182,19 +182,9 @@ def is_configured(default_config_dir: str | None = None) -> bool:
     return os.path.exists(os.path.join(config_dir, ".env"))
 
 
-def get_or_create_table(doc: TOMLDocument, table_path: str):
-    """Navigate or create nested tables in the TOML document."""
-    current_section = doc
-    for key_name in table_path.split('.'):
-        if key_name not in current_section:
-            current_section.add(key_name, table())
-        current_section = current_section[key_name]
-    return current_section
-
-
 def update_setting(doc: TOMLDocument, table_path: str, key_name: str, new_value, friendly_name: str):
     """Update a setting in the TOML document with user confirmation."""
-    current_section = get_or_create_table(doc, table_path)
+    current_section = _descend_tables(doc, table_path.split('.'))
     existing_value = current_section.get(key_name, None)
 
     if existing_value == new_value:
@@ -424,7 +414,7 @@ def first_run_setup():
             table_path_str, friendly_name = path_mappings[path_type]
 
             # Retrieve or create the current section in the TOML document
-            current_section = get_or_create_table(doc, table_path_str)
+            current_section = _descend_tables(doc, table_path_str.split('.'))
 
             # Set opt_in = true since we detected an existing directory
             if not current_section.get('opt_in', False):

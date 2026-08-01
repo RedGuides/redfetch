@@ -208,7 +208,7 @@ def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=Fa
                 pass
 
             if protected_files is None:
-                protected_files = config.settings.from_env(config.settings.ENV).PROTECTED_FILES_BY_RESOURCE.get(resource_id, [])
+                protected_files = config.active_settings().PROTECTED_FILES_BY_RESOURCE.get(resource_id, [])
             sweep_stale_swap_files(extract_to)
             try:
                 if should_flatten:

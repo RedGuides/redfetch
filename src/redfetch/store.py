@@ -7,6 +7,7 @@ import os
 import sqlite3
 
 import aiosqlite
+from pydantic import TypeAdapter, ValidationError
 
 from redfetch import config
 from redfetch import meta
@@ -24,6 +25,11 @@ from redfetch.sync_types import (
 
 
 SCHEMA_VERSION = 3
+
+
+def db_name(env: str) -> str:
+    """Per-env resource DB filename — the one definition of the naming scheme."""
+    return f"{env}_resources.db"
 
 
 def get_db_path(db_name: str) -> str:
@@ -207,16 +213,15 @@ def reset_versions_for_resource(cursor, resource_id: str, server_slug: str = "")
     )
 
 
+_PROTECTED_FILES = TypeAdapter(list[str])
+
+
 def _decode_protected_files(raw: str | None) -> list[str]:
-    if not raw:
-        return []
+    # corrupt or non-list-of-strings JSON degrades to [] (no protected files)
     try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
+        return _PROTECTED_FILES.validate_json(raw or "[]")
+    except ValidationError:
         return []
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value]
 
 
 def _row_server_slug(root_resource_id: str, server_slug: str) -> str:
