@@ -6,6 +6,7 @@ import stat
 import sys
 import time
 import zlib
+from contextlib import suppress
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile, is_zipfile
 import asyncio
@@ -118,11 +119,8 @@ async def download_file_async(
         print(f"Downloaded file {file_path}")
         return True
     finally:
-        try:
-            if tmp_path and os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
+        if tmp_path:
+            _remove_if_exists(tmp_path)
 
 
 def _ensure_disk_space(resp, file_path: str) -> None:
@@ -160,8 +158,8 @@ async def _stream_to_tempfile(resp, file_path: str, hasher) -> str:
         return tmp_path
     except Exception:
         # Clean up any partially written temp file on error
-        if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        if tmp_path:
+            _remove_if_exists(tmp_path)
         raise
 
 
@@ -397,18 +395,14 @@ def _clear_readonly(path: str) -> bool:
 
 def _restore_readonly(path: str) -> None:
     """Put back a read-only bit we cleared for a swap that then failed."""
-    try:
+    with suppress(OSError):
         os.chmod(path, stat.S_IREAD)
-    except OSError:
-        pass
 
 
 def _mark_fresh(path: str) -> None:
     """Stamp now so the mtime sweep guard sees an in-flight file, not stale debris."""
-    try:
+    with suppress(OSError):
         os.utime(path)
-    except OSError:
-        pass
 
 
 def _remove_if_exists(path: str) -> None:

@@ -332,8 +332,8 @@ def test_restart_refuses_relaunch_when_folder_not_clear(fake_windows):
 def test_filter_skips_running_preset_keeps_idle(monkeypatch, tmp_path):
     eqbcs = tmp_path / "EQBCS.exe"
     myseq = tmp_path / "MySEQ.exe"
-    eqbcs.write_text("")
-    myseq.write_text("")
+    eqbcs.touch()
+    myseq.touch()
 
     monkeypatch.setattr(
         utils, "resolve_post_update_launch",

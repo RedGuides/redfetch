@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -312,11 +313,9 @@ class ExecutionPlan(SyncModel):
 
     actions: dict[str, PlannedAction] = Field(default_factory=dict)
 
-    def action_counts(self) -> dict[str, int]:
-        counts = {"download": 0, "skip": 0, "block": 0, "untrack": 0}
-        for action in self.actions.values():
-            counts[action.action] += 1
-        return counts
+    def action_counts(self) -> Counter[str]:
+        # absent kinds read as 0 via Counter
+        return Counter(action.action for action in self.actions.values())
 
 
 class ExecutionResultItem(SyncModel):

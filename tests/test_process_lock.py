@@ -23,11 +23,8 @@ def test_run_sync_skips_when_another_process_holds_the_lock(tmp_path, monkeypatc
     _stub_sync(monkeypatch, ran)
 
     other = FileLock(str(tmp_path / "sync.lock"))  # stands in for another redfetch process
-    other.acquire()
-    try:
+    with other:
         outcome = asyncio.run(sync.run_sync("db", {}, resource_ids=["1"]))
-    finally:
-        other.release()
 
     assert outcome.success is False
     assert ran == []  # never reached the pipeline
@@ -56,11 +53,8 @@ def test_busy_message_does_not_name_a_process(tmp_path, monkeypatch, capsys):
     _stub_sync(monkeypatch, ran)
 
     other = FileLock(str(tmp_path / "sync.lock"))
-    other.acquire()
-    try:
+    with other:
         outcome = asyncio.run(sync.run_sync("db", {}, resource_ids=["1"]))
-    finally:
-        other.release()
 
     assert outcome.status == "busy"
     out = capsys.readouterr().out

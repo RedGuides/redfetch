@@ -1,5 +1,8 @@
 """Shared on-disk cache."""
 
+# Standard
+from contextlib import suppress
+
 # third-party
 from diskcache import Cache
 
@@ -25,8 +28,6 @@ def clear() -> None:
     try:
         store.clear()
     finally:
-        try:
+        with suppress(Exception):
             store.close()
-        except Exception:
-            pass  # best-effort close
         _cache = None

@@ -114,9 +114,9 @@ def test_config_dir_is_reported_when_set(tmp_path, install_settings, monkeypatch
 def test_delete_config_files_takes_only_redfetch_files(tmp_path):
     (tmp_path / ".env").write_text("token", encoding="utf-8")
     (tmp_path / "settings.local.toml").write_text("[LIVE]", encoding="utf-8")
-    (tmp_path / "legacy.db").write_text("", encoding="utf-8")
+    (tmp_path / "legacy.db").touch()
     (tmp_path / ".cache").mkdir()
-    (tmp_path / ".cache" / "blob").write_text("", encoding="utf-8")
+    (tmp_path / ".cache" / "blob").touch()
     (tmp_path / "unrelated.txt").write_text("keep me", encoding="utf-8")
 
     meta._delete_config_files(tmp_path)

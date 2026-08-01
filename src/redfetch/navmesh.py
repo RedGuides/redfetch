@@ -292,7 +292,7 @@ async def sync_navmeshes(
             return ok
 
         results = await asyncio.gather(*(_download_one(nm) for nm in to_download))
-        failed = sum(1 for ok in results if not ok)
+        failed = results.count(False)
 
         if failed:
             # Files are rechecked next run.

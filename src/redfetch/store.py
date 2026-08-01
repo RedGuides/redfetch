@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import json
 import os
 import sqlite3
@@ -226,65 +226,41 @@ def _row_server_slug(root_resource_id: str, server_slug: str) -> str:
     return ""
 
 
-def _row_to_local_state(row: sqlite3.Row | tuple) -> LocalInstallState:
-    (
-        target_key,
-        server_slug,
-        resource_id,
-        parent_id,
-        parent_target_key,
-        root_resource_id,
-        target_kind,
-        category_id,
-        title,
-        version_remote,
-        version_local,
-        resolved_path,
-        subfolder,
-        flatten,
-        protected_files,
-        _remote_status,
-        is_special,
-        is_watching,
-        is_licensed,
-        is_explicit,
-        is_dependency,
-    ) = row
-
+def _row_to_local_state(row: sqlite3.Row) -> LocalInstallState:
     return LocalInstallState(
-        target_key=str(target_key),
-        server_slug=str(server_slug),
-        resource_id=str(resource_id),
-        parent_id=str(parent_id) if parent_id not in (None, 0) else None,
-        parent_target_key=parent_target_key,
-        root_resource_id=str(root_resource_id),
-        target_kind=str(target_kind),
-        category_id=category_id,
-        title=title,
-        version_local=version_local,
-        version_remote=version_remote,
-        resolved_path=resolved_path,
-        subfolder=subfolder,
-        flatten=bool(flatten),
-        protected_files=_decode_protected_files(protected_files),
-        is_special=bool(is_special),
-        is_watching=bool(is_watching),
-        is_licensed=bool(is_licensed),
-        is_explicit=bool(is_explicit),
-        is_dependency=bool(is_dependency),
+        target_key=str(row["target_key"]),
+        server_slug=str(row["server_slug"]),
+        resource_id=str(row["resource_id"]),
+        parent_id=str(row["parent_id"]) if row["parent_id"] not in (None, 0) else None,
+        parent_target_key=row["parent_target_key"],
+        root_resource_id=str(row["root_resource_id"]),
+        target_kind=str(row["target_kind"]),
+        category_id=row["category_id"],
+        title=row["title"],
+        version_local=row["version_local"],
+        version_remote=row["version_remote"],
+        resolved_path=row["resolved_path"],
+        subfolder=row["subfolder"],
+        flatten=bool(row["flatten"]),
+        protected_files=_decode_protected_files(row["protected_files"]),
+        is_special=bool(row["is_special"]),
+        is_watching=bool(row["is_watching"]),
+        is_licensed=bool(row["is_licensed"]),
+        is_explicit=bool(row["is_explicit"]),
+        is_dependency=bool(row["is_dependency"]),
     )
 
 
 async def load_local_snapshot(db_path: str, server_slug: str = "") -> LocalSnapshot:
     """Load all tracked install targets from the DB so the planner knows what's installed."""
     async with aiosqlite.connect(db_path, timeout=30.0) as conn:
+        conn.row_factory = aiosqlite.Row
         async with conn.execute(
             """
             SELECT
                 target_key, server_slug, resource_id, parent_id, parent_target_key, root_resource_id,
                 target_kind, category_id, title, version_remote, version_local,
-                resolved_path, subfolder, flatten,
-                protected_files, remote_status,
+                resolved_path, subfolder, flatten, protected_files,
                 is_special, is_watching, is_licensed, is_explicit, is_dependency
             FROM downloads
             WHERE server_slug IN ('', ?)
@@ -296,7 +272,7 @@ async def load_local_snapshot(db_path: str, server_slug: str = "") -> LocalSnaps
 
     return LocalSnapshot(
         install_targets={
-            str(row[0]): _row_to_local_state(row)
+            str(row["target_key"]): _row_to_local_state(row)
             for row in rows
         }
     )
@@ -311,6 +287,16 @@ def _desired_flags(target: DesiredInstallTarget) -> dict[str, int]:
         "is_explicit": int(target.explicit_root or "explicit" in target.sources),
         "is_dependency": int(target.target_kind == "dependency"),
     }
+
+
+def _upsert(table: str, row: dict, key: tuple[str, ...]) -> tuple[str, tuple]:
+    """One named dict drives the column list, placeholders, and update set."""
+    sets = ", ".join(f"{c} = excluded.{c}" for c in row if c not in key)
+    return (
+        f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' * len(row))}) "
+        f"ON CONFLICT({', '.join(key)}) DO UPDATE SET {sets}",
+        tuple(row.values()),
+    )
 
 
 async def _upsert_download_row(
@@ -349,60 +335,26 @@ async def _upsert_download_row(
     )
     persisted_flatten = action.flatten if action is not None else target.flatten
     persisted_protected_files = action.protected_files if action is not None else target.protected_files
-    await conn.execute(
-        """
-        INSERT INTO downloads (
-            target_key, server_slug, resource_id, parent_id, parent_target_key, root_resource_id,
-            target_kind, category_id, title, version_remote, version_local,
-            resolved_path, subfolder, flatten,
-            protected_files, remote_status,
-            is_special, is_watching, is_licensed, is_explicit, is_dependency
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(target_key, server_slug) DO UPDATE SET
-            resource_id = excluded.resource_id,
-            parent_id = excluded.parent_id,
-            parent_target_key = excluded.parent_target_key,
-            root_resource_id = excluded.root_resource_id,
-            target_kind = excluded.target_kind,
-            category_id = excluded.category_id,
-            title = excluded.title,
-            version_remote = excluded.version_remote,
-            version_local = excluded.version_local,
-            resolved_path = excluded.resolved_path,
-            subfolder = excluded.subfolder,
-            flatten = excluded.flatten,
-            protected_files = excluded.protected_files,
-            remote_status = excluded.remote_status,
-            is_special = excluded.is_special,
-            is_watching = excluded.is_watching,
-            is_licensed = excluded.is_licensed,
-            is_explicit = excluded.is_explicit,
-            is_dependency = excluded.is_dependency
-        """,
-        (
-            target.target_key,
-            row_slug,
-            int(target.resource_id),
-            int(target.parent_id) if target.parent_id is not None else 0,
-            target.parent_target_key,
-            int(target.root_resource_id),
-            target.target_kind,
-            persisted_category_id,
-            persisted_title,
-            remote_state.version_id if remote_state else None,
-            version_local,
-            persisted_resolved_path,
-            persisted_subfolder,
-            int(persisted_flatten),
-            json.dumps(persisted_protected_files),
-            remote_state.status if remote_state else None,
-            flags["is_special"],
-            flags["is_watching"],
-            flags["is_licensed"],
-            flags["is_explicit"],
-            flags["is_dependency"],
-        ),
-    )
+    row = {
+        "target_key": target.target_key,
+        "server_slug": row_slug,
+        "resource_id": int(target.resource_id),
+        "parent_id": int(target.parent_id) if target.parent_id is not None else 0,
+        "parent_target_key": target.parent_target_key,
+        "root_resource_id": int(target.root_resource_id),
+        "target_kind": target.target_kind,
+        "category_id": persisted_category_id,
+        "title": persisted_title,
+        "version_remote": remote_state.version_id if remote_state else None,
+        "version_local": version_local,
+        "resolved_path": persisted_resolved_path,
+        "subfolder": persisted_subfolder,
+        "flatten": int(persisted_flatten),
+        "protected_files": json.dumps(persisted_protected_files),
+        "remote_status": remote_state.status if remote_state else None,
+        **flags,
+    }
+    await conn.execute(*_upsert("downloads", row, key=("target_key", "server_slug")))
     if row_slug:
         await conn.execute(
             "DELETE FROM downloads WHERE target_key = ? AND server_slug = ''",
@@ -492,10 +444,8 @@ async def record_installed_state(
 def reset_download_dates(cursor) -> None:
     reset_all_versions(cursor)
     cursor.execute("DELETE FROM navmesh_files")
-    try:
-        meta.clear_pypi_cache()
-    except Exception:
-        pass  # cache invalidation is best-effort
+    with suppress(Exception):
+        meta.clear_pypi_cache()  # cache invalidation is best-effort
 
 
 def reset_download_dates_for_resources(db_name: str, resource_ids: Iterable[str], server_slug: str = "") -> bool:
@@ -542,10 +492,8 @@ async def reset_download_dates_async(db_path: str) -> None:
         await conn.execute("UPDATE downloads SET version_local = 0")
         await conn.execute("DELETE FROM navmesh_files")
         await conn.commit()
-    try:
-        meta.clear_pypi_cache()
-    except Exception:
-        pass  # cache invalidation is best-effort
+    with suppress(Exception):
+        meta.clear_pypi_cache()  # cache invalidation is best-effort
 
 
 def list_resources(cursor) -> list[tuple[int, str]]:

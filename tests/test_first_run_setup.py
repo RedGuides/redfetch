@@ -99,7 +99,7 @@ def test_is_configured_true_when_flag_and_env_present(tmp_path):
     """Flag points at a dir that contains a .env -> configured."""
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / ".env").write_text("")
+    (config_dir / ".env").touch()
     (tmp_path / "first_run_complete").write_text(str(config_dir))
     assert is_configured(str(tmp_path)) is True
 
@@ -107,7 +107,7 @@ def test_is_configured_true_when_flag_and_env_present(tmp_path):
 def test_flag_round_trips_non_ascii_config_dir(tmp_path):
     config_dir = tmp_path / "cönfig-Δir"
     config_dir.mkdir()
-    (config_dir / ".env").write_text("")
+    (config_dir / ".env").touch()
     create_first_run_flag(str(tmp_path), str(config_dir))
     assert is_configured(str(tmp_path)) is True
 

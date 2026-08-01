@@ -5,6 +5,8 @@ import platform
 import re
 import shutil
 import tomllib
+from contextlib import suppress
+from pathlib import Path
 
 # third-party
 import tomlkit
@@ -277,11 +279,7 @@ def write_breadcrumb() -> None:
 
 
 def remove_breadcrumb() -> None:
-    breadcrumb_path = os.path.join(DEFAULT_CONFIG_DIR, BREADCRUMB_FILENAME)
-    try:
-        os.remove(breadcrumb_path)
-    except FileNotFoundError:
-        pass
+    Path(DEFAULT_CONFIG_DIR, BREADCRUMB_FILENAME).unlink(missing_ok=True)
 
 
 def switch_environment(new_env):
@@ -562,7 +560,5 @@ def write_env_to_file(new_env):
     env_loader.write(env_file_path, {"REDFETCH_ENV": new_env})
 
     # Env changed -> re-shows server/config banner.
-    try:
+    with suppress(OSError):
         os.remove(os.path.join(os.path.dirname(env_file_path), ".banner_shown"))
-    except OSError:
-        pass

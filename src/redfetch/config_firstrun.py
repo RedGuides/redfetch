@@ -5,6 +5,7 @@ import os
 import platform
 import json
 import time
+from pathlib import Path
 
 # Third-party
 from platformdirs import user_config_dir
@@ -37,7 +38,7 @@ def _banner_due(config_dir):
 
 def _mark_banner_shown(config_dir):
     try:
-        open(os.path.join(config_dir, ".banner_shown"), "w").close()
+        Path(config_dir, ".banner_shown").touch()
     except OSError:
         pass
 

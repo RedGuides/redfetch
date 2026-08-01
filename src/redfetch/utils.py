@@ -6,6 +6,7 @@ import re
 import shlex
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -109,12 +110,10 @@ def sweep_stale_update_debris() -> None:
     from redfetch import download
 
     for get_path in (get_vvmq_path, get_myseq_path, get_current_download_folder):
-        try:
+        with suppress(Exception):
             path = get_path()
             if path and os.path.isdir(path):
                 download.sweep_stale_swap_files(path)
-        except Exception:
-            continue
 
 
 def get_current_download_folder() -> str:
@@ -245,8 +244,7 @@ def _command_program(command: list[str] | str) -> str:
     if isinstance(command, str):
         s = command.strip()
         if s.startswith('"'):
-            end = s.find('"', 1)
-            return s[1:end] if end != -1 else s[1:]
+            return s[1:].partition('"')[0]
         return s.split(None, 1)[0] if s else ""
     return str(command[0]) if command else ""
 

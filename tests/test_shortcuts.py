@@ -413,7 +413,7 @@ def test_openable_available_folder(tmp_path):
 
 
 def test_openable_available_file(tmp_path):
-    (tmp_path / "f.ini").write_text("")
+    (tmp_path / "f.ini").touch()
     present = shortcuts.Openable("t", "L", lambda: str(tmp_path), "f.ini")
     assert shortcuts.openable_available(present) is True
     absent = shortcuts.Openable("t", "L", lambda: str(tmp_path), "missing.ini")

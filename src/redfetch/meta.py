@@ -73,8 +73,7 @@ def fetch_latest_version_from_pypi():
     if "test.pypi.org" in PYPI_URL:
         releases = list(data.get("releases", {}).keys())
         if releases:
-            releases.sort(key=version.parse)
-            return releases[-1]
+            return max(releases, key=version.parse)
     # Default: whatever PyPI reports as the latest stable version
     return data["info"]["version"]
 

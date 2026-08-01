@@ -73,9 +73,6 @@ def remove_shortcut() -> Path:
     if sys.platform != "win32":
         raise NotImplementedError("Desktop shortcuts are only supported on Windows.")
     shortcut_path = get_shortcut_path()
-    try:
-        shortcut_path.unlink()
-    except FileNotFoundError:
-        pass
+    shortcut_path.unlink(missing_ok=True)
     return shortcut_path
 

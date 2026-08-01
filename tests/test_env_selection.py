@@ -44,6 +44,12 @@ def test_server_flag_noop_when_omitted(fake_config):
     assert settings.ENV == "LIVE"
 
 
+def _read_status(tmp_path):
+    return json.loads(
+        (tmp_path / update_status.UPDATE_STATUS_FILENAME).read_text(encoding="utf-8")
+    )
+
+
 def _fake_settings(env="LIVE"):
     """A minimal stand-in for config.settings that supports in-memory env selection."""
     calls = {"setenv": [], "validated": 0}
@@ -101,9 +107,7 @@ def test_check_command_uses_ephemeral_env(monkeypatch, tmp_path):
         main.check_command(server=Env.TEST)
     assert exc_info.value.exit_code == 0
 
-    on_disk = json.loads(
-        (tmp_path / update_status.UPDATE_STATUS_FILENAME).read_text(encoding="utf-8")
-    )
+    on_disk = _read_status(tmp_path)
     assert on_disk["env"] == "TEST"
     assert on_disk["auth_state"] == "ok"
     assert len(on_disk["updates"]["items"]) == 1
@@ -125,9 +129,7 @@ def test_check_command_not_configured_writes_verdict(monkeypatch, tmp_path):
         main.check_command(server=Env.EMU)
     assert exc_info.value.exit_code == 0
 
-    on_disk = json.loads(
-        (tmp_path / update_status.UPDATE_STATUS_FILENAME).read_text(encoding="utf-8")
-    )
+    on_disk = _read_status(tmp_path)
     assert on_disk["auth_state"] == "not_configured"
     assert on_disk["env"] == "EMU"
     assert on_disk["updates"]["items"] == []
@@ -155,9 +157,7 @@ def test_check_command_needs_login_writes_verdict(monkeypatch, tmp_path):
         main.check_command(server=None)
     assert exc_info.value.exit_code == 0
 
-    on_disk = json.loads(
-        (tmp_path / update_status.UPDATE_STATUS_FILENAME).read_text(encoding="utf-8")
-    )
+    on_disk = _read_status(tmp_path)
     assert on_disk["auth_state"] == "needs_login"
     assert on_disk["env"] == "LIVE"
     assert on_disk["updates"]["items"] == []

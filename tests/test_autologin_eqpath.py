@@ -1,6 +1,7 @@
 """redfetch recovers the EQ dir from MacroQuest autologin's login.db when EQPATH is unset."""
 import os
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -9,15 +10,12 @@ from redfetch import detecteq
 
 def _make_login_db(db_path: str, rows: list[tuple[str, str]]) -> None:
     """A minimal login.db with just the server_types table MQ reads the EQ path from."""
-    con = sqlite3.connect(db_path)
-    try:
+    with closing(sqlite3.connect(db_path)) as con:
         con.execute("CREATE TABLE server_types (type text primary key, eq_path text not null)")
         con.executemany(
             "INSERT INTO server_types (type, eq_path) VALUES (LOWER(?), ?)", rows
         )
         con.commit()
-    finally:
-        con.close()
 
 
 @pytest.fixture
@@ -25,7 +23,7 @@ def eq_dir(tmp_path):
     """A folder that passes detecteq.is_valid_eq_dir (contains eqgame.exe)."""
     d = tmp_path / "EverQuest"
     d.mkdir()
-    (d / "eqgame.exe").write_text("")
+    (d / "eqgame.exe").touch()
     return d
 
 

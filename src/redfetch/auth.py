@@ -10,16 +10,17 @@ import base64
 import hashlib
 import asyncio
 import os
+import secrets
 import time
 import webbrowser
-from datetime import datetime, timedelta
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
 # third-party
 import httpx
 import keyring  # for storing tokens (secrets only)
-from keyring.errors import NoKeyringError
+from keyring.errors import NoKeyringError, PasswordDeleteError
 
 # Local
 from redfetch import cache
@@ -122,8 +123,8 @@ def first_authorization(client_id: str, client_secret: str | None, *, scope: str
     Uses Authorization Code + PKCE (S256) as required by XF for public clients.
     """
     # Step 1: Generate PKCE + state, then build the authorize URL
-    state = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii").rstrip("=")
-    code_verifier = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii").rstrip("=")  # 43 chars base64url
+    state = secrets.token_urlsafe(32)
+    code_verifier = secrets.token_urlsafe(32) 
     code_challenge = (
         base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("ascii")).digest())
         .decode("ascii")
@@ -186,10 +187,8 @@ def first_authorization(client_id: str, client_secret: str | None, *, scope: str
     print("Authorization successful and tokens cached.")
 
     # Cache basic user info (best-effort; not required for API auth).
-    try:
+    with suppress(Exception):
         _cache_user_info(token_data.get("access_token"))
-    except Exception:
-        pass
 
 
 def _cache_user_info(access_token: str | None) -> None:
@@ -277,7 +276,7 @@ def store_tokens_in_keyring(data):
     keyring.set_password(KEYRING_SERVICE_NAME, "access_token", data["access_token"])
     keyring.set_password(KEYRING_SERVICE_NAME, "refresh_token", data["refresh_token"])
     
-    expires_at = datetime.now().timestamp() + int(data.get("expires_in", 0) or 0)
+    expires_at = time.time() + int(data.get("expires_in", 0) or 0)
     set_token_expiry(str(expires_at))
 
 
@@ -315,14 +314,9 @@ def refresh_token(client_id: str, client_secret: str | None, *, redirect_uri: st
 
 def token_is_valid():
     """Check if the access token is still valid."""
-    expires_at_str = get_token_expiry()
-    if expires_at_str:
-        expires_at = datetime.fromtimestamp(float(expires_at_str))
-        now = datetime.now()
-        is_valid = now < expires_at - timedelta(minutes=5)  # Buffer of 5 minutes
-        return is_valid
-    else:
-        return False
+    expires_at = get_token_expiry()
+    # 5-minute buffer
+    return bool(expires_at) and time.time() < float(expires_at) - 300
 
 
 def get_cached_tokens():
@@ -340,15 +334,11 @@ def logout():
     legacy_credentials = ["user_id", "username", "expires_at"]
 
     for credential in keyring_credentials + legacy_credentials:
-        try:
+        with suppress(PasswordDeleteError):
             keyring.delete_password(KEYRING_SERVICE_NAME, credential)
-        except keyring.errors.PasswordDeleteError:
-            pass
 
-    try:
+    with suppress(Exception):  # cache cleanup must not block logout
         cache.clear()
-    except Exception:
-        pass  # cache cleanup must not block logout
 
 
 # ---------------------------------------------------------------------------

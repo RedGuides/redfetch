@@ -1,6 +1,7 @@
 """config.self_heal_eqpath fills a blank/stale EQPATH from MacroQuest autologin at startup."""
 import os
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -11,13 +12,10 @@ from redfetch import config
 
 def _make_login_db(config_dir, rows):
     """A minimal login.db with just the server_types table MQ reads the EQ path from."""
-    con = sqlite3.connect(str(config_dir / "login.db"))
-    try:
+    with closing(sqlite3.connect(str(config_dir / "login.db"))) as con:
         con.execute("CREATE TABLE server_types (type text primary key, eq_path text not null)")
         con.executemany("INSERT INTO server_types (type, eq_path) VALUES (LOWER(?), ?)", rows)
         con.commit()
-    finally:
-        con.close()
 
 
 def _make_vvmq(tmp_path, name, server_type, eq_path):
@@ -33,7 +31,7 @@ def eq_dir(tmp_path):
     """A valid EverQuest folder (passes detecteq.is_valid_eq_dir)."""
     d = tmp_path / "EverQuest"
     d.mkdir()
-    (d / "eqgame.exe").write_text("")
+    (d / "eqgame.exe").touch()
     return d
 
 
@@ -124,7 +122,7 @@ def test_stale_eqpath_is_reheal(tmp_path, eq_dir, spy, monkeypatch):
 def test_valid_stored_eqpath_never_clobbered(tmp_path, eq_dir, spy, monkeypatch):
     other = tmp_path / "OtherEQ"
     other.mkdir()
-    (other / "eqgame.exe").write_text("")
+    (other / "eqgame.exe").touch()
     vvmq = _make_vvmq(tmp_path, "vvmq_live", "live", eq_dir)  # autologin knows a different valid dir
     _install(monkeypatch, {"LIVE": _env_with_vvmq("LIVE", vvmq, eqpath=str(other))})
 

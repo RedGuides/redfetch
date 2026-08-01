@@ -4,6 +4,7 @@ import os
 import sys
 import traceback
 import webbrowser
+from contextlib import suppress
 from pathlib import Path
 from itertools import cycle
 
@@ -311,14 +312,9 @@ class FetchTab(ScrollableContainer):
             return
 
         term_lower = term.lower()
-        matches: list[int] = []
-
-        for i, line in enumerate(log.lines):
-            line_text = str(line)
-            if term_lower in line_text.lower():
-                matches.append(i)
-
-        self._log_search_matches = matches
+        self._log_search_matches = [
+            i for i, line in enumerate(log.lines) if term_lower in str(line).lower()
+        ]
         self._log_search_index = -1
 
     def _show_current_log_search_result(self) -> None:
@@ -1539,15 +1535,14 @@ class Redfetch(App):
     def action_focus_search(self) -> None:
         """Focus the log search input."""
         main_screen = self._get_main_screen()
-        if main_screen:
-            try:
-                search_input = main_screen.query_one("#log_search", Input)
-                tabbed_content = main_screen.query_one(TabbedContent)
-                if tabbed_content.active != "fetch":
-                    tabbed_content.active = "fetch"
-                search_input.focus()
-            except Exception:
-                pass
+        if not main_screen:
+            return
+        with suppress(Exception):
+            search_input = main_screen.query_one("#log_search", Input)
+            tabbed_content = main_screen.query_one(TabbedContent)
+            if tabbed_content.active != "fetch":
+                tabbed_content.active = "fetch"
+            search_input.focus()
 
     def action_cycle_theme(self) -> None:
         """Cycle to the next theme."""
@@ -1777,12 +1772,9 @@ class Redfetch(App):
             self.notify("MySEQ is not available for the current environment", severity="error")
 
     def update_eq_maps_settings(self, selected_value: str | None) -> None:
-        if selected_value is None or selected_value == Select.NULL:
-            brewall_opt_in = False
-            good_opt_in = False
-        else:
-            brewall_opt_in = selected_value in ["brewall", "all"]
-            good_opt_in = selected_value in ["good", "all"]
+        # None/NULL fall out on their own
+        brewall_opt_in = selected_value in ("brewall", "all")
+        good_opt_in = selected_value in ("good", "all")
 
         config.update_setting(['SPECIAL_RESOURCES', config.MAPS_MAP["brewall"], 'opt_in'], brewall_opt_in, env=self.current_env)
         config.update_setting(['SPECIAL_RESOURCES', config.MAPS_MAP["good"], 'opt_in'], good_opt_in, env=self.current_env)
@@ -1795,8 +1787,7 @@ class Redfetch(App):
     def get_current_eq_maps_value(self) -> str:
         if not self.eq_path:
             return Select.NULL
-        eq_maps_status = utils.get_eq_maps_status()
-        return eq_maps_status if eq_maps_status else Select.NULL
+        return utils.get_eq_maps_status() or Select.NULL
 
     #
     # Server profile handling (emu multipath)
@@ -2098,7 +2089,7 @@ class Redfetch(App):
             elif event_type == "done" and main_screen:
                 main_screen.query_one(FetchTab).query_one("#update_progress", ProgressBar).advance(1)
         except Exception:
-            pass
+            pass  # progress display is nice but never let it break the sync
 
     async def run_synchronization(self, resource_ids=None) -> SyncOutcome:
         try:

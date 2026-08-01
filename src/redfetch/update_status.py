@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+import time
 from typing import Literal
 
 from redfetch import config
@@ -73,7 +73,7 @@ def write_update_status(
 
     payload = {
         "schema_version": SCHEMA_VERSION,
-        "checked_at": int(datetime.now(timezone.utc).timestamp()),
+        "checked_at": int(time.time()),
         "env": env.upper(),
         "auth_state": auth_state,
         "managed_path": managed_path,

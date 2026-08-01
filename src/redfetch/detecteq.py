@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
 # Only import winreg on Windows
@@ -17,8 +18,9 @@ def _extract_dir_from_value(raw_value: str) -> str:
 
     s = str(raw_value).strip()
     # Common DisplayIcon form: C:\...\eqgame.exe,0 -> strip icon index
-    if "," in s and s.lower().split(",", 1)[0].endswith(".exe"):
-        s = s.split(",", 1)[0].strip()
+    head = s.partition(",")[0]
+    if head.lower().endswith(".exe"):
+        s = head.strip()
 
     # Remove surrounding quotes if present
     s = s.strip().strip('"').strip()
@@ -102,17 +104,13 @@ def read_autologin_eq_path(mq_config_dir: str | None, server_type: str) -> str |
     if not os.path.isfile(db_path):
         return None  # autologin maybe hasn't run
 
-    con = None
     try:
-        con = sqlite3.connect(Path(db_path).as_uri() + "?mode=ro", uri=True)
-        row = con.execute(
-            "SELECT eq_path FROM server_types WHERE type = LOWER(?)", (server_type,)
-        ).fetchone()
+        with closing(sqlite3.connect(Path(db_path).as_uri() + "?mode=ro", uri=True)) as con:
+            row = con.execute(
+                "SELECT eq_path FROM server_types WHERE type = LOWER(?)", (server_type,)
+            ).fetchone()
     except (sqlite3.Error, ValueError):
         return None  # locked or something
-    finally:
-        if con is not None:
-            con.close()
 
     candidate = row[0] if row else None
     return os.path.normpath(candidate) if is_valid_eq_dir(candidate) else None
