@@ -1,8 +1,9 @@
-"""Server profiles for multi-server clients i.e. emu (config.MULTI_SERVER_ENVS).
+"""The server domain for multi-server clients i.e. emu (config.MULTI_SERVER_ENVS).
 
 Env-level slots (EQPATH, map opt-ins) always hold the active server's
-values. Other modules should use this API instead of touching ``SERVERS.*``
-directly.
+values; inactive servers keep theirs in ``SERVERS.<slug>`` snapshots that
+``switch_server`` swaps in and out. Other modules should use this API
+instead of touching ``SERVERS.*`` directly.
 """
 import os
 import re
@@ -29,7 +30,7 @@ class ServerSwitchError(ValueError):
 
 
 def is_multi_server(env: str) -> bool:
-    """True when *env* can have switchable server profiles."""
+    """True when *env* can have switchable servers."""
     return env in config.MULTI_SERVER_ENVS
 
 
@@ -38,7 +39,8 @@ def env_for_slug(slug: str) -> str | None:
     found = [env for env in config.MULTI_SERVER_ENVS if slug in list_servers(env)]
     if len(found) > 1:
         raise ValueError(
-            f"Server name '{slug}' is ambiguous — it exists under {' and '.join(found)}."
+            f"Server name '{slug}' is ambiguous — it exists under "
+            f"{' and '.join(config.ENVS[e] for e in found)}."
         )
     return found[0] if found else None
 
@@ -50,17 +52,19 @@ def validate_server_slug(slug: str, *, must_be_new: bool = False) -> str:
         raise ValueError(
             f"Invalid server name '{slug}': use lowercase letters, digits, '-' or '_'."
         )
-    if slug.upper() in config.ENV_TOKENS:
-        raise ValueError(f"'{slug}' is a reserved name (client environment).")
+    if slug.upper() in config.ENVS:
+        raise ValueError(f"'{slug}' is a reserved name.")
     if must_be_new:
-        for env in config.ENV_TOKENS:
+        for env in config.ENVS:
             if slug in list_servers(env):
-                raise ValueError(f"Server name '{slug}' is already in use ({env}).")
+                raise ValueError(
+                    f"Server name '{slug}' is already in use on {config.ENVS[env]}."
+                )
     return slug
 
 
 def list_servers(env: str) -> dict[str, dict]:
-    """Return the env's server profiles keyed by slug as plain dictionaries."""
+    """Return the env's servers keyed by slug as plain dictionaries."""
     servers = config.settings.from_env(env).get("SERVERS") or {}
     if not isinstance(servers, dict):
         return {}
@@ -72,7 +76,7 @@ def list_servers(env: str) -> dict[str, dict]:
 
 
 def server_label(slug: str, env: str) -> str:
-    """Display label for a server profile, falling back to its slug."""
+    """Display label for a server, falling back to its slug."""
     return list_servers(env).get(slug, {}).get("label") or slug
 
 
@@ -210,7 +214,7 @@ def switch_server(slug: str) -> list[str]:
             f"'{outgoing}' is no longer configured. Its settings won't be saved back."
         )
 
-    # Missing profile values inherit the bundled env defaults.
+    # Missing snapshot values inherit the bundled env defaults.
     applied = {}
     for slot in SERVER_SLOT_PATHS:
         if outgoing == slug and saved_back is not None:

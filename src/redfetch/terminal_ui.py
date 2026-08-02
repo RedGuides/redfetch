@@ -140,8 +140,8 @@ def staff_picks_enabled(env: str) -> bool:
     return bool(staff_ids) and all(specials.get(rid, {}).get("opt_in", False) for rid in staff_ids)
 
 
-class ProfileSelect(Select[str]):
-    """The server profile dropdown."""
+class ServerSelect(Select[str]):
+    """The server dropdown: client rows with their servers indented beneath."""
 
     def __init__(self, options: list[tuple[Text, str]], value: str, widget_id: str) -> None:
         super().__init__(
@@ -149,22 +149,21 @@ class ProfileSelect(Select[str]):
             id=widget_id,
             classes="bordertitles",
             value=value,
-            prompt="Select server type",
+            prompt="Select server",
             allow_blank=False,
             tooltip=(
-                "The type of EQ server. Live and Test are official servers, "
-                "while Emu is for unofficial servers."
+                "The server you intend to play on."
             ),
         )
-        self.profile_rows = options
+        self.server_rows = options
 
     def replace_options(self, options: list[tuple[Text, str]]) -> None:
         """Replace options; callers preserve selection and suppress ``Changed``."""
-        self.profile_rows = options
+        self.server_rows = options
         self.set_options(options)
 
 
-def configured_profiles(env: str) -> list[tuple[str, str]]:
+def configured_servers(env: str) -> list[tuple[str, str]]:
     """(slug, label) for each of the env's servers that's fully set up."""
     return [
         (slug, entry.get("label") or slug)
@@ -173,23 +172,23 @@ def configured_profiles(env: str) -> list[tuple[str, str]]:
     ]
 
 
-def build_profile_rows() -> list[tuple[Text, str]]:
+def build_server_rows() -> list[tuple[Text, str]]:
     """Dropdown rows: each client environment, then its indented servers.
 
     Prompts double as the collapsed label, so keep them clean — no glyphs or
     active markers. The overlay highlights the current value on its own.
     """
     rows: list[tuple[Text, str]] = []
-    for env in config.ENV_TOKENS:
-        rows.append((Text(env.capitalize(), style="bold"), env))
+    for env in config.ENVS:
+        rows.append((Text(config.ENVS[env], style="bold"), env))
         if servers.is_multi_server(env):
             rows.extend(
-                (Text(f"  {label}"), slug) for slug, label in configured_profiles(env)
+                (Text(f"  {label}"), slug) for slug, label in configured_servers(env)
             )
     return rows
 
 
-def derived_profile_value(app, options) -> str:
+def derived_server_value(app, options) -> str:
     """Return a selection guaranteed to exist in ``options``."""
     derived = app.active_server or app.current_env
     if derived not in {value for _, value in options}:
@@ -197,15 +196,15 @@ def derived_profile_value(app, options) -> str:
     return derived
 
 
-def sync_profile_select(tab: ScrollableContainer, select_id: str) -> None:
-    """Refresh a profile dropdown without emitting ``Changed``."""
+def sync_server_select(tab: ScrollableContainer, select_id: str) -> None:
+    """Refresh a server dropdown without emitting ``Changed``."""
     app = tab.app
-    select = tab.query_one(f"#{select_id}", ProfileSelect)
-    options = build_profile_rows()
-    derived = derived_profile_value(app, options)
+    select = tab.query_one(f"#{select_id}", ServerSelect)
+    options = build_server_rows()
+    derived = derived_server_value(app, options)
     with tab.prevent(Select.Changed):
         # Text equality is plain-text based; rows only change on add/rename/delete.
-        if select.profile_rows != options:
+        if select.server_rows != options:
             select.replace_options(options)
         if select.value != derived:
             select.value = derived
@@ -234,11 +233,11 @@ class FetchTab(ScrollableContainer):
         # Simple vertical layout: controls on top, big log on the bottom
         with Vertical(id="fetch_layout"):
             with Grid(id="fetch_grid"):
-                profile_rows = build_profile_rows()
-                yield ProfileSelect(
-                    profile_rows,
-                    derived_profile_value(self.app, profile_rows),
-                    "server_type_fetch",
+                server_rows = build_server_rows()
+                yield ServerSelect(
+                    server_rows,
+                    derived_server_value(self.app, server_rows),
+                    "server_select_fetch",
                 )
                 with CenterMiddle(id="centermiddle_welcome"):
                     with Center(id="center_welcome"):
@@ -478,9 +477,9 @@ class FetchTab(ScrollableContainer):
             busy or not bool(download_folder) or not bool(resource_input.value)
         )
 
-        server_type_fetch = self.query_one("#server_type_fetch", ProfileSelect)
-        server_type_fetch.disabled = busy or interface_running
-        sync_profile_select(self, "server_type_fetch")
+        server_select_fetch = self.query_one("#server_select_fetch", ServerSelect)
+        server_select_fetch.disabled = busy or interface_running
+        sync_server_select(self, "server_select_fetch")
 
     #
     # Event handlers for widgets on this tab
@@ -529,9 +528,9 @@ class FetchTab(ScrollableContainer):
     def handle_resource_id_changed(self, event: Input.Changed) -> None:
         self._recompute()
 
-    @on(Select.Changed, "#server_type_fetch")
-    def handle_server_type_fetch_changed(self, event: Select.Changed) -> None:
-        self.app.handle_profile_selected(event.value)
+    @on(Select.Changed, "#server_select_fetch")
+    def handle_server_select_fetch_changed(self, event: Select.Changed) -> None:
+        self.app.handle_server_selected(event.value)
 
 
 class SettingsTab(ScrollableContainer):
@@ -542,11 +541,11 @@ class SettingsTab(ScrollableContainer):
         current_env = self.app.current_env
 
         with ItemGrid(id="dropdowns_grid"):
-            profile_rows = build_profile_rows()
-            yield ProfileSelect(
-                profile_rows,
-                derived_profile_value(self.app, profile_rows),
-                "server_type",
+            server_rows = build_server_rows()
+            yield ServerSelect(
+                server_rows,
+                derived_server_value(self.app, server_rows),
+                "server_select",
             )
         with ItemGrid(id="inputs_grid", classes="bordertitles"):
             yield Button(
@@ -605,7 +604,7 @@ class SettingsTab(ScrollableContainer):
                 )
             else:
                 yield Input(
-                    value="VVMQ not available for current environment",
+                    value="VVMQ not available for this server",
                     id="vvmq_path_input",
                     disabled=True,
                 )
@@ -619,7 +618,7 @@ class SettingsTab(ScrollableContainer):
                 .get("opt_in", False),
                 tooltip=(
                     "Adds MySEQ to your 'special resources', with maps and offsets "
-                    "for your selected server type."
+                    "for your selected server."
                 ),
             )
             yield Label("Nav Meshes:", classes="left_middle")
@@ -646,7 +645,7 @@ class SettingsTab(ScrollableContainer):
             yield Switch(
                 id="staff_picks",
                 value=staff_picks_enabled(current_env),
-                tooltip="A collection of scripts for this server type that RedGuides staff recommends.",
+                tooltip="A collection of scripts for this server that RedGuides staff recommends.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
             yield Label("Background updates:", classes="left_middle")
@@ -711,7 +710,7 @@ class SettingsTab(ScrollableContainer):
         self.query_one("#vvmq_path_input", Input).disabled = not has_download
         self.query_one("#select_vvmq_path", Button).disabled = not has_download
 
-        sync_profile_select(self, "server_type")
+        sync_server_select(self, "server_select")
 
         # EQ maps select - depends on eq_path
         eq_maps_select = self.query_one("#eq_maps", Select)
@@ -790,7 +789,7 @@ class SettingsTab(ScrollableContainer):
             vvmq_input_widget.value = vvmq_path
             vvmq_input_widget.disabled = False
         else:
-            vvmq_input_widget.value = "VVMQ not found for this server type."
+            vvmq_input_widget.value = "VVMQ not found for this server."
             vvmq_input_widget.disabled = True
 
     def update_myseq_display(self) -> None:
@@ -865,9 +864,9 @@ class SettingsTab(ScrollableContainer):
         if event.value != self.app.get_current_eq_maps_value():
             self.app.update_eq_maps_settings(event.value)
 
-    @on(Select.Changed, "#server_type")
-    def handle_server_type_changed(self, event: Select.Changed) -> None:
-        self.app.handle_profile_selected(event.value)
+    @on(Select.Changed, "#server_select")
+    def handle_server_select_changed(self, event: Select.Changed) -> None:
+        self.app.handle_server_selected(event.value)
 
     @on(Checkbox.Changed, "#post_update_launch Checkbox")
     def on_launch_toggle_changed(self, event: Checkbox.Changed) -> None:
@@ -877,7 +876,7 @@ class SettingsTab(ScrollableContainer):
 
 
 class ServersTab(ScrollableContainer):
-    """Manage EMU server profiles."""
+    """Manage a multi-server env's servers."""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="servers_layout"):
@@ -966,7 +965,7 @@ class ServersTab(ScrollableContainer):
         configured = bool(slug) and servers.is_server_configured(slug, env)
         self.query_one("#server_switch", Button).disabled = not slug or slug == active
         self.query_one("#server_rename", Button).disabled = not slug or known
-        # Unconfigured known profiles have nothing to delete.
+        # Unconfigured known servers have nothing to delete.
         self.query_one("#server_delete", Button).disabled = not slug or (known and not configured)
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
@@ -1024,7 +1023,7 @@ class ServersTab(ScrollableContainer):
             self.app.notify(f"{label} set up.")
             self.app.refresh_after_server_change()
             if switch_after:
-                # add_server activates the first profile.
+                # add_server activates the first server.
                 self.app.switch_active_server(slug)
 
         self.app.push_screen(SelectDirectory(location=Path.home()), callback=picked)
@@ -1280,12 +1279,12 @@ class MainScreen(Screen):
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
         log.write_line(f"redfetch v{meta.get_current_version()} allows you to download resources from RedGuides")
-        log.write_line("Server type: " + self.app.current_env)
+        log.write_line("Server: " + config.ENVS[self.app.current_env])
         log.write_line("\n")
 
         # Set border titles
-        self.query_one("#server_type").border_title = "Server type"
-        self.query_one("#server_type_fetch").border_title = "Server type"
+        self.query_one("#server_select").border_title = "Server"
+        self.query_one("#server_select_fetch").border_title = "Server"
         self.query_one("#inputs_grid").border_title = "Directories"
         self.query_one("#settings_grid").border_title = "Settings"
         self.query_one("#special_resources_grid").border_title = "Special Resources"
@@ -1319,7 +1318,7 @@ class Redfetch(App):
     download_folder: reactive[str] = reactive("")
     eq_path: reactive[str] = reactive("")
     current_env: reactive[str] = reactive(config.settings.ENV)
-    # Selected EMU profile, or None outside EMU.
+    # Active server slug on a multi-server env, else None.
     active_server: reactive[str | None] = reactive(None)
     # User account identity and permissions: set reactively by background workers, observed by AccountTab for live updates
     username: reactive[str] = reactive("")
@@ -1334,7 +1333,7 @@ class Redfetch(App):
     # This state tracks whether an offer is actively displayed; it's reactive to trigger FetchTab updates when changed.
     _offer_active: reactive[bool] = reactive(False)
 
-    # Avoid an intermediate environment toast during profile selection.
+    # Avoid an intermediate environment toast during server selection.
     _suppress_env_notify: bool = False
 
     CSS_PATH = "terminal_ui.tcss"
@@ -1345,7 +1344,7 @@ class Redfetch(App):
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+t", "cycle_theme", "Theme"),
         ("ctrl+f", "focus_search", "Search Log"),
-        ("ctrl+s", "cycle_server_type", "Server Type"),
+        ("ctrl+s", "cycle_env", "Server"),
         Binding("ctrl+r", "start_interface", "RG.com Interface", tooltip="Download resources while you browse redguides.com"),
         Binding("ctrl+r", "stop_interface", "Stop Interface", tooltip="Other buttons are disabled until you stop the interface"),
     ]
@@ -1498,7 +1497,7 @@ class Redfetch(App):
 
         self.check_mq_status_worker()
         if not self._suppress_env_notify:
-            self.notify(f"Server type changed to: {new}")
+            self.notify(f"Server: {config.ENVS[new]}")
 
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
@@ -1539,12 +1538,12 @@ class Redfetch(App):
             self.cancel_update_watched()
         self.exit()
 
-    def action_cycle_server_type(self) -> None:
-        """Cycle the server type."""
+    def action_cycle_env(self) -> None:
+        """Cycle the client env (servers ride the dropdown, not this)."""
         if self.is_updating or self.interface_running:
             return
 
-        order = config.ENV_TOKENS
+        order = tuple(config.ENVS)
         try:
             index = order.index(self.current_env)
         except ValueError:
@@ -1681,7 +1680,7 @@ class Redfetch(App):
     def _queue_signature_reconcile(self) -> None:
         if self.is_updating:
             return
-        self.notify(f"Settings updated for {self.current_env}; changes will apply on next sync.")
+        self.notify(f"Settings updated for {config.ENVS[self.current_env]}; changes will apply on next sync.")
 
     #
     # Toggle handlers
@@ -1699,7 +1698,7 @@ class Redfetch(App):
         env = self.current_env
         pack_ids = get_staff_pick_ids_for_env(env)
         if not pack_ids:
-            self.notify(f"No Staff Picks configured for {env}", severity="warning")
+            self.notify(f"No Staff Picks configured for {config.ENVS[env]}", severity="warning")
             return
 
         current_specials = config.settings.from_env(env).SPECIAL_RESOURCES
@@ -1713,7 +1712,7 @@ class Redfetch(App):
 
         if changed:
             state = "enabled" if value else "disabled"
-            self.notify(f"Staff Picks for {env} are now {state}")
+            self.notify(f"Staff Picks for {config.ENVS[env]} are now {state}")
 
     def handle_toggle_navmesh(self, value: bool) -> None:
         current_opt_in = config.settings.from_env(self.current_env).get('NAVMESH_DOWNLOADS', None)
@@ -1721,7 +1720,7 @@ class Redfetch(App):
         if current_opt_in != value:
             config.update_setting(['NAVMESH_DOWNLOADS'], value, env=self.current_env)
             state = "enabled" if value else "disabled"
-            self.notify(f"navmesh downloads for {self.current_env} are now {state}")
+            self.notify(f"navmesh downloads for {config.ENVS[self.current_env]} are now {state}")
 
     def handle_toggle_auto_update(self, value: bool) -> None:
         current = config.settings.from_env(self.current_env).get('AUTO_UPDATE', None)
@@ -1729,7 +1728,7 @@ class Redfetch(App):
         if current != value:
             config.update_setting(['AUTO_UPDATE'], value, env=self.current_env)
             state = "enabled" if value else "disabled"
-            self.notify(f"Background updates for {self.current_env} are now {state}")
+            self.notify(f"Background updates for {config.ENVS[self.current_env]} are now {state}")
 
     def handle_toggle_auto_run_vvmq(self, value) -> None:
         main_screen = self._get_main_screen()
@@ -1787,9 +1786,9 @@ class Redfetch(App):
         if myseq_id:
             config.update_setting(['SPECIAL_RESOURCES', myseq_id, 'opt_in'], opt_in, env=self.current_env)
             state = "enabled" if opt_in else "disabled"
-            self.notify(f"MySEQ for {self.current_env} is now {state}")
+            self.notify(f"MySEQ for {config.ENVS[self.current_env]} is now {state}")
         else:
-            self.notify("MySEQ is not available for the current environment", severity="error")
+            self.notify("MySEQ is not available for this server", severity="error")
 
     def update_eq_maps_settings(self, selected_value: str | None) -> None:
         # None/NULL fall out on their own
@@ -1810,7 +1809,7 @@ class Redfetch(App):
         return utils.get_eq_maps_status() or Select.NULL
 
     #
-    # Server profile handling (emu multipath)
+    # Server handling (emu multipath)
     #
 
     def apply_servers_tab_visibility(self) -> None:
@@ -1825,7 +1824,7 @@ class Redfetch(App):
             tabbed.hide_tab("servers")
 
     def refresh_after_server_change(self) -> None:
-        """Refresh tabs even when a profile switch leaves watched values unchanged."""
+        """Refresh tabs even when a server switch leaves watched values unchanged."""
         settings_for_env = config.settings.from_env(self.current_env)
         self.eq_path = settings_for_env.EQPATH or ""
         self.download_folder = utils.get_current_download_folder()
@@ -1843,7 +1842,7 @@ class Redfetch(App):
 
     def switch_active_server(self, slug: str) -> None:
         if slug == servers.get_active_server(self.current_env):
-            # Ignore mount-time events for the active profile.
+            # Ignore mount-time events for the already-active server.
             return
         if self.is_updating or self.interface_running:
             return
@@ -1858,9 +1857,9 @@ class Redfetch(App):
         label = servers.server_label(slug, self.current_env)
         self.notify(f"Server: {label}")
 
-    def handle_profile_selected(self, value: str) -> None:
-        """Handle an environment token or a server profile slug."""
-        if value in config.ENV_TOKENS:
+    def handle_server_selected(self, value: str) -> None:
+        """Handle an environment token or a server slug."""
+        if value in config.ENVS:
             self.current_env = value
             return
         try:
@@ -2448,7 +2447,7 @@ class RunVVMQScreen(ModalScreen):
 
 
 class AddServerScreen(ModalScreen[dict | None]):
-    """Collect a known or custom server profile."""
+    """Collect a known or custom server."""
 
     CUSTOM = "__custom__"
     BINDINGS = [("escape", "dismiss", "Cancel")]
@@ -2530,7 +2529,7 @@ class AddServerScreen(ModalScreen[dict | None]):
 
 
 class RenameServerScreen(ModalScreen[str | None]):
-    """Rename a custom server profile."""
+    """Rename a custom server."""
 
     BINDINGS = [("escape", "dismiss", "Cancel")]
 
@@ -2569,7 +2568,7 @@ class RenameServerScreen(ModalScreen[str | None]):
 
 
 class ConfirmDeleteServerScreen(ModalScreen[bool]):
-    """Confirm a profile reset or deletion."""
+    """Confirm a server reset or deletion."""
 
     BINDINGS = [("escape", "dismiss", "Cancel")]
 

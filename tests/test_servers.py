@@ -1,4 +1,4 @@
-"""Tests for emulator server profiles and switching."""
+"""Tests for emulator servers and switching."""
 import os
 import re
 import tomllib
@@ -93,7 +93,7 @@ def test_real_bundle_ships_known_emu_servers(tmp_path, monkeypatch):
 def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
     """Validate the required shape of every bundled server entry."""
     _install_settings(tmp_path, monkeypatch)
-    for env in config.ENV_TOKENS:
+    for env in config.ENVS:
         for slug, entry in servers.list_servers(env).items():
             assert servers.validate_server_slug(slug) == slug
             assert entry.get("label"), f"known server '{slug}' needs a label"
@@ -223,9 +223,9 @@ def test_is_multi_server_predicate(monkeypatch):
     assert servers.is_multi_server("EMU") is True
     assert servers.is_multi_server("LIVE") is False
     assert servers.is_multi_server("TEST") is False
-    # Uniqueness sweeps and the heal loop iterate ENV_TOKENS; a multi-server
+    # Uniqueness sweeps and the heal loop iterate ENVS; a multi-server
     # env missing from it would silently escape both.
-    assert set(config.MULTI_SERVER_ENVS) <= set(config.ENV_TOKENS)
+    assert set(config.MULTI_SERVER_ENVS) <= set(config.ENVS)
     monkeypatch.setattr(config, "MULTI_SERVER_ENVS", ("EMU", "TOB"))
     assert servers.is_multi_server("TOB") is True
 
@@ -242,6 +242,8 @@ def test_env_for_slug_ambiguous_raises(tmp_path, monkeypatch):
     """The same slug under two envs: hand-edits bypass add-path uniqueness."""
     local = '[TOB.SERVERS.thegrind]\nlabel = "Impostor"\n'
     _install_settings(tmp_path, monkeypatch, local_toml=local, bundle_toml=BUNDLE_TWO_CLIENTS)
+    # A real second multi-server client would land in ENVS too (they stay in lockstep).
+    monkeypatch.setattr(config, "ENVS", {**config.ENVS, "TOB": "Tob"})
     monkeypatch.setattr(config, "MULTI_SERVER_ENVS", ("EMU", "TOB"))
     with pytest.raises(ValueError, match="ambiguous"):
         servers.env_for_slug("thegrind")
@@ -328,7 +330,7 @@ def test_switch_applies_incoming_and_saves_back_outgoing(tmp_path, monkeypatch):
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "b"
     assert _norm(emu["EQPATH"]) == _norm("D:/EQ-B")
-    # A's current map settings were saved to its profile.
+    # A's current map settings were saved to its snapshot.
     snap = emu["SERVERS"]["a"]
     assert _norm(snap["eqpath"]) == _norm("D:/EQ-A")
     assert snap["SPECIAL_RESOURCES"]["153"]["opt_in"] is True
@@ -400,7 +402,7 @@ eqpath = ""
 
 
 def test_switch_blocks_blank_env_eqpath_with_opt_ins(tmp_path, monkeypatch):
-    """Reject an active profile with maps enabled but no EQ path."""
+    """Reject an active server with maps enabled but no EQ path."""
     local = """
 [EMU]
 EQPATH = ""

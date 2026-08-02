@@ -68,7 +68,7 @@ async def _is_mq_down_async(client: httpx.AsyncClient) -> bool:
             if env.lower() == current_env:
                 return status.lower() != "yes"
 
-        print(f"Warning: Environment {current_env} not found in status JSON.")
+        print(f"Warning: {current_env} not found in status JSON.")
         return True  # Assume down if environment not found
     except (httpx.HTTPStatusError, httpx.RequestError, KeyError, ValueError) as e:
         print(f"Error fetching or parsing status: {e}")

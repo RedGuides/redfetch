@@ -22,10 +22,12 @@ CATEGORY_MAP = {
     25: "lua"
 }
 
-# Client environments (dynaconf envs). Also for server slugs.
-ENV_TOKENS = ("LIVE", "TEST", "EMU")
+# MQ Client environments (dynaconf envs)
+# Keys are reserved against server slugs. User copy says "server" at both
+# levels — never "client"/"environment".
+ENVS = {"LIVE": "Live", "TEST": "Test", "EMU": "Emu (RoF2)"}
 
-# Envs whose server domain servers.py manages (switchable server profiles).
+# Envs who have switchable servers (servers.py manages)
 MULTI_SERVER_ENVS = ("EMU",)
 
 # Resource to MQ version
@@ -159,7 +161,7 @@ def initialize_config():
     if not os.path.exists(env_file_path):
         # If not, create it and set the default environment to 'LIVE'
         atomic_write_text(env_file_path, 'REDFETCH_ENV=LIVE\n')
-        print(f".env file created with default environment set to 'LIVE' at {env_file_path}")
+        print(f".env file created at {env_file_path} (server: Live)")
 
     # Migrate any settings.local.toml written by older versions
     _migrate_local_settings(config_dir)
@@ -199,7 +201,7 @@ def self_heal_eqpath() -> None:
     """Fill a blank or broken EQ PATH from autologin's login.db, per env."""
     from redfetch import utils, detecteq
 
-    for env in ENV_TOKENS:
+    for env in ENVS:
         try:
             env_settings = settings.from_env(env)
             # Spelled inline: config must not import servers.
@@ -296,10 +298,9 @@ def switch_environment(new_env):
     # Keep a simple attribute around for convenience (used throughout the app)
     settings.ENV = new_env
 
-    # Re-validate settings after environment switch
+    # Re-validate settings after environment switch; callers own the confirmation.
     try:
         settings.validators.validate()
-        print(f"Server type: {new_env}")
     except ValidationError as e:
         print(f"Validation error after switching to {new_env}: {e}")
 

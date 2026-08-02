@@ -16,6 +16,7 @@ from redfetch import utils
 # Resolve paths lazily so --server can switch environments before launch.
 
 def _eq_dir() -> str | None:
+    # On a multi-server env this is the active server's path — servers.py swaps it.
     return config.active_settings().get("EQPATH") or None
 
 
@@ -104,7 +105,7 @@ RUNNABLES: tuple[Runnable, ...] = (
     Runnable(
         "eqgame", "EQGame 🐲🩹", "eqgame.exe", _eq_dir, args=("patchme",),
         aliases=("eqclient",),
-        tooltip="The EverQuest client *WITHOUT* updating.",
+        tooltip="Run EverQuest *WITHOUT* updating.",
     ),
     Runnable(
         "myseq", "MySEQ 📍", "MySEQ.exe", utils.get_myseq_path,

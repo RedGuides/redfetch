@@ -9,6 +9,7 @@ import asyncio
 # third-party imports
 from rich.prompt import Prompt
 from rich.console import Console
+from rich.markup import escape
 import typer
 
 # local imports
@@ -314,7 +315,7 @@ def _has_auth_credentials() -> bool:
 def check_command(
     server: Env | None = typer.Option(
         None, "--server", "-s", case_sensitive=False,
-        help="Check this server's env for this run only, without persisting it ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
+        help="Check this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
     ),
 ):
     from redfetch.config_firstrun import is_configured
@@ -531,7 +532,7 @@ def config_command(
     settings_env = server.value if server else config.settings.ENV
     db_name = store.db_name(settings_env)
     store.initialize_db(db_name)
-    console.print(f"Updated setting {path} to {value}{' for server ' + server.value if server else ''}.")
+    console.print(f"Updated setting {path} to {value}{' for server ' + config.ENVS[server.value] if server else ''}.")
 
 
 @app.command(
@@ -544,13 +545,12 @@ def server_command(
 ):
     config.initialize_config()
 
+    # Exit codes: 0 switched, 1 a guard blocked the switch, 2 bad input (typer usage error).
     value = env.strip()
     token = value.upper()
-    if token in config.ENV_TOKENS:
+    if token in config.ENVS:
         config.switch_environment(token)
-        console.print(f"Environment updated to {token}.")
-        console.print("New complete configuration:")
-        typer.echo(config.settings.from_env(token).as_dict())
+        console.print(f"Server: {config.ENVS[token]}")
         return
 
     try:
@@ -561,7 +561,7 @@ def server_command(
 
     if server_env is None:
         known = {s for e in config.MULTI_SERVER_ENVS for s in servers.list_servers(e)}
-        valid = ", ".join([*config.ENV_TOKENS, *sorted(known)])
+        valid = ", ".join([*config.ENVS, *sorted(known)])
         raise typer.BadParameter(f"Unknown server '{slug}'. Valid servers: {valid}.")
 
     if not servers.is_server_configured(slug, server_env):
@@ -589,7 +589,8 @@ def server_command(
         raise typer.Exit(1)
     for notice in notices or []:
         console.print(f"[yellow]{notice}[/yellow]")
-    console.print(f"Active server: {slug}")
+    # escape(): labels are free text and rich raises on stray closing tags.
+    console.print(f"Server: {escape(servers.server_label(slug, server_env))}")
 
 
 @app.command("show", hidden=True)
@@ -645,10 +646,16 @@ def config_show_command(server: Env | None = typer.Option(None, "--server", "-s"
 
     # If nothing to show, still render an empty-but-clear panel
     if not panel_lines:
-        panel_lines.append("[dim]No paths are currently configured or opted in for this environment.[/dim]")
+        panel_lines.append("[dim]No paths are currently configured or opted in for this server.[/dim]")
 
-    # Lead with the server type so users always know which env they're on.
-    panel_lines.insert(0, f"[bold yellow]Server type:[/bold yellow] {current_env}")
+    # Lead with the server so users always know which env they're on.
+    if servers.is_multi_server(current_env):
+        active = servers.get_active_server(current_env)
+        if active:
+            label = servers.server_label(active, current_env)
+            shown = label if label == active else f"{label} ({active})"
+            panel_lines.insert(0, f"[bold yellow]Active server:[/bold yellow] {escape(shown)}")
+    panel_lines.insert(0, f"[bold yellow]Server:[/bold yellow] {config.ENVS[current_env]}")
 
     console.print(Panel("\n".join(panel_lines), expand=False))
 
@@ -739,7 +746,7 @@ def legacy_switch_env_callback(ctx: typer.Context, value: Env | None):
     """Deprecated --switch-env handler that forwards to the 'server' subcommand."""
     if ctx.resilient_parsing or value is None:
         return value
-    console.print("[yellow]Warning:[/yellow] --switch-env is deprecated. Use 'redfetch server ENV' instead.")
+    console.print("[yellow]Warning:[/yellow] --switch-env is deprecated. Use 'redfetch server <server>' instead.")
     ctx.invoke(server_command, env=value)
     raise typer.Exit()
 
@@ -751,7 +758,7 @@ def root(
     switch_env: Env | None = typer.Option(
         None, "--switch-env", is_eager=True, case_sensitive=False, hidden=True,
         callback=legacy_switch_env_callback,
-        metavar="ENV", help="(Deprecated) Use 'server' subcommand instead.",
+        metavar="SERVER", help="(Deprecated) Use 'server' subcommand instead.",
     ),
     # Legacy: --download-watched
     download_watched: bool = typer.Option(

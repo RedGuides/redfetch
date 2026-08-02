@@ -1,4 +1,4 @@
-"""Tests for switching client environments and emu server profiles."""
+"""Tests for switching client environments and emu servers."""
 from types import SimpleNamespace
 
 import pytest
@@ -53,9 +53,9 @@ def test_legacy_switch_env_enum_still_accepted(cli_env):
     assert calls == [("client", "TEST")]
 
 
-def test_env_enum_pins_env_tokens():
-    """The CLI's client-token axis stays in lockstep with config.ENV_TOKENS."""
-    assert set(Env) == set(config.ENV_TOKENS)
+def test_env_enum_pins_envs():
+    """The CLI's client-token axis stays in lockstep with config.ENVS."""
+    assert set(Env) == set(config.ENVS)
 
 
 # Emulator server slugs

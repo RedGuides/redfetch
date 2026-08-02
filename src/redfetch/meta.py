@@ -432,7 +432,7 @@ def _collect_leftover_dirs() -> set[Path]:
     """Collect existing directories, excluding those nested in another."""
     candidates: set[Path] = set()
 
-    for env in ('DEFAULT', *config.ENV_TOKENS):
+    for env in ('DEFAULT', *config.ENVS):
         env_settings = config.settings.from_env(env)
 
         download_folder = env_settings.get('DOWNLOAD_FOLDER')

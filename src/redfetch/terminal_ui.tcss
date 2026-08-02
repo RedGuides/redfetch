@@ -101,7 +101,7 @@ Label {
     height: auto;
 }
 
-#server_type_fetch {
+#server_select_fetch {
     content-align: center middle;
     width: 25;
     min-width: 15;
@@ -192,7 +192,7 @@ Label {
     overflow-y: auto;
 }
 
-#server_type {
+#server_select {
     content-align: center middle;
     width: 25;
     min-width: 15;
@@ -201,8 +201,8 @@ Label {
 
 /* Server rows need more width than the dropdown itself.
    SelectOverlay is a private Textual widget  */
-#server_type > SelectOverlay,
-#server_type_fetch > SelectOverlay {
+#server_select > SelectOverlay,
+#server_select_fetch > SelectOverlay {
     width: 34;
 }
 

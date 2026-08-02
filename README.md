@@ -73,7 +73,7 @@ To run redfetch from the command line:
 >   - `--force` / `-f` - Force re-download by resetting this resource's download date.
 >   - `--server` / `-s` - Download from this server for this run only, without changing your current server (LIVE, TEST, EMU).
 > - `check` - Non-interactive update check (for automation.)
->   - `--server` / `-s` - Check this server's env for this run only, without persisting it (LIVE, TEST, EMU).
+>   - `--server` / `-s` - Check this server for this run only, without changing your current server (LIVE, TEST, EMU).
 > - `list` - List resources and dependencies in your local cache.
 > - `reset` - Reset download dates for *watched resources* in the database.
 >
@@ -121,7 +121,7 @@ All settings are prefixed with the environment,
 - `[DEFAULT]` - encompasses all environments that are not explicitly defined.
 - `[LIVE]` - EverQuest Live
 - `[TEST]` - EverQuest Test
-- `[EMU]` - EverQuest Emulator
+- `[EMU]` - EverQuest Emulator (can hold multiple servers; see [Emu servers](#emu-servers))
 
 ### Adding a special resource
 To add a "special resource" (a non-MQ resource that you want to keep updated), open `settings.local.toml` and add an entry. You'll need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory. Example:
@@ -134,6 +134,25 @@ opt_in = true
 * Note the use of single quotes around the path, which are required for windows paths.
 
 The above will install Brewall's maps to the EQ maps directory the next time `redfetch update` is run for `LIVE` servers.
+
+### Emu servers
+
+redfetch can track more than one emulator server, each with its own EverQuest folder and maps choice. 
+
+You can also switch from the command line:
+
+```powershell
+redfetch server lazarus
+```
+
+To add a server redfetch doesn't know about, use the Servers tab, or hand-add an entry to `settings.local.toml`:
+
+```toml
+[EMU.SERVERS.myserver]
+label = "My Server"
+opt_in = true
+eqpath = 'D:\Games\EQ-MyServer'
+```
 
 ### Overwrite protection
 

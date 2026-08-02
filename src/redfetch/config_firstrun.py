@@ -18,12 +18,12 @@ from tomlkit import TOMLDocument
 
 # Custom
 from redfetch import utils
-from redfetch.config import _descend_tables, load_config, save_config
+from redfetch.config import ENVS, _descend_tables, load_config, save_config
 from redfetch.detecteq import find_everquest_uninstall_location
 
 console = Console()
 
-# server type and config dir banner
+# server and config dir banner
 BANNER_COOLDOWN = 12 * 3600
 
 
@@ -223,7 +223,8 @@ def _show_env_banner(config_dir: str) -> None:
     effective_env = env_from_file or os.environ.get("REDFETCH_ENV") or "LIVE"
 
     notice_lines: list[str] = [
-        f"[bold yellow]Server type: [cyan]{effective_env}[/cyan][/bold yellow]",
+        # Hand-edited tokens surface verbatim for support.
+        f"[bold yellow]Server: [cyan]{ENVS.get(effective_env, effective_env)}[/cyan][/bold yellow]",
         f"Configuration directory: {config_dir}",
     ]
 
@@ -235,12 +236,12 @@ def _show_env_banner(config_dir: str) -> None:
     if os.environ.get("REDGUIDES_API_KEY"):
         notice_lines.append("[bold yellow]Auth:[/bold yellow] API key via REDGUIDES_API_KEY")
         if os.environ.get("REDGUIDES_USER_ID"):
-            notice_lines.append("[bold yellow]Auth:[/bold yellow] REDGUIDES_USER_ID set via env")
+            notice_lines.append("[bold yellow]Auth:[/bold yellow] REDGUIDES_USER_ID set")
     else:
         if os.environ.get("REDFETCH_OAUTH_CLIENT_ID"):
-            notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client ID set via env")
+            notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client ID set (REDFETCH_OAUTH_CLIENT_ID)")
         if os.environ.get("REDFETCH_OAUTH_CLIENT_SECRET"):
-            notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client secret set via env")
+            notice_lines.append("[bold yellow]OAuth:[/bold yellow] Client secret set (REDFETCH_OAUTH_CLIENT_SECRET)")
         oauth_redirect_override = os.environ.get("REDFETCH_OAUTH_REDIRECT_URI")
         if oauth_redirect_override:
             notice_lines.append(f"[bold yellow]OAuth redirect:[/bold yellow] {oauth_redirect_override}")
@@ -346,7 +347,7 @@ def first_run_setup():
         if os.path.exists(os.path.join(config_dir, ".env")):
             _show_env_banner(config_dir)
             return config_dir
-        console.print("[bold red]Environment file (.env) not found. Rerunning setup.[/bold red]")
+        console.print("[bold red]The .env file was not found. Rerunning setup.[/bold red]")
 
     eq_path = find_everquest_uninstall_location()
 

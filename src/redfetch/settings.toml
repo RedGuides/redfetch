@@ -2,9 +2,9 @@
 # Instead, you should make a settings.local.toml file, and edit that. It will override anything here.
 
 # ========================================
-# DEFAULT SETTINGS USED IN ALL ENVIRONMENTS
+# DEFAULT SETTINGS USED FOR ALL SERVERS
 # ========================================
-# These settings are the base configuration for all environments. You can override them with [LIVE], [TEST], or [EMU] sections.
+# These settings are the base configuration for all servers. You can override them with [LIVE], [TEST], or [EMU] sections.
 [DEFAULT]
 DOWNLOAD_FOLDER = "@format {env[REDFETCH_DATA_DIR]}/Downloads"
 EQPATH = ""
@@ -18,7 +18,7 @@ OAUTH_SCOPE = "user:read resource:read resource:write attachment:write"
 OAUTH_REDIRECT_URI = "http://127.0.0.1:62897/"
 
 # ========================================
-# LIVE ENVIRONMENT SETTINGS
+# LIVE SERVER SETTINGS
 # ========================================
 [LIVE]
 THEME = "textual-dark"
@@ -118,7 +118,7 @@ opt_in = true
 staff_pick = true
 
 # ========================================
-# TEST ENVIRONMENT SETTINGS
+# TEST SERVER SETTINGS
 # ========================================
 [TEST]
 THEME = "gruvbox"
@@ -218,8 +218,9 @@ opt_in = true
 staff_pick = true
 
 # ========================================
-# EMULATOR ENVIRONMENT SETTINGS
+# EMULATOR ROF2 SETTINGS
 # ========================================
+# an ACTIVE_SERVER can override the emu slots (EQPATH, maps opt-ins)
 [EMU]
 THEME = "dracula"
 
