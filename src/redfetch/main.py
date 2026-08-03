@@ -171,7 +171,7 @@ async def download_command_async(db_name: str, db_path: str, id_or_url: str, for
 )
 def update_command(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download of all watched resources."),
-    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Update this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Env | None = typer.Option(None, "--server", "--client", "-s", case_sensitive=False, help="Update this client for this run only, without changing your active client ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
     headless: bool = typer.Option(False, "--headless", hidden=True, help="MQ silent update: no prompts, no browser, no dialogs. writes update_status.json."),
 ):
     if headless:
@@ -287,7 +287,7 @@ async def _headless_update_async(db_path: str) -> SyncOutcome | None:
 def download(
     id_or_url: str = typer.Argument(..., metavar="ID_OR_URL", help="RedGuides resource ID or URL"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-download by resetting this resource's download date."),
-    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Download from this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Env | None = typer.Option(None, "--server", "--client", "-s", case_sensitive=False, help="Download for this client for this run only, without changing your active client ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     db_name, db_path = initialize_db_only(server=server)
     asyncio.run(download_command_async(db_name=db_name, db_path=db_path, id_or_url=id_or_url, force=force))
@@ -314,8 +314,8 @@ def _has_auth_credentials() -> bool:
 )
 def check_command(
     server: Env | None = typer.Option(
-        None, "--server", "-s", case_sensitive=False,
-        help="Check this server for this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
+        None, "--server", "--client", "-s", case_sensitive=False,
+        help="Check this client for this run only, without changing your active client ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan]).",
     ),
 ):
     from redfetch.config_firstrun import is_configured
@@ -409,7 +409,7 @@ def _print_shortcut_table(entries, available) -> None:
 )
 def run_shortcut_command(
     target: str | None = typer.Argument(None, metavar="SHORTCUT", help="Shortcut to run: vvmq, eqbcs, eq, eqgame, etc."),
-    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Run for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Env | None = typer.Option(None, "--server", "--client", "-s", case_sensitive=False, help="Run for this client this run only, without changing your active client ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     config.initialize_config()
     _apply_server_override(server)
@@ -446,7 +446,7 @@ def run_shortcut_command(
 )
 def open_shortcut_command(
     target: str | None = typer.Argument(None, metavar="SHORTCUT", help="Folder/file to open: downloads, vvmq, eq, etc."),
-    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Resolve paths for this server this run only, without changing your current server ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
+    server: Env | None = typer.Option(None, "--server", "--client", "-s", case_sensitive=False, help="Resolve paths for this client this run only, without changing your active client ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])."),
 ):
     config.initialize_config()
     _apply_server_override(server)
@@ -524,7 +524,7 @@ def resources_reset_command():
 def config_command(
     path: str = typer.Argument(..., metavar="SETTING_PATH", help="Dot-separated setting path (e.g., SPECIAL_RESOURCES.1974.opt_in)"),
     value: str = typer.Argument(..., metavar="VALUE", help="New value for the setting"),
-    server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to apply the change in ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])"),
+    server: Env | None = typer.Option(None, "--server", "--client", "-s", case_sensitive=False, help="Client to apply the change in ([green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan])"),
 ):
     config.initialize_config()
     setting_path_list = path.split('.')
@@ -532,25 +532,65 @@ def config_command(
     settings_env = server.value if server else config.settings.ENV
     db_name = store.db_name(settings_env)
     store.initialize_db(db_name)
-    console.print(f"Updated setting {path} to {value}{' for server ' + config.ENVS[server.value] if server else ''}.")
+    console.print(f"Updated setting {path} to {value}{' for client ' + config.ENVS[server.value] if server else ''}.")
+
+
+def _switch_client(token: str) -> None:
+    """Persist the client switch; its active server (if any) resumes untouched."""
+    config.switch_environment(token)
+    console.print(f"Client: {config.ENVS[token]}")
+    if servers.is_multi_server(token):
+        active = servers.get_active_server(token)
+        label = servers.server_label(active, token) if active else config.BARE_SERVER_LABEL
+        console.print(f"Server: {escape(label)}")
+
+
+@app.command(
+    "client",
+    help="Switch the game client: [green]LIVE[/green], [yellow]TEST[/yellow], or [cyan]EMU[/cyan] (RoF2).",
+    rich_help_panel="🍔 Configuration"
+)
+def client_command(
+    env: Env = typer.Argument(..., metavar="CLIENT", case_sensitive=False, help="[green]LIVE[/green], [yellow]TEST[/yellow], or [cyan]EMU[/cyan]"),
+):
+    config.initialize_config()
+    _switch_client(env.value)
 
 
 @app.command(
     "server",
-    help="Switch the current server: [green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan], or an emu server by name.",
+    help="Switch the active emu server: a name like [cyan]lazarus[/cyan], or [cyan]none[/cyan] to use any emu server.",
     rich_help_panel="🍔 Configuration"
 )
 def server_command(
-    env: str = typer.Argument(..., metavar="SERVER", help="[green]LIVE[/green], [yellow]TEST[/yellow], [cyan]EMU[/cyan], or an emu server name (e.g. [cyan]lazarus[/cyan])"),
+    server: str = typer.Argument(..., metavar="SERVER", help="An emu server name (e.g. [cyan]lazarus[/cyan]), or [cyan]none[/cyan] to use any emu server"),
 ):
     config.initialize_config()
 
     # Exit codes: 0 switched, 1 a guard blocked the switch, 2 bad input (typer usage error).
-    value = env.strip()
+    value = server.strip()
     token = value.upper()
     if token in config.ENVS:
-        config.switch_environment(token)
-        console.print(f"Server: {config.ENVS[token]}")
+        # a client token still switches the client, no nag.
+        _switch_client(token)
+        return
+
+    if value.lower() == servers.BARE_SETUP_TOKEN:
+        current = config.settings.ENV
+        if not servers.is_multi_server(current):
+            raise typer.BadParameter(
+                f"{config.ENVS[current]} doesn't have switchable servers — "
+                "switch to an emu client first (e.g. 'redfetch client emu')."
+            )
+        if servers.get_active_server(current):
+            try:
+                notices = servers.switch_to_generic(current)
+            except servers.ServerSwitchError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1)
+            for notice in notices:
+                console.print(f"[yellow]{escape(notice)}[/yellow]")
+        console.print(f"Server: {config.BARE_SERVER_LABEL}")
         return
 
     try:
@@ -561,13 +601,16 @@ def server_command(
 
     if server_env is None:
         known = {s for e in config.MULTI_SERVER_ENVS for s in servers.list_servers(e)}
-        valid = ", ".join([*config.ENVS, *sorted(known)])
-        raise typer.BadParameter(f"Unknown server '{slug}'. Valid servers: {valid}.")
+        valid = ", ".join([servers.BARE_SETUP_TOKEN, *sorted(known)])
+        raise typer.BadParameter(
+            f"Unknown server '{slug}'. Valid servers: {valid}. "
+            "To switch clients (LIVE, TEST, EMU), use 'redfetch client'."
+        )
 
     if not servers.is_server_configured(slug, server_env):
         label = servers.server_label(slug, server_env)
         try:
-            folder = Prompt.ask(f"EverQuest folder for [bold]{label}[/bold]")
+            folder = Prompt.ask(f"EverQuest folder for [bold]{escape(label)}[/bold]")
         except (KeyboardInterrupt, EOFError):
             # headless/no-stdin: can't configure interactively
             console.print(f"[red]'{slug}' isn't set up; it needs an EverQuest folder.[/red]")
@@ -581,25 +624,26 @@ def server_command(
     # never persist a server slug as REDFETCH_ENV.
     if config.settings.ENV != server_env:
         config.switch_environment(server_env)
+        # The client changed too (durably) — say so, matching _switch_client.
+        console.print(f"Client: {config.ENVS[server_env]}")
 
     try:
         notices = servers.switch_server(slug)
     except servers.ServerSwitchError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
-    for notice in notices or []:
-        console.print(f"[yellow]{notice}[/yellow]")
-    # escape(): labels are free text and rich raises on stray closing tags.
+    for notice in notices:
+        console.print(f"[yellow]{escape(notice)}[/yellow]")
     console.print(f"Server: {escape(servers.server_label(slug, server_env))}")
 
 
 @app.command("show", hidden=True)
 @app.command(
     "status",
-    help="Show the configuration for the current or specified server.",
+    help="Show the configuration for the current or specified client.",
     rich_help_panel="🍔 Configuration"
 )
-def config_show_command(server: Env | None = typer.Option(None, "--server", "-s", case_sensitive=False, help="Server to show (defaults to current)")):
+def config_show_command(server: Env | None = typer.Option(None, "--server", "--client", "-s", case_sensitive=False, help="Client to show (defaults to current)")):
     from rich.panel import Panel
 
     config.initialize_config()
@@ -646,16 +690,18 @@ def config_show_command(server: Env | None = typer.Option(None, "--server", "-s"
 
     # If nothing to show, still render an empty-but-clear panel
     if not panel_lines:
-        panel_lines.append("[dim]No paths are currently configured or opted in for this server.[/dim]")
+        panel_lines.append("[dim]No paths are currently configured or opted in for this client.[/dim]")
 
-    # Lead with the server so users always know which env they're on.
+    # Lead with both levels so users always know where they are.
     if servers.is_multi_server(current_env):
         active = servers.get_active_server(current_env)
         if active:
             label = servers.server_label(active, current_env)
             shown = label if label == active else f"{label} ({active})"
-            panel_lines.insert(0, f"[bold yellow]Active server:[/bold yellow] {escape(shown)}")
-    panel_lines.insert(0, f"[bold yellow]Server:[/bold yellow] {config.ENVS[current_env]}")
+        else:
+            shown = config.BARE_SERVER_LABEL
+        panel_lines.insert(0, f"[bold yellow]Server:[/bold yellow] {escape(shown)}")
+    panel_lines.insert(0, f"[bold yellow]Client:[/bold yellow] {config.ENVS[current_env]}")
 
     console.print(Panel("\n".join(panel_lines), expand=False))
 
@@ -743,11 +789,11 @@ def legacy_callback_factory(new_command: str, invoke_func=None, **invoke_kwargs)
 
 
 def legacy_switch_env_callback(ctx: typer.Context, value: Env | None):
-    """Deprecated --switch-env handler that forwards to the 'server' subcommand."""
+    """Deprecated --switch-env handler that forwards to the 'client' subcommand."""
     if ctx.resilient_parsing or value is None:
         return value
-    console.print("[yellow]Warning:[/yellow] --switch-env is deprecated. Use 'redfetch server <server>' instead.")
-    ctx.invoke(server_command, env=value)
+    console.print("[yellow]Warning:[/yellow] --switch-env is deprecated. Use 'redfetch client' instead.")
+    ctx.invoke(client_command, env=value)
     raise typer.Exit()
 
 
@@ -758,18 +804,22 @@ def root(
     switch_env: Env | None = typer.Option(
         None, "--switch-env", is_eager=True, case_sensitive=False, hidden=True,
         callback=legacy_switch_env_callback,
-        metavar="SERVER", help="(Deprecated) Use 'server' subcommand instead.",
+        metavar="CLIENT", help="(Deprecated) Use 'client' subcommand instead.",
     ),
     # Legacy: --download-watched
     download_watched: bool = typer.Option(
         False, "--download-watched", is_eager=True, hidden=True,
-        callback=legacy_callback_factory("update", update_command, force=False),
+        callback=legacy_callback_factory(
+            "update", update_command, force=False, server=None, headless=False,
+        ),
         help="(Deprecated) Use 'update' subcommand instead.",
     ),
     # Legacy: --force-download
     force_download: bool = typer.Option(
         False, "--force-download", is_eager=True, hidden=True,
-        callback=legacy_callback_factory("update --force", update_command, force=True),
+        callback=legacy_callback_factory(
+            "update --force", update_command, force=True, server=None, headless=False,
+        ),
         help="(Deprecated) Use 'update --force' instead.",
     ),
     # Legacy: --serve

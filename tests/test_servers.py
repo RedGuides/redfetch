@@ -179,11 +179,6 @@ def test_active_server_slug_for_db_keying(tmp_path, monkeypatch):
     assert servers.active_server_slug("TEST") == ""
 
 
-def test_active_server_slug_empty_when_unset(tmp_path, monkeypatch):
-    _install_settings(tmp_path, monkeypatch)
-    assert servers.active_server_slug("EMU") == ""
-
-
 # --- is_server_configured ---------------------------------------------------------
 
 def test_configured_requires_opt_in_and_eqpath(tmp_path, monkeypatch):
@@ -285,8 +280,9 @@ def test_bad_slugs_rejected(slug):
         servers.validate_server_slug(slug)
 
 
-@pytest.mark.parametrize("slug", ["live", "test", "emu"])
-def test_reserved_client_tokens_rejected(slug):
+@pytest.mark.parametrize("slug", ["live", "test", "emu", servers.BARE_SETUP_TOKEN])
+def test_reserved_names_rejected(slug):
+    """Client tokens and the CLI bare-setup token can never become server names."""
     with pytest.raises(ValueError, match="reserved"):
         servers.validate_server_slug(slug)
 
@@ -495,29 +491,134 @@ eqpath = "D:/EQ-C"
 
 # --- lifecycle: add / delete / rename -------------------------------------------
 
-def test_first_add_seeds_snapshot_and_activates(tmp_path, monkeypatch):
-    """Today's setup becomes server #1: seeded from env slots, active, no switch."""
-    local = """
+BARE_LOCAL = """
 [EMU]
-EQPATH = "D:/EQ-Original"
+EQPATH = "D:/EQ-Bare"
 
 [EMU.SPECIAL_RESOURCES.153]
 opt_in = true
 custom_path = "D:/shared-maps"
 """
-    _install_settings(tmp_path, monkeypatch, local_toml=local)
 
-    servers.add_server("lazarus", env="EMU", eqpath="D:/EQ-Original")
+
+def test_switch_away_from_bare_saves_generic(tmp_path, monkeypatch):
+    """The bare setup parks in GENERIC when a named server takes the slots."""
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+    servers.add_server("lazarus", env="EMU", eqpath="D:/EQ-Laz")
+
+    servers.switch_server("lazarus")
 
     emu = _parsed(tmp_path)["EMU"]
     assert emu["ACTIVE_SERVER"] == "lazarus"
-    snap = emu["SERVERS"]["lazarus"]
-    assert snap["opt_in"] is True
-    assert _norm(snap["eqpath"]) == _norm("D:/EQ-Original")
-    assert snap["SPECIAL_RESOURCES"]["153"]["opt_in"] is True  # seeded from env
-    assert _norm(snap["SPECIAL_RESOURCES"]["153"]["custom_path"]) == _norm("D:/shared-maps")
-    assert servers.get_active_server("EMU") == "lazarus"  # fresh view
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-Laz")
+    generic = emu["GENERIC"]  # the bare folder, preserved rather than dropped
+    assert _norm(generic["eqpath"]) == _norm("D:/EQ-Bare")
+    assert generic["SPECIAL_RESOURCES"]["153"]["opt_in"] is True
+    assert _norm(generic["SPECIAL_RESOURCES"]["153"]["custom_path"]) == _norm("D:/shared-maps")
+
+
+def test_switch_to_generic_restores_and_saves_back(tmp_path, monkeypatch):
+    """Coming back to the bare setup restores its values and parks lazarus's."""
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+    servers.add_server("lazarus", env="EMU", eqpath="D:/EQ-Laz")
+    servers.switch_server("lazarus")
+    # Edit the slots while lazarus holds them — only a real save-back captures this.
+    config.update_setting(["EQPATH"], "D:/EQ-Laz-Moved", env="EMU")
+
+    servers.switch_to_generic("EMU")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert "ACTIVE_SERVER" not in emu
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-Bare")
+    assert servers.get_active_server("EMU") is None  # fresh view
+    clone = config.settings.from_env("EMU")
+    assert clone.SPECIAL_RESOURCES["153"]["opt_in"] is True  # the bare setup's, not lazarus's
+    # lazarus took the edit with it
+    assert _norm(emu["SERVERS"]["lazarus"]["eqpath"]) == _norm("D:/EQ-Laz-Moved")
+
+
+def test_switch_to_generic_with_nothing_parked(tmp_path, monkeypatch):
+    """The bare setup is always reachable — no GENERIC table, no configuring, no block."""
+    local = """
+[EMU]
+EQPATH = "D:/EQ-Laz"
+ACTIVE_SERVER = "lazarus"
+
+[EMU.SERVERS.lazarus]
+opt_in = true
+eqpath = "D:/EQ-Laz"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+    assert "GENERIC" not in _parsed(tmp_path)["EMU"]
+
+    servers.switch_to_generic("EMU")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert "ACTIVE_SERVER" not in emu
+    assert servers.get_active_server("EMU") is None
+    assert config.settings.from_env("EMU").EQPATH == ""  # bundled default, blank and legal
+
+
+def test_generic_round_trip_is_byte_identical(tmp_path, monkeypatch):
+    """bare -> lazarus -> bare leaves the file byte-stable."""
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+    servers.add_server("lazarus", env="EMU", eqpath="D:/EQ-Laz")
+    servers.switch_server("lazarus")
+    servers.switch_to_generic("EMU")
+    baseline = _local_file(tmp_path).read_bytes()
+
+    servers.switch_server("lazarus")
+    servers.switch_to_generic("EMU")
+
+    assert _local_file(tmp_path).read_bytes() == baseline
+
+
+def test_switch_to_generic_with_blank_eqpath_clamps_maps(tmp_path, monkeypatch):
+    """The bare setup stays enterable with no folder — maps clamp off instead of blocking."""
+    local = """
+[EMU]
+EQPATH = ""
+ACTIVE_SERVER = "a"
+
+[EMU.SERVERS.a]
+label = "Server A"
+opt_in = true
+eqpath = "D:/EQ-A"
+
+[EMU.GENERIC]
+eqpath = ""
+
+[EMU.GENERIC.SPECIAL_RESOURCES.153]
+opt_in = true
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+
+    notices = servers.switch_to_generic("EMU")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert "ACTIVE_SERVER" not in emu
+    clone = config.settings.from_env("EMU")
+    assert clone.SPECIAL_RESOURCES["153"]["opt_in"] is False  # never <drive>:\maps
+    assert any("folder" in n for n in notices)
+
+
+def test_add_does_not_activate(tmp_path, monkeypatch):
+    """Adding is not switching — the caller decides."""
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+
+    servers.add_server("lazarus", env="EMU", eqpath="D:/EQ-Laz")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert "ACTIVE_SERVER" not in emu
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-Bare")  # slots still the bare setup's
     assert servers.is_server_configured("lazarus", "EMU") is True
+
+
+def test_active_server_slug_keys_the_bare_setup_by_env_token(tmp_path, monkeypatch):
+    """'' means "shared row", so the bare setup needs an identity of its own."""
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+
+    assert servers.active_server_slug("EMU") == "emu"
 
 
 def test_second_add_does_not_switch(tmp_path, monkeypatch):
@@ -585,10 +686,14 @@ def test_add_novel_rejects_cross_client_collision(tmp_path, monkeypatch):
 
 
 def test_delete_active_clears_active_server(tmp_path, monkeypatch):
+    """With nothing parked in GENERIC, the bare setup starts from bundled defaults."""
     _install_settings(tmp_path, monkeypatch, local_toml=SWITCH_LOCAL)
 
     servers.delete_server("a", env="EMU")
 
+    clone = config.settings.from_env("EMU")
+    assert clone.EQPATH == ""  # "a"'s folder must not linger in the slots
+    assert clone.SPECIAL_RESOURCES["153"]["opt_in"] is False  # nor its maps (clamped)
     emu = _parsed(tmp_path)["EMU"]
     assert "ACTIVE_SERVER" not in emu
     assert "a" not in emu["SERVERS"]
@@ -612,6 +717,25 @@ eqpath = "D:/EQ-Laz"
     listed = servers.list_servers("EMU")  # fresh view shows the bundled entry
     assert listed["lazarus"]["label"] == "Project Lazarus"
     assert servers.is_server_configured("lazarus", "EMU") is False
+
+
+def test_delete_active_returns_to_bare(tmp_path, monkeypatch):
+    """Deleting the active server always lands on the bare setup, never in limbo."""
+    local = SWITCH_LOCAL + """
+[EMU.GENERIC]
+eqpath = "D:/EQ-Bare"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+
+    servers.delete_server("a", env="EMU")
+
+    emu = _parsed(tmp_path)["EMU"]
+    assert "ACTIVE_SERVER" not in emu
+    assert _norm(emu["EQPATH"]) == _norm("D:/EQ-Bare")  # not the deleted server's folder
+    # "a" had maps on; the bare setup's off wins (pruned — it's the bundle default).
+    clone = config.settings.from_env("EMU")
+    assert clone.SPECIAL_RESOURCES["153"]["opt_in"] is False
+    assert servers.get_active_server("EMU") is None  # fresh view
 
 
 def test_delete_unknown_rejected(tmp_path, monkeypatch):

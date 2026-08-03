@@ -101,11 +101,17 @@ Label {
     height: auto;
 }
 
-#server_select_fetch {
+/* Right-hand cell of the fetch grid; mirrors the client select on the left
+   so the welcome column stays centered, server select hugging the edge. */
+#fetch_server_slot {
+    height: auto;
+    align-horizontal: right;
+}
+
+#client_select_fetch, #server_select_fetch {
     content-align: center middle;
     width: 25;
     min-width: 15;
-    column-span: 1;
 }
 
 #centermiddle_welcome {
@@ -192,11 +198,10 @@ Label {
     overflow-y: auto;
 }
 
-#server_select {
+#client_select, #server_select {
     content-align: center middle;
     width: 25;
     min-width: 15;
-    column-span: 4;
 }
 
 /* Server rows need more width than the dropdown itself.
@@ -207,8 +212,17 @@ Label {
 }
 
 /* Settings boxes are label/control (or button/input) pairs */
-#inputs_grid {
+#server_settings_grid {
     margin-top: 1;
+    margin-bottom: 1;
+    layout: grid;
+    grid-size: 2;
+    grid-columns: auto 1fr;
+    grid-rows: auto;
+    grid-gutter: 1;
+    min-width: 50;
+}
+#inputs_grid {
     margin-bottom: 1;
     layout: grid;
     grid-size: 2;
@@ -243,8 +257,13 @@ Label {
     border: round $secondary-background;
     min-width: 50;
 }
+/* Client and server dropdowns sit side by side */
 #dropdowns_grid {
+    height: auto;
     min-width: 30;
+}
+#server_select {
+    margin-left: 2;
 }
 #auto_run_vvmq, #post_update_launch {
     layout: horizontal;

@@ -61,19 +61,20 @@ To run redfetch from the command line:
 
 ## Command Line Reference
 
+<!-- to update: hatch run dev:check-docs -->
 <!-- BEGIN GENERATED CLI REFERENCE -->
 > Run `redfetch --help` for the current list, or `redfetch <COMMAND> --help` for a command's options. It looks like:
 >
 > ### 📦 Resource Management
 > - `update` - Update all *watched* and special resources.
 >   - `--force` / `-f` - Force re-download of all watched resources.
->   - `--server` / `-s` - Update this server for this run only, without changing your current server (LIVE, TEST, EMU).
+>   - `--server` / `--client` / `-s` - Update this client for this run only, without changing your active client (LIVE, TEST, EMU).
 > - `download <ID_OR_URL>` - Download a specific resource by ID or URL.
 >   - `ID_OR_URL` - RedGuides resource ID or URL
 >   - `--force` / `-f` - Force re-download by resetting this resource's download date.
->   - `--server` / `-s` - Download from this server for this run only, without changing your current server (LIVE, TEST, EMU).
+>   - `--server` / `--client` / `-s` - Download for this client for this run only, without changing your active client (LIVE, TEST, EMU).
 > - `check` - Non-interactive update check (for automation.)
->   - `--server` / `-s` - Check this server for this run only, without changing your current server (LIVE, TEST, EMU).
+>   - `--server` / `--client` / `-s` - Check this client for this run only, without changing your active client (LIVE, TEST, EMU).
 > - `list` - List resources and dependencies in your local cache.
 > - `reset` - Reset download dates for *watched resources* in the database.
 >
@@ -81,10 +82,10 @@ To run redfetch from the command line:
 > - `ui` - Launch the *Terminal User Interface*.
 > - `run [SHORTCUT]` - Run a shortcut (e.g. **vvmq**, **eqbcs**, **myseq**). **run** by itself will show a full list.
 >   - `SHORTCUT` - Shortcut to run: vvmq, eqbcs, eq, eqgame, etc.
->   - `--server` / `-s` - Run for this server this run only, without changing your current server (LIVE, TEST, EMU).
+>   - `--server` / `--client` / `-s` - Run for this client this run only, without changing your active client (LIVE, TEST, EMU).
 > - `open [SHORTCUT]` - Open a folder or file (e.g. **downloads**, **eqhost**). **open** by itself will show a full list.
 >   - `SHORTCUT` - Folder/file to open: downloads, vvmq, eq, etc.
->   - `--server` / `-s` - Resolve paths for this server this run only, without changing your current server (LIVE, TEST, EMU).
+>   - `--server` / `--client` / `-s` - Resolve paths for this client this run only, without changing your active client (LIVE, TEST, EMU).
 > - `web` - Launch the **RedGuides.com** web interface.
 > - `version` - Show version and exit.
 > - `uninstall` - Uninstall **redfetch** and clean up data.
@@ -94,11 +95,13 @@ To run redfetch from the command line:
 > - `config <SETTING_PATH> <VALUE>` - Update a setting by path and value.
 >   - `SETTING_PATH` - Dot-separated setting path (e.g., SPECIAL_RESOURCES.1974.opt_in)
 >   - `VALUE` - New value for the setting
->   - `--server` / `-s` - Server to apply the change in (LIVE, TEST, EMU)
-> - `server <SERVER>` - Switch the current server: LIVE, TEST, EMU, or an emu server by name.
->   - `SERVER` - LIVE, TEST, EMU, or an emu server name (e.g. lazarus)
-> - `status` - Show the configuration for the current or specified server.
->   - `--server` / `-s` - Server to show (defaults to current)
+>   - `--server` / `--client` / `-s` - Client to apply the change in (LIVE, TEST, EMU)
+> - `client <CLIENT>` - Switch the game client: LIVE, TEST, or EMU (RoF2).
+>   - `CLIENT` - LIVE, TEST, or EMU
+> - `server <SERVER>` - Switch the active emu server: a name like lazarus, or none to use any emu server.
+>   - `SERVER` - An emu server name (e.g. lazarus), or none to use any emu server
+> - `status` - Show the configuration for the current or specified client.
+>   - `--server` / `--client` / `-s` - Client to show (defaults to current)
 >
 > ### 📤 Publishing
 > - `publish <RESOURCE_ID>` - Publish updates to a **RedGuides** resource.
@@ -118,10 +121,10 @@ The `publish` command also has a [GitHub Action](https://github.com/marketplace/
 
 All settings are prefixed with the environment,
 
-- `[DEFAULT]` - encompasses all environments that are not explicitly defined.
+- `[DEFAULT]` - encompasses all clients that are not explicitly defined.
 - `[LIVE]` - EverQuest Live
 - `[TEST]` - EverQuest Test
-- `[EMU]` - EverQuest Emulator (can hold multiple servers; see [Emu servers](#emu-servers))
+- `[EMU]` - EQEmulator (see [Emu servers](#emu-servers))
 
 ### Adding a special resource
 To add a "special resource" (a non-MQ resource that you want to keep updated), open `settings.local.toml` and add an entry. You'll need the [resource ID (numbers at the end of the url)](https://www.redguides.com/community/resources/brewalls-everquest-maps.153/) and a target directory. Example:
@@ -133,7 +136,7 @@ opt_in = true
 ```
 * Note the use of single quotes around the path, which are required for windows paths.
 
-The above will install Brewall's maps to the EQ maps directory the next time `redfetch update` is run for `LIVE` servers.
+The above will install Brewall's maps to the EQ maps directory the next time `redfetch update` is run for the `LIVE` client.
 
 ### Emu servers
 
@@ -142,7 +145,9 @@ redfetch can track more than one emulator server, each with its own EverQuest fo
 You can also switch from the command line:
 
 ```powershell
+redfetch client emu
 redfetch server lazarus
+redfetch server none    # back to "Any emu server"
 ```
 
 To add a server redfetch doesn't know about, use the Servers tab, or hand-add an entry to `settings.local.toml`:
@@ -182,9 +187,9 @@ Absolute paths are used as-is. Relative paths are joined to `DOWNLOAD_FOLDER`. Y
 If you self-compile MacroQuest or use a discord friend's copy, you can still keep your scripts and plugins in sync with redfetch by opting out of Very Vanilla:
 
 ```powershell
-redfetch.exe config SPECIAL_RESOURCES.1974.opt_in false --server LIVE
-redfetch.exe config SPECIAL_RESOURCES.60.opt_in false --server EMU
-redfetch.exe config SPECIAL_RESOURCES.2218.opt_in false --server TEST
+redfetch.exe config SPECIAL_RESOURCES.1974.opt_in false --client LIVE
+redfetch.exe config SPECIAL_RESOURCES.60.opt_in false --client EMU
+redfetch.exe config SPECIAL_RESOURCES.2218.opt_in false --client TEST
 ```
 
 Then assign the *Very Vanilla MQ* path to your self-compiled MacroQuest.
@@ -207,7 +212,7 @@ targets = ["myseq", "custom", "eqbcs"]
 command = ["C:\\Users\\Public\\Python\\python.exe", "C:\\Users\\Public\\redfetch\\after_update.py"]
 ```
 
-You can set these per-server, e.g. `[TEST.POST_UPDATE_LAUNCH]`, or global `[DEFAULT.POST_UPDATE_LAUNCH]`.
+You can set these per-client, e.g. `[TEST.POST_UPDATE_LAUNCH]`, or global `[DEFAULT.POST_UPDATE_LAUNCH]`.
 
 ![Watchers on RedGuides](https://www.redguides.com/community/resources/redfetch.3177/watchers-sparkline?months=12&w=500&h=180)
 

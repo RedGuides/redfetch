@@ -4,6 +4,8 @@ Env-level slots (EQPATH, map opt-ins) always hold the active server's
 values; inactive servers keep theirs in ``SERVERS.<slug>`` snapshots that
 ``switch_server`` swaps in and out. Other modules should use this API
 instead of touching ``SERVERS.*`` directly.
+
+An unset ``ACTIVE_SERVER`` means a bare "any emu server"
 """
 import os
 import re
@@ -14,6 +16,12 @@ from redfetch import store
 
 # Slugs must work as bare TOML keys and CLI arguments.
 SERVER_SLUG_RE = re.compile(r"[a-z0-9_-]+")
+
+# Where the bare setup parks its values while a named server holds the slots.
+GENERIC_SNAPSHOT_KEY = "GENERIC"
+
+# reserved so a user server can never shadow the generic "any emu server"
+BARE_SETUP_TOKEN = "none"
 
 SERVER_SLOT_PATHS = (
     ("EQPATH",),
@@ -52,7 +60,7 @@ def validate_server_slug(slug: str, *, must_be_new: bool = False) -> str:
         raise ValueError(
             f"Invalid server name '{slug}': use lowercase letters, digits, '-' or '_'."
         )
-    if slug.upper() in config.ENVS:
+    if slug.upper() in config.ENVS or slug == BARE_SETUP_TOKEN:
         raise ValueError(f"'{slug}' is a reserved name.")
     if must_be_new:
         for env in config.ENVS:
@@ -81,21 +89,17 @@ def server_label(slug: str, env: str) -> str:
 
 
 def get_active_server(env: str) -> str | None:
-    """The active server slug, or None.
+    """The active server slug, or None."""
 
-    Always None for single-server envs (LIVE, TEST). The TUI dropdown's
-    derived selection (``active_server or current_env``) depends on that
-    — don't change one without checking the other.
-    """
     slug = config.settings.from_env(env).get("ACTIVE_SERVER")
     return str(slug) if slug else None
 
 
 def active_server_slug(env: str) -> str:
-    """The slug that keys per-server db rows: '' on single-server envs or when no server is active."""
+    """The slug that keys per-server db rows."""
     if not is_multi_server(env):
         return ""
-    return get_active_server(env) or ""
+    return get_active_server(env) or env.lower()
 
 
 def is_server_configured(slug: str, env: str) -> bool:
@@ -139,6 +143,22 @@ def _read_env_slot(env_settings, slot):
     return current
 
 
+def _snapshot_slot_values(snapshot, base_view) -> dict:
+    """A snapshot's slot values; missing ones inherit the bundled env defaults."""
+    values = {}
+    for slot in SERVER_SLOT_PATHS:
+        value = _walk_get(snapshot, _slot_snapshot_path(slot))
+        if value is None:  # absent, not falsey
+            value = _read_env_slot(base_view, slot)
+        values[slot] = _normalize_slot_value(slot, value)
+    return values
+
+
+def _write_env_slots(env_table, values) -> None:
+    for slot, value in values.items():
+        config._descend_tables(env_table, slot[:-1])[slot[-1]] = value
+
+
 def _walk_get(mapping, keys):
     """Read a nested mapping while ignoring key case."""
     current = mapping
@@ -175,10 +195,65 @@ def _save_and_reload(path, doc):
     config.reload_settings()
 
 
-def switch_server(slug: str) -> list[str]:
-    """Switch the active server (the env is derived from the slug)."""
-    _require_init()
+def _snapshot_path(slug: str | None) -> tuple:
+    """Where a server's dormant values live: named servers nest, the bare setup doesn't."""
+    return ("SERVERS", slug) if slug else (GENERIC_SNAPSHOT_KEY,)
+
+
+def _maps_enabled(applied: dict) -> bool:
+    return any(
+        applied[("SPECIAL_RESOURCES", resource_id, "opt_in")]
+        for resource_id in config.MAPS_MAP.values()
+    )
+
+
+def _clamp_maps_without_folder(values: dict) -> bool:
+    """Turn maps off when there's no folder; True when that changed something."""
+    if values[("EQPATH",)].strip() or not _maps_enabled(values):
+        return False
+    for resource_id in config.MAPS_MAP.values():
+        values[("SPECIAL_RESOURCES", resource_id, "opt_in")] = False
+    return True
+
+
+def _apply_switch(env: str, incoming_slug: str | None, incoming: dict) -> tuple[list, dict, str, dict]:
+    """Save the outgoing server's slots away and stage the incoming ones."""
+    outgoing = get_active_server(env)
+    env_view = config.settings.from_env(env)
+    base_view = config._base_settings().from_env(env)
     notices = []
+
+    path, doc = _load_local()
+    env_table = config._descend_tables(doc, (env,))
+
+    # A named outgoing server that's been deleted must not be recreated
+    saved_back = None
+    if outgoing is None or is_server_configured(outgoing, env):
+        saved_back = {
+            slot: _normalize_slot_value(slot, _read_env_slot(env_view, slot))
+            for slot in SERVER_SLOT_PATHS
+        }
+        snapshot_root = _snapshot_path(outgoing)
+        for slot, value in saved_back.items():
+            snap_path = snapshot_root + _slot_snapshot_path(slot)
+            config._descend_tables(env_table, snap_path[:-1])[snap_path[-1]] = value
+    else:
+        notices.append(
+            f"'{outgoing}' is no longer configured. Its settings won't be saved back."
+        )
+
+    # Re-switching to the active server
+    if outgoing == incoming_slug and saved_back is not None:
+        applied = saved_back
+    else:
+        applied = _snapshot_slot_values(incoming, base_view)
+    _write_env_slots(env_table, applied)
+    return notices, doc, path, applied
+
+
+def switch_server(slug: str) -> list[str]:
+    """Switch to a named server (the env is derived from the slug)."""
+    _require_init()
 
     slug = validate_server_slug(slug)
     env = env_for_slug(slug)  # raises on an ambiguous slug
@@ -192,60 +267,53 @@ def switch_server(slug: str) -> list[str]:
     if not incoming.get("opt_in"):
         raise ServerSwitchError(f"Server '{slug}' isn't set up — configure it first.")
 
-    outgoing = get_active_server(env)
-    env_view = config.settings.from_env(env)
-    base_view = config._base_settings().from_env(env)
-
-    path, doc = _load_local()
-    env_table = config._descend_tables(doc, (env,))
-
-    # Don't recreate a deleted outgoing server.
-    saved_back = None
-    if outgoing and is_server_configured(outgoing, env):
-        saved_back = {
-            slot: _normalize_slot_value(slot, _read_env_slot(env_view, slot))
-            for slot in SERVER_SLOT_PATHS
-        }
-        for slot, value in saved_back.items():
-            snap_path = ("SERVERS", outgoing) + _slot_snapshot_path(slot)
-            config._descend_tables(env_table, snap_path[:-1])[snap_path[-1]] = value
-    elif outgoing:
-        notices.append(
-            f"'{outgoing}' is no longer configured. Its settings won't be saved back."
-        )
-
-    # Missing snapshot values inherit the bundled env defaults.
-    applied = {}
-    for slot in SERVER_SLOT_PATHS:
-        if outgoing == slug and saved_back is not None:
-            value = saved_back[slot]
-        else:
-            value = _walk_get(incoming, _slot_snapshot_path(slot))
-            if value is None:
-                value = _read_env_slot(base_view, slot)
-            value = _normalize_slot_value(slot, value)
-        config._descend_tables(env_table, slot[:-1])[slot[-1]] = value
-        applied[slot] = value
+    notices, doc, path, applied = _apply_switch(env, slug, incoming)
 
     # Avoid writing maps to <drive>:\maps.
-    if not applied[("EQPATH",)].strip() and any(
-        applied[("SPECIAL_RESOURCES", resource_id, "opt_in")]
-        for resource_id in config.MAPS_MAP.values()
-    ):
+    if not applied[("EQPATH",)].strip() and _maps_enabled(applied):
         raise ServerSwitchError(
             f"Server '{slug}' has no EverQuest folder but map downloads are enabled — "
             "set its EQ folder first."
         )
 
-    env_table["ACTIVE_SERVER"] = slug
+    config._descend_tables(doc, (env,))["ACTIVE_SERVER"] = slug
 
     _save_and_reload(path, doc)
     return notices
 
 
+def switch_to_generic(env: str) -> list[str]:
+    """Switch to the bare any server setup"""
+    _require_init()
+    if not is_multi_server(env):
+        raise ServerSwitchError(f"'{env}' doesn't have switchable servers.")
+
+    notices, doc, path, applied = _apply_switch(env, None, _generic_snapshot(env))
+    env_table = config._descend_tables(doc, (env,))
+    if _clamp_maps_without_folder(applied):
+        _write_env_slots(env_table, applied)
+        notices.append("Map downloads are off until you set an EverQuest folder.")
+
+    env_table.pop("ACTIVE_SERVER", None)
+
+    _save_and_reload(path, doc)
+    return notices
+
+
+def _generic_snapshot(env: str) -> dict:
+    """The bare setup's parked values, or {} before it has ever been parked."""
+    snapshot = config.settings.from_env(env).get(GENERIC_SNAPSHOT_KEY)
+    return config._to_plain(snapshot) if isinstance(snapshot, dict) else {}
+
+
+def generic_eqpath(env: str) -> str:
+    """The folder the bare setup would restore"""
+    return str(_generic_snapshot(env).get("eqpath") or "")
+
+
 def add_server(slug: str, *, env: str, eqpath: str, label: str | None = None,
                patcher_url: str | None = None) -> None:
-    """Configure a known server or create a custom one; the first becomes active."""
+    """Configure a known server or create a custom one."""
     _require_init()
 
     slug = validate_server_slug(slug)
@@ -258,7 +326,6 @@ def add_server(slug: str, *, env: str, eqpath: str, label: str | None = None,
     known = slug in _bundle_servers(env)
     if not known and slug not in list_servers(env):
         validate_server_slug(slug, must_be_new=True)  # cross-client uniqueness
-    first = not any(is_server_configured(s, env) for s in list_servers(env))
 
     path, doc = _load_local()
     snap = config._descend_tables(doc, (env, "SERVERS", slug))
@@ -269,19 +336,7 @@ def add_server(slug: str, *, env: str, eqpath: str, label: str | None = None,
     if patcher_url:
         snap["patcher_url"] = patcher_url
 
-    if first:
-        # Today's setup becomes server #1: seed from the env slots, no switch.
-        env_view = config.settings.from_env(env)
-        for slot in SERVER_SLOT_PATHS:
-            if slot == ("EQPATH",):
-                continue  # the caller's folder wins
-            value = _normalize_slot_value(slot, _read_env_slot(env_view, slot))
-            snap_path = _slot_snapshot_path(slot)
-            config._descend_tables(snap, snap_path[:-1])[snap_path[-1]] = value
-        env_table = config._descend_tables(doc, (env,))
-        env_table["EQPATH"] = eqpath
-        env_table["ACTIVE_SERVER"] = slug
-    elif slug == get_active_server(env):
+    if slug == get_active_server(env):
         # The env slots hold the active server's values
         config._descend_tables(doc, (env,))["EQPATH"] = eqpath
 
@@ -297,6 +352,7 @@ def delete_server(slug: str, *, env: str) -> None:
     if not known and slug not in list_servers(env):
         raise ValueError(f"Unknown server '{slug}'.")
 
+    was_active = get_active_server(env) == slug
     path, doc = _load_local()
     env_table = doc.get(env)
     servers_table = env_table.get("SERVERS") if env_table is not None else None
@@ -304,7 +360,13 @@ def delete_server(slug: str, *, env: str) -> None:
         # Known slugs revert to their bundled entry; customs disappear.
         servers_table.pop(slug, None)
 
-    if get_active_server(env) == slug and env_table is not None:
+    if was_active:
+        # Remove the deleted server's values
+        base_view = config._base_settings().from_env(env)
+        env_table = config._descend_tables(doc, (env,))
+        applied = _snapshot_slot_values(_generic_snapshot(env), base_view)
+        _clamp_maps_without_folder(applied)
+        _write_env_slots(env_table, applied)
         env_table.pop("ACTIVE_SERVER", None)
 
     _save_and_reload(path, doc)

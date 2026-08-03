@@ -23,7 +23,7 @@ from redfetch.detecteq import find_everquest_uninstall_location
 
 console = Console()
 
-# server and config dir banner
+# client and config dir banner
 BANNER_COOLDOWN = 12 * 3600
 
 
@@ -224,7 +224,7 @@ def _show_env_banner(config_dir: str) -> None:
 
     notice_lines: list[str] = [
         # Hand-edited tokens surface verbatim for support.
-        f"[bold yellow]Server: [cyan]{ENVS.get(effective_env, effective_env)}[/cyan][/bold yellow]",
+        f"[bold yellow]Client: [cyan]{ENVS.get(effective_env, effective_env)}[/cyan][/bold yellow]",
         f"Configuration directory: {config_dir}",
     ]
 

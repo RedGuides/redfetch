@@ -23,12 +23,14 @@ CATEGORY_MAP = {
 }
 
 # MQ Client environments (dynaconf envs)
-# Keys are reserved against server slugs. User copy says "server" at both
-# levels — never "client"/"environment".
+# Keys are reserved against server slugs.
 ENVS = {"LIVE": "Live", "TEST": "Test", "EMU": "Emu (RoF2)"}
 
 # Envs who have switchable servers (servers.py manages)
 MULTI_SERVER_ENVS = ("EMU",)
+
+# Display row for a multi-server client's bare setup (no named server active).
+BARE_SERVER_LABEL = "Any emu server"
 
 # Resource to MQ version
 VANILLA_MAP = {
@@ -161,7 +163,7 @@ def initialize_config():
     if not os.path.exists(env_file_path):
         # If not, create it and set the default environment to 'LIVE'
         atomic_write_text(env_file_path, 'REDFETCH_ENV=LIVE\n')
-        print(f".env file created at {env_file_path} (server: Live)")
+        print(f".env file created at {env_file_path} (client: Live)")
 
     # Migrate any settings.local.toml written by older versions
     _migrate_local_settings(config_dir)
@@ -352,7 +354,9 @@ def _descend_tables(table, keys):
 def _annotate_special_resource_comments(toml_text: str) -> str:
     """Add a `# friendly-name` comment above each known SPECIAL_RESOURCES section."""
     section_pattern = re.compile(
-        r"^\[(?:DEFAULT|LIVE|TEST|EMU)(?:\.SERVERS\.[A-Za-z0-9_-]+)?\.SPECIAL_RESOURCES\.(\d+)\]\s*$"
+        r"^\[(?:DEFAULT|LIVE|TEST|EMU)"
+        r"(?:\.SERVERS\.[A-Za-z0-9_-]+|\.GENERIC)?"
+        r"\.SPECIAL_RESOURCES\.(\d+)\]\s*$"
     )
 
     new_lines = []
@@ -568,6 +572,6 @@ def write_env_to_file(new_env):
 
     env_loader.write(env_file_path, {"REDFETCH_ENV": new_env})
 
-    # Env changed -> re-shows server/config banner.
+    # Env changed -> re-shows client/config banner.
     with suppress(OSError):
         os.remove(os.path.join(os.path.dirname(env_file_path), ".banner_shown"))

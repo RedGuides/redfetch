@@ -97,7 +97,7 @@ def _print_failure_detail(
     if not has_scoped_actions:
         print(
             f"No valid resources found for IDs: {resource_ids}. "
-            "Are you on the right server? Did you opt_in in your settings.local.toml?"
+            "Are you on the right client? Did you opt_in in your settings.local.toml?"
         )
 
 

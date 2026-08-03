@@ -14,13 +14,14 @@ import httpx
 from dynaconf import ValidationError
 from textual_fspicker import SelectDirectory
 from rich.console import detect_legacy_windows
+from rich.markup import escape
 from rich.text import Text
 
 # textual framework
 from textual import work, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, Static, ProgressBar, RadioSet, RadioButton, Checkbox, OptionList
+from textual.widgets import Footer, Button, Header, Label, Input, Switch, Select, TabbedContent, TabPane, Log, ProgressBar, RadioSet, RadioButton, Checkbox, OptionList
 from textual.widgets.option_list import Option
 from textual.events import Print
 from textual.containers import ScrollableContainer, Center, CenterMiddle, Grid, ItemGrid, Vertical, Horizontal
@@ -141,9 +142,9 @@ def staff_picks_enabled(env: str) -> bool:
 
 
 class ServerSelect(Select[str]):
-    """The server dropdown: client rows with their servers indented beneath."""
+    """The server dropdown: the bare setup plus the client's configured servers."""
 
-    def __init__(self, options: list[tuple[Text, str]], value: str, widget_id: str) -> None:
+    def __init__(self, options: list[tuple[str, str]], value: str, widget_id: str) -> None:
         super().__init__(
             options,
             id=widget_id,
@@ -152,15 +153,35 @@ class ServerSelect(Select[str]):
             prompt="Select server",
             allow_blank=False,
             tooltip=(
-                "The server you intend to play on."
+                "The emu server you intend to play on."
             ),
         )
         self.server_rows = options
 
-    def replace_options(self, options: list[tuple[Text, str]]) -> None:
+    def replace_options(self, options: list[tuple[str, str]]) -> None:
         """Replace options; callers preserve selection and suppress ``Changed``."""
         self.server_rows = options
         self.set_options(options)
+
+
+def build_client_rows() -> list[tuple[str, str]]:
+    """Client dropdown rows, one per client env."""
+    return [(label, env) for env, label in config.ENVS.items()]
+
+
+def make_client_select(value: str, widget_id: str) -> Select[str]:
+    """The client dropdown: Live / Test / Emu (RoF2). Its options never change."""
+    return Select[str](
+        build_client_rows(),
+        id=widget_id,
+        classes="bordertitles",
+        value=value,
+        prompt="Select client",
+        allow_blank=False,
+        tooltip=(
+            "The game client you play. 'Live' is the normal retail client from everquest dot com."
+        ),
+    )
 
 
 def configured_servers(env: str) -> list[tuple[str, str]]:
@@ -172,42 +193,49 @@ def configured_servers(env: str) -> list[tuple[str, str]]:
     ]
 
 
-def build_server_rows() -> list[tuple[Text, str]]:
-    """Dropdown rows: each client environment, then its indented servers.
-
-    Prompts double as the collapsed label, so keep them clean — no glyphs or
-    active markers. The overlay highlights the current value on its own.
-    """
-    rows: list[tuple[Text, str]] = []
-    for env in config.ENVS:
-        rows.append((Text(config.ENVS[env], style="bold"), env))
-        if servers.is_multi_server(env):
-            rows.extend(
-                (Text(f"  {label}"), slug) for slug, label in configured_servers(env)
-            )
-    return rows
+# Server-row id for the bare setup 
+BARE_SETUP_ID = "#bare"
 
 
-def derived_server_value(app, options) -> str:
-    """Return a selection guaranteed to exist in ``options``."""
-    derived = app.active_server or app.current_env
-    if derived not in {value for _, value in options}:
-        derived = app.current_env
-    return derived
+def build_server_rows(env: str) -> list[tuple[str, str]]:
+    """Server dropdown rows: the bare setup first, then configured servers."""
+    return [
+        (config.BARE_SERVER_LABEL, BARE_SETUP_ID),
+        *((escape(label), slug) for slug, label in configured_servers(env)),
+    ]
+
+
+def server_select_state(app) -> tuple[list[tuple[str, str]], str]:
+    """The server dropdown's rows and selection for the current client."""
+    rows = build_server_rows(app.current_env)
+    value = app.active_server or BARE_SETUP_ID
+    if value not in {row_value for _, row_value in rows}:
+        value = BARE_SETUP_ID
+    return rows, value
+
+
+def sync_client_select(tab: ScrollableContainer, select_id: str) -> None:
+    """Point a client dropdown at the current client without emitting ``Changed``."""
+    select = tab.query_one(f"#{select_id}", Select)
+    with tab.prevent(Select.Changed):
+        if select.value != tab.app.current_env:
+            select.value = tab.app.current_env
 
 
 def sync_server_select(tab: ScrollableContainer, select_id: str) -> None:
     """Refresh a server dropdown without emitting ``Changed``."""
     app = tab.app
     select = tab.query_one(f"#{select_id}", ServerSelect)
-    options = build_server_rows()
-    derived = derived_server_value(app, options)
+    show = servers.is_multi_server(app.current_env)
+    select.display = show
+    if not show:
+        return
+    rows, value = server_select_state(app)
     with tab.prevent(Select.Changed):
-        # Text equality is plain-text based; rows only change on add/rename/delete.
-        if select.server_rows != options:
-            select.replace_options(options)
-        if select.value != derived:
-            select.value = derived
+        if select.server_rows != rows:
+            select.replace_options(rows)
+        if select.value != value:
+            select.value = value
 
 
 class WatchedButtonState(NamedTuple):
@@ -233,12 +261,7 @@ class FetchTab(ScrollableContainer):
         # Simple vertical layout: controls on top, big log on the bottom
         with Vertical(id="fetch_layout"):
             with Grid(id="fetch_grid"):
-                server_rows = build_server_rows()
-                yield ServerSelect(
-                    server_rows,
-                    derived_server_value(self.app, server_rows),
-                    "server_select_fetch",
-                )
+                yield make_client_select(self.app.current_env, "client_select_fetch")
                 with CenterMiddle(id="centermiddle_welcome"):
                     with Center(id="center_welcome"):
                         yield Label("Who's this?", id="welcome_label")
@@ -249,7 +272,10 @@ class FetchTab(ScrollableContainer):
                             variant="default",
                             tooltip="is MQ down?",
                         )
-                yield Static("", id="spacer_for_welcome_centering")
+                # Right-hand grid cell even when the server dropdown is hidden
+                with Vertical(id="fetch_server_slot"):
+                    server_rows, server_value = server_select_state(self.app)
+                    yield ServerSelect(server_rows, server_value, "server_select_fetch")
                 yield Button(
                     "Update Single Resource",
                     id="update_resource_id",
@@ -477,8 +503,10 @@ class FetchTab(ScrollableContainer):
             busy or not bool(download_folder) or not bool(resource_input.value)
         )
 
-        server_select_fetch = self.query_one("#server_select_fetch", ServerSelect)
-        server_select_fetch.disabled = busy or interface_running
+        selects_busy = busy or interface_running
+        self.query_one("#client_select_fetch", Select).disabled = selects_busy
+        self.query_one("#server_select_fetch", ServerSelect).disabled = selects_busy
+        sync_client_select(self, "client_select_fetch")
         sync_server_select(self, "server_select_fetch")
 
     #
@@ -528,6 +556,10 @@ class FetchTab(ScrollableContainer):
     def handle_resource_id_changed(self, event: Input.Changed) -> None:
         self._recompute()
 
+    @on(Select.Changed, "#client_select_fetch")
+    def handle_client_select_fetch_changed(self, event: Select.Changed) -> None:
+        self.app.handle_client_selected(event.value)
+
     @on(Select.Changed, "#server_select_fetch")
     def handle_server_select_fetch_changed(self, event: Select.Changed) -> None:
         self.app.handle_server_selected(event.value)
@@ -540,12 +572,39 @@ class SettingsTab(ScrollableContainer):
         input_verb = "Enter" if detect_legacy_windows() else "Paste"
         current_env = self.app.current_env
 
-        with ItemGrid(id="dropdowns_grid"):
-            server_rows = build_server_rows()
-            yield ServerSelect(
-                server_rows,
-                derived_server_value(self.app, server_rows),
-                "server_select",
+        with Horizontal(id="dropdowns_grid"):
+            yield make_client_select(self.app.current_env, "client_select")
+            server_rows, server_value = server_select_state(self.app)
+            yield ServerSelect(server_rows, server_value, "server_select")
+        with ItemGrid(id="server_settings_grid", classes="bordertitles"):
+            yield Button(
+                "EverQuest Folder",
+                id="select_eq_path",
+                variant="default",
+                tooltip=(
+                    "The EverQuest directory, the one with eqgame.exe."
+                ),
+            )
+            yield Input(
+                value=config.settings.from_env(current_env).EQPATH or "",
+                placeholder=f"{input_verb} your EverQuest directory",
+                id="eq_path_input",
+                tooltip=(
+                    "The EverQuest directory, the one with eqgame.exe."
+                ),
+                valid_empty=True,
+            )
+            yield Label("Maps:", classes="left_middle")
+            yield Select(
+                [("Brewall's Maps", "brewall"), ("Good's Maps", "good"), ("All", "all")],
+                id="eq_maps",
+                prompt="Select maps",
+                allow_blank=True,
+                value=self.app.get_current_eq_maps_value(),
+                tooltip=(
+                    "Requires an EverQuest folder. Adds maps to your "
+                    "normal EverQuest map, using Brewall and Good's folders."
+                ),
             )
         with ItemGrid(id="inputs_grid", classes="bordertitles"):
             yield Button(
@@ -567,25 +626,6 @@ class SettingsTab(ScrollableContainer):
                 ),
             )
             yield Button(
-                "EverQuest Folder",
-                id="select_eq_path",
-                variant="default",
-                tooltip=(
-                    "The EverQuest directory, the one with eqgame.exe. Currently only "
-                    "used to update your maps."
-                ),
-            )
-            yield Input(
-                value=config.settings.from_env(current_env).EQPATH or "",
-                placeholder=f"{input_verb} your EverQuest directory",
-                id="eq_path_input",
-                tooltip=(
-                    "The EverQuest directory, the one with eqgame.exe. Currently only "
-                    "used to update your maps."
-                ),
-                valid_empty=True,
-            )
-            yield Button(
                 "Very Vanilla MQ Folder",
                 id="select_vvmq_path",
                 variant="default",
@@ -604,7 +644,7 @@ class SettingsTab(ScrollableContainer):
                 )
             else:
                 yield Input(
-                    value="VVMQ not available for this server",
+                    value="VVMQ not available for this client",
                     id="vvmq_path_input",
                     disabled=True,
                 )
@@ -618,7 +658,7 @@ class SettingsTab(ScrollableContainer):
                 .get("opt_in", False),
                 tooltip=(
                     "Adds MySEQ to your 'special resources', with maps and offsets "
-                    "for your selected server."
+                    "for your selected client."
                 ),
             )
             yield Label("Nav Meshes:", classes="left_middle")
@@ -629,23 +669,11 @@ class SettingsTab(ScrollableContainer):
                     "Download pre-made navigation meshes for the Nav plugin (via mqmesh.com). "
                 ),
             )
-            yield Label("Maps:", classes="left_middle")
-            yield Select(
-                [("Brewall's Maps", "brewall"), ("Good's Maps", "good"), ("All", "all")],
-                id="eq_maps",
-                prompt="Select maps",
-                allow_blank=True,
-                value=self.app.get_current_eq_maps_value(),
-                tooltip=(
-                    "Requires an EverQuest folder. Adds maps to your "
-                    "normal EverQuest map, using Brewall and Good's folders."
-                ),
-            )
             yield Label("Staff Picks:", classes="left_middle")
             yield Switch(
                 id="staff_picks",
                 value=staff_picks_enabled(current_env),
-                tooltip="A collection of scripts for this server that RedGuides staff recommends.",
+                tooltip="A collection of scripts for this client that RedGuides staff recommends.",
             )
         with ItemGrid(id="settings_grid", classes="bordertitles"):
             yield Label("Background updates:", classes="left_middle")
@@ -710,7 +738,19 @@ class SettingsTab(ScrollableContainer):
         self.query_one("#vvmq_path_input", Input).disabled = not has_download
         self.query_one("#select_vvmq_path", Button).disabled = not has_download
 
+        sync_client_select(self, "client_select")
         sync_server_select(self, "server_select")
+
+        # Read the label from the dropdown, not from config, so they always match.
+        if servers.is_multi_server(app.current_env):
+            _, selected = server_select_state(app)
+            group_label = (
+                config.BARE_SERVER_LABEL if selected == BARE_SETUP_ID
+                else servers.server_label(selected, app.current_env)
+            )
+        else:
+            group_label = config.ENVS[app.current_env]
+        self.query_one("#server_settings_grid").border_title = f"Server — {escape(group_label)}"
 
         # EQ maps select - depends on eq_path
         eq_maps_select = self.query_one("#eq_maps", Select)
@@ -789,7 +829,7 @@ class SettingsTab(ScrollableContainer):
             vvmq_input_widget.value = vvmq_path
             vvmq_input_widget.disabled = False
         else:
-            vvmq_input_widget.value = "VVMQ not found for this server."
+            vvmq_input_widget.value = "VVMQ not found for this client."
             vvmq_input_widget.disabled = True
 
     def update_myseq_display(self) -> None:
@@ -864,6 +904,10 @@ class SettingsTab(ScrollableContainer):
         if event.value != self.app.get_current_eq_maps_value():
             self.app.update_eq_maps_settings(event.value)
 
+    @on(Select.Changed, "#client_select")
+    def handle_client_select_changed(self, event: Select.Changed) -> None:
+        self.app.handle_client_selected(event.value)
+
     @on(Select.Changed, "#server_select")
     def handle_server_select_changed(self, event: Select.Changed) -> None:
         self.app.handle_server_selected(event.value)
@@ -936,14 +980,22 @@ class ServersTab(ScrollableContainer):
         listed = servers.list_servers(env)
         active = servers.get_active_server(env)
         option_list.clear_options()
-        slugs = sorted(listed)
-        for slug in slugs:
+        # The bare setup is always first and is unlike the other entries
+        bare_label = config.BARE_SERVER_LABEL
+        if active is None:
+            bare = f"[green]●[/green] [b]{bare_label}[/b]  [dim]{escape(app.eq_path or '')}[/dim]"
+        else:
+            bare = f"○ {bare_label}  [dim]{escape(servers.generic_eqpath(env))}[/dim]"
+        option_list.add_option(Option(Text.from_markup(bare), id=BARE_SETUP_ID))
+        slugs = [BARE_SETUP_ID, *sorted(listed)]
+        for slug in slugs[1:]:
             entry = listed[slug]
-            label = entry.get("label") or slug  # Tolerate hand-edited entries.
-            eqpath = str(entry.get("eqpath") or "")
+            # Labels and paths are free text so escape them
+            label = escape(entry.get("label") or slug)  # Tolerate hand-edited entries.
+            eqpath = escape(str(entry.get("eqpath") or ""))
             if slug == active:
                 # The active snapshot lags live settings until switch-away.
-                eqpath = str(app.eq_path or "")
+                eqpath = escape(str(app.eq_path or ""))
                 prompt = f"[green]●[/green] [b]{label}[/b]  [dim]{eqpath}[/dim]"
             elif servers.is_server_configured(slug, env):
                 prompt = f"○ {label}  [dim]{eqpath}[/dim]"
@@ -961,12 +1013,17 @@ class ServersTab(ScrollableContainer):
         env = self.app.current_env
         slug = self._highlighted_slug()
         active = servers.get_active_server(env)
-        known = bool(slug) and servers.is_known_server(slug, env)
-        configured = bool(slug) and servers.is_server_configured(slug, env)
-        self.query_one("#server_switch", Button).disabled = not slug or slug == active
-        self.query_one("#server_rename", Button).disabled = not slug or known
+        bare = slug == BARE_SETUP_ID
+        known = bool(slug) and not bare and servers.is_known_server(slug, env)
+        configured = bool(slug) and not bare and servers.is_server_configured(slug, env)
+        selected_active = slug == active or (bare and active is None)
+        self.query_one("#server_switch", Button).disabled = not slug or selected_active
+        # The bare setup has no entry to rename or delete.
+        self.query_one("#server_rename", Button).disabled = not slug or known or bare
         # Unconfigured known servers have nothing to delete.
-        self.query_one("#server_delete", Button).disabled = not slug or (known and not configured)
+        self.query_one("#server_delete", Button).disabled = (
+            not slug or bare or (known and not configured)
+        )
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         self._refresh_buttons()
@@ -996,7 +1053,12 @@ class ServersTab(ScrollableContainer):
     def _switch(self, slug: str) -> None:
         app = self.app
         env = app.current_env
-        if slug == servers.get_active_server(env):
+        active = servers.get_active_server(env)
+        if slug == BARE_SETUP_ID:
+            if active is not None:
+                app.switch_to_bare_setup(env)
+            return
+        if slug == active:
             return
         if not servers.is_server_configured(slug, env):
             # CLI parity: prompt for the folder
@@ -1020,10 +1082,10 @@ class ServersTab(ScrollableContainer):
             except ValueError as exc:
                 self.app.notify(str(exc), severity="error")
                 return
-            self.app.notify(f"{label} set up.")
+            self.app.notify(f"{label} set up.", markup=False)
             self.app.refresh_after_server_change()
             if switch_after:
-                # add_server activates the first server.
+                # add_server never activates, switching is always explicit.
                 self.app.switch_active_server(slug)
 
         self.app.push_screen(SelectDirectory(location=Path.home()), callback=picked)
@@ -1032,7 +1094,7 @@ class ServersTab(ScrollableContainer):
     def handle_add_pressed(self, event: Button.Pressed) -> None:
         env = self.app.current_env
         available = [
-            (entry.get("label") or slug, slug)
+            (escape(entry.get("label") or slug), slug)
             for slug, entry in sorted(servers.list_servers(env).items())
             if servers.is_known_server(slug, env) and not servers.is_server_configured(slug, env)
         ]
@@ -1079,7 +1141,6 @@ class ServersTab(ScrollableContainer):
         label = servers.server_label(slug, env)
         known = servers.is_known_server(slug, env)
         is_active = servers.get_active_server(env) == slug
-
         def done(confirmed: bool | None) -> None:
             if not confirmed or self._busy():
                 return
@@ -1088,14 +1149,20 @@ class ServersTab(ScrollableContainer):
             except ValueError as exc:
                 self.app.notify(str(exc), severity="error")
                 return
-            if known:
-                self.app.notify(f"{label} reset; it's back in the available list.")
-            else:
-                self.app.notify(f"{label} removed.")
+            message = (
+                f"{label} reset; it's back in the available list."
+                if known else f"{label} removed."
+            )
+            if is_active:
+                message += f" Now on {config.BARE_SERVER_LABEL}."
+            self.app.notify(message, markup=False)
             self.app.refresh_after_server_change()
 
         self.app.push_screen(
-            ConfirmDeleteServerScreen(label, known=known, is_active=is_active), done
+            ConfirmDeleteServerScreen(
+                label, known=known, is_active=is_active, lands_on=config.BARE_SERVER_LABEL,
+            ),
+            done,
         )
 
 
@@ -1279,10 +1346,19 @@ class MainScreen(Screen):
         # Initialize the Log widget with some content
         log = self.query_one("#fetch_log", Log)
         log.write_line(f"redfetch v{meta.get_current_version()} allows you to download resources from RedGuides")
-        log.write_line("Server: " + config.ENVS[self.app.current_env])
+        env = self.app.current_env
+        log.write_line("Client: " + config.ENVS[env])
+        if servers.is_multi_server(env):
+            active = self.app.active_server
+            log.write_line(
+                "Server: "
+                + (servers.server_label(active, env) if active else config.BARE_SERVER_LABEL)
+            )
         log.write_line("\n")
 
         # Set border titles
+        self.query_one("#client_select").border_title = "Client"
+        self.query_one("#client_select_fetch").border_title = "Client"
         self.query_one("#server_select").border_title = "Server"
         self.query_one("#server_select_fetch").border_title = "Server"
         self.query_one("#inputs_grid").border_title = "Directories"
@@ -1333,9 +1409,6 @@ class Redfetch(App):
     # This state tracks whether an offer is actively displayed; it's reactive to trigger FetchTab updates when changed.
     _offer_active: reactive[bool] = reactive(False)
 
-    # Avoid an intermediate environment toast during server selection.
-    _suppress_env_notify: bool = False
-
     CSS_PATH = "terminal_ui.tcss"
 
     MODES = {"main": MainScreen}
@@ -1344,7 +1417,7 @@ class Redfetch(App):
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+t", "cycle_theme", "Theme"),
         ("ctrl+f", "focus_search", "Search Log"),
-        ("ctrl+s", "cycle_env", "Server"),
+        ("ctrl+s", "cycle_env", "Client"),
         Binding("ctrl+r", "start_interface", "RG.com Interface", tooltip="Download resources while you browse redguides.com"),
         Binding("ctrl+r", "stop_interface", "Stop Interface", tooltip="Other buttons are disabled until you stop the interface"),
     ]
@@ -1496,8 +1569,7 @@ class Redfetch(App):
         self.update_count = None
 
         self.check_mq_status_worker()
-        if not self._suppress_env_notify:
-            self.notify(f"Server: {config.ENVS[new]}")
+        self.notify(f"Client: {config.ENVS[new]}")
 
     def watch_theme(self, theme: str) -> None:
         """Save theme preference when it changes."""
@@ -1539,7 +1611,7 @@ class Redfetch(App):
         self.exit()
 
     def action_cycle_env(self) -> None:
-        """Cycle the client env (servers ride the dropdown, not this)."""
+        """Cycle to the next client; its active server resumes as-is."""
         if self.is_updating or self.interface_running:
             return
 
@@ -1788,7 +1860,7 @@ class Redfetch(App):
             state = "enabled" if opt_in else "disabled"
             self.notify(f"MySEQ for {config.ENVS[self.current_env]} is now {state}")
         else:
-            self.notify("MySEQ is not available for this server", severity="error")
+            self.notify("MySEQ is not available for this client", severity="error")
 
     def update_eq_maps_settings(self, selected_value: str | None) -> None:
         # None/NULL fall out on their own
@@ -1855,32 +1927,41 @@ class Redfetch(App):
             self.notify(notice, severity="warning")
         self.refresh_after_server_change()
         label = servers.server_label(slug, self.current_env)
-        self.notify(f"Server: {label}")
+        self.notify(f"Server: {label}", markup=False)  # labels are free text
 
-    def handle_server_selected(self, value: str) -> None:
-        """Handle an environment token or a server slug."""
-        if value in config.ENVS:
-            self.current_env = value
+    def switch_to_bare_setup(self, env: str) -> None:
+        """Leave the active server for the client's own setup."""
+        if self.is_updating or self.interface_running:
             return
         try:
-            target_env = servers.env_for_slug(value)
-        except ValueError as exc:  # ambiguous slug (hand-edited collision)
+            notices = servers.switch_to_generic(env)
+        except (servers.ServerSwitchError, ValueError) as exc:
             self.notify(str(exc), severity="error")
-            self.refresh_after_server_change()
             return
-        if target_env is None:
-            self.notify(f"Unknown server '{value}'.", severity="error")
-            self.refresh_after_server_change()
+        for notice in notices or []:
+            self.notify(notice, severity="warning")
+        self.refresh_after_server_change()
+        self.notify(f"Server: {config.BARE_SERVER_LABEL}")
+
+    def handle_client_selected(self, token: str) -> None:
+        """Switch clients; the incoming client's active server resumes untouched."""
+        if token != self.current_env:
+            self.current_env = token  # watch_current_env does the switch
+
+    def handle_server_selected(self, value: str) -> None:
+        """Switch to the server the user picked from the dropdown, or leave the current server if they picked the bare setup."""
+        env = self.current_env
+        if value == BARE_SETUP_ID:
+            active = servers.get_active_server(env)
+            if active is not None and servers.is_server_configured(active, env):
+                self.switch_to_bare_setup(env)
+                if servers.get_active_server(env):
+                    # Blocked: put the dropdown back on the server we're still on.
+                    self.refresh_after_server_change()
             return
-        if self.current_env != target_env:
-            self._suppress_env_notify = True
-            try:
-                self.current_env = target_env  # The watcher is synchronous.
-            finally:
-                self._suppress_env_notify = False
         self.switch_active_server(value)
         if self.active_server != value:
-            # Restore dropdowns if the switch was blocked.
+            # Restore the dropdowns if the switch was blocked.
             self.refresh_after_server_change()
 
     #
@@ -2572,22 +2653,25 @@ class ConfirmDeleteServerScreen(ModalScreen[bool]):
 
     BINDINGS = [("escape", "dismiss", "Cancel")]
 
-    def __init__(self, label: str, *, known: bool, is_active: bool) -> None:
+    def __init__(self, label: str, *, known: bool, is_active: bool,
+                 lands_on: str) -> None:
         super().__init__()
         self._label = label
         self._known = known
         self._is_active = is_active
+        self._lands_on = lands_on
 
     def compose(self) -> ComposeResult:
+        label = escape(self._label)  # free text; Label parses markup
         if self._known:
             message = (
-                f"Reset {self._label}? Your folder and map choices for it are removed, "
+                f"Reset {label}? Your folder and map choices for it are removed, "
                 "and it goes back to the available list."
             )
         else:
-            message = f"Delete {self._label}? Its settings are removed from settings.local.toml."
+            message = f"Delete {label}? Its settings are removed from settings.local.toml."
         if self._is_active:
-            message += "\n\nThis is your active server, so no server will be active afterward."
+            message += f"\n\nThis is your active server, so you'll switch to {self._lands_on}."
         with Vertical(id="server_dialog"):
             yield Label(message, id="server_dialog_title")
             with Horizontal(id="server_dialog_buttons"):
