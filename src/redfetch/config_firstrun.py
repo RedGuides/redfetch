@@ -455,7 +455,7 @@ def first_run_setup():
         default_choice = bool(os.environ.get("PYAPP"))
 
         console.print(
-            "\n[bold cyan][italic]\"Shall we set a signe upon thy fair anime walpaper?\"[/italic][/bold cyan]"
+            "\n[bold cyan][italic]\"Shall we set a signe upon thy fair anime wallpaper?\"[/italic][/bold cyan]"
         )
         wants_shortcut = CustomConfirm.ask(
             "Create Desktop shortcut?",
