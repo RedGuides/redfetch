@@ -610,7 +610,7 @@ async def provision(slug: str, *, env: str, source: str, destination: str,
     except laa.LaaError as exc:
         notices.append(f"Couldn't turn on the 4GB allowance: {exc}")
 
-    if utils.dx9_missing():
+    if utils.dx9_notice_wanted():
         notices.append(
             "DirectX 9 wasn't detected on your computer, which EverQuest needs. "
             f"Get it from Microsoft: {utils.DX9_INSTALLER_URL}"

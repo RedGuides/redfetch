@@ -52,11 +52,18 @@ class ServersTab(ScrollableContainer):
     def compose(self) -> ComposeResult:
         input_verb = "Enter" if detect_legacy_windows() else "Paste"
         with Vertical(id="servers_layout"):
-            yield Label(
-                "DirectX 9 wasn't detected on your computer, which EverQuest needs. "
-                f"[@click=app.link('{utils.DX9_INSTALLER_URL}')]Get it from Microsoft[/]",
-                id="dx9_notice",
-            )
+            with Horizontal(id="dx9_notice"):
+                yield Label(
+                    "DirectX 9 wasn't detected on your computer, which EverQuest needs. "
+                    f"[@click=app.link('{utils.DX9_INSTALLER_URL}')]Get it from Microsoft[/]",
+                    id="dx9_notice_text",
+                )
+                yield Button(
+                    "Dismiss",
+                    id="dx9_dismiss",
+                    variant="default",
+                    tooltip="Hide this warning for good.",
+                )
             yield OptionList(id="server_list")
             with Horizontal(id="server_actions"):
                 yield Button(
@@ -136,7 +143,7 @@ class ServersTab(ScrollableContainer):
         # Never the whole tab for a provision: that would grey out its own Cancel button.
         self.disabled = app.is_updating or app.interface_running
         # Machine-level, not per-server; the tab itself is the emu gate.
-        self.query_one("#dx9_notice", Label).display = utils.dx9_missing()
+        self.query_one("#dx9_notice").display = utils.dx9_notice_wanted()
         provisioning = app.provision_running
         self.query_one("#server_provision_row").set_class(not provisioning, "hidden")
         self.query_one("#provision_cancel", Button).disabled = not app.provision_cancellable
@@ -311,6 +318,11 @@ class ServersTab(ScrollableContainer):
     @on(Button.Pressed, "#server_select_eq_path")
     def handle_select_eq_path_pressed(self, event: Button.Pressed) -> None:
         self.app.select_directory("server_eq_path_input")
+
+    @on(Button.Pressed, "#dx9_dismiss")
+    def handle_dx9_dismiss_pressed(self, event: Button.Pressed) -> None:
+        utils.dismiss_dx9_notice()
+        self.query_one("#dx9_notice").display = False
 
     @on(Input.Submitted, "#server_eq_path_input")
     def handle_eq_path_submitted(self, event: Input.Submitted) -> None:

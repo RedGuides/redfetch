@@ -220,6 +220,16 @@ def dx9_missing() -> bool:
     return not os.path.isfile(DX9_DLL_PATH)
 
 
+def dx9_notice_wanted() -> bool:
+    """True when the DX9 warning should be shown at all."""
+    return dx9_missing() and not config.active_settings().get("DX9_NOTICE_DISMISSED")
+
+
+def dismiss_dx9_notice() -> None:
+    """Silence the DX9 warning for good."""
+    config.update_setting(["DX9_NOTICE_DISMISSED"], True)
+
+
 #
 # post-update launch
 #
