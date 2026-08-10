@@ -20,7 +20,7 @@ from redfetch import provision
 from redfetch import servers
 from redfetch import utils
 from redfetch.tui_widgets import (
-    BARE_SETUP_ID, ServerSelect, TRISTATE_OPTIONS, make_client_select, make_tristate,
+    ServerSelect, TRISTATE_OPTIONS, make_client_select, make_tristate,
     server_select_state, set_tristate, sync_client_select, sync_server_select,
 )
 
@@ -59,45 +59,65 @@ def staff_picks_enabled(env: str) -> bool:
 class SettingsTab(ScrollableContainer):
     """Content for the Settings tab."""
 
+    def _eq_folder_cells(self, input_verb: str, current_env: str) -> ComposeResult:
+        yield Button(
+            "EverQuest Folder",
+            id="select_eq_path",
+            variant="default",
+            tooltip=(
+                "The EverQuest directory, the one with eqgame.exe."
+            ),
+        )
+        yield Input(
+            value=config.settings.from_env(current_env).EQPATH or "",
+            placeholder=f"{input_verb} your EverQuest directory",
+            id="eq_path_input",
+            tooltip=(
+                "The EverQuest directory, the one with eqgame.exe."
+            ),
+            valid_empty=True,
+        )
+
+    def _maps_cells(self) -> ComposeResult:
+        yield Label("Maps:", classes="left_middle")
+        yield Select(
+            [("Brewall's Maps", "brewall"), ("Good's Maps", "good"), ("All", "all")],
+            id="eq_maps",
+            prompt="Select maps",
+            allow_blank=True,
+            value=self.app.get_current_eq_maps_value(),
+            tooltip=(
+                "Requires an EverQuest folder. Adds maps to your "
+                "normal EverQuest map, using Brewall and Good's folders."
+            ),
+        )
+
     def compose(self) -> ComposeResult:
         input_verb = "Enter" if detect_legacy_windows() else "Paste"
         current_env = self.app.current_env
+        # EQPATH and maps are per-server slots (servers.SERVER_SLOT_PATHS);
+        # so they get a server-labeled box.
+        server_scoped = self.app.active_server is not None
 
         with Horizontal(id="dropdowns_grid"):
-            yield make_client_select(self.app.current_env, "client_select")
+            client_select = make_client_select(current_env, "client_select")
+            client_select.border_title = "Client"
+            yield client_select
             server_rows, server_value = server_select_state(self.app)
-            yield ServerSelect(server_rows, server_value, "server_select")
-        with ItemGrid(id="server_settings_grid", classes="bordertitles"):
-            yield Button(
-                "EverQuest Folder",
-                id="select_eq_path",
-                variant="default",
-                tooltip=(
-                    "The EverQuest directory, the one with eqgame.exe."
-                ),
-            )
-            yield Input(
-                value=config.settings.from_env(current_env).EQPATH or "",
-                placeholder=f"{input_verb} your EverQuest directory",
-                id="eq_path_input",
-                tooltip=(
-                    "The EverQuest directory, the one with eqgame.exe."
-                ),
-                valid_empty=True,
-            )
-            yield Label("Maps:", classes="left_middle")
-            yield Select(
-                [("Brewall's Maps", "brewall"), ("Good's Maps", "good"), ("All", "all")],
-                id="eq_maps",
-                prompt="Select maps",
-                allow_blank=True,
-                value=self.app.get_current_eq_maps_value(),
-                tooltip=(
-                    "Requires an EverQuest folder. Adds maps to your "
-                    "normal EverQuest map, using Brewall and Good's folders."
-                ),
-            )
-        with ItemGrid(id="inputs_grid", classes="bordertitles"):
+            server_select = ServerSelect(server_rows, server_value, "server_select")
+            server_select.border_title = "Server"
+            yield server_select
+        if server_scoped:
+            with ItemGrid(id="server_settings_grid", classes="bordertitles") as server_grid:
+                server_grid.border_title = Content(
+                    servers.server_label(self.app.active_server, current_env)
+                )
+                yield from self._eq_folder_cells(input_verb, current_env)
+                yield from self._maps_cells()
+        with ItemGrid(id="inputs_grid", classes="bordertitles") as locations:
+            locations.border_title = "Locations"
+            if not server_scoped:
+                yield from self._eq_folder_cells(input_verb, current_env)
             yield Button(
                 "Download Folder",
                 id="select_dl_path",
@@ -154,7 +174,10 @@ class SettingsTab(ScrollableContainer):
                 id="clean_source_input",
                 tooltip=clean_source_tooltip,
             )
-        with ItemGrid(id="special_resources_grid", classes="bordertitles"):
+        with ItemGrid(id="special_resources_grid", classes="bordertitles") as specials:
+            specials.border_title = "Special Resources"
+            if not server_scoped:
+                yield from self._maps_cells()
             yield Label("MySEQ:", classes="left_middle")
             myseq_id = utils.get_current_myseq_id()
             yield Switch(
@@ -181,7 +204,8 @@ class SettingsTab(ScrollableContainer):
                 value=staff_picks_enabled(current_env),
                 tooltip="A collection of scripts for this client that RedGuides staff recommends.",
             )
-        with ItemGrid(id="settings_grid", classes="bordertitles"):
+        with ItemGrid(id="settings_grid", classes="bordertitles") as settings_grid:
+            settings_grid.border_title = "Settings"
             yield Label("Background updates:", classes="left_middle")
             yield Switch(
                 id="auto_update",
@@ -204,7 +228,8 @@ class SettingsTab(ScrollableContainer):
                     value=desktop_shortcut.get_shortcut_path().exists(),
                     tooltip="Create or remove a Desktop shortcut to run redfetch.",
                 )
-        with ItemGrid(id="maintenance_grid", classes="bordertitles"):
+        with ItemGrid(id="maintenance_grid", classes="bordertitles") as maintenance:
+            maintenance.border_title = "Maintenance"
             yield Button(
                 "Clear Download Cache",
                 id="reset_downloads",
@@ -234,6 +259,19 @@ class SettingsTab(ScrollableContainer):
     def _recompute(self) -> None:
         """Derive every Settings widget from app state + per-env config."""
         app = self.app
+
+        # Defer if a recompose hasn't rebuilt the children yet.
+        if not self.query("#inputs_grid"):
+            self.call_after_refresh(self._recompute)
+            return
+
+        # Rebuild when EQPATH + maps need to move between boxes.
+        server_scoped = app.active_server is not None
+        if server_scoped != bool(self.query("#server_settings_grid")):
+            self.refresh(recompose=True)
+            self.call_after_refresh(self._recompute)
+            return
+
         busy = app.is_updating or app.interface_running or app.provision_running
 
         # Disable entire tab while busy
@@ -254,16 +292,10 @@ class SettingsTab(ScrollableContainer):
         sync_client_select(self, "client_select")
         sync_server_select(self, "server_select")
 
-        # Read the label from the dropdown, not from config, so they always match.
-        if servers.is_multi_server(app.current_env):
-            _, selected = server_select_state(app)
-            group_label = (
-                config.BARE_SERVER_LABEL if selected == BARE_SETUP_ID
-                else servers.server_label(selected, app.current_env)
+        if server_scoped:
+            self.query_one("#server_settings_grid").border_title = Content(
+                servers.server_label(app.active_server, app.current_env)
             )
-        else:
-            group_label = config.ENVS[app.current_env]
-        self.query_one("#server_settings_grid").border_title = Content(f"Server: {group_label}")
 
         # EQ maps select - depends on eq_path
         eq_maps_select = self.query_one("#eq_maps", Select)

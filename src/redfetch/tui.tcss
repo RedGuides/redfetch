@@ -213,7 +213,6 @@ Label {
 
 /* Settings boxes are label/control (or button/input) pairs */
 #server_settings_grid {
-    margin-top: 1;
     margin-bottom: 1;
     layout: grid;
     grid-size: 2;
@@ -261,6 +260,7 @@ Label {
 #dropdowns_grid {
     height: auto;
     min-width: 30;
+    margin-bottom: 1;
 }
 #server_select {
     margin-left: 2;
@@ -381,7 +381,14 @@ Label {
 }
 
 #dx9_notice {
+    height: auto;
     margin-bottom: 1;
+}
+
+#dx9_notice_text {
+    width: 1fr;
+    content-align-vertical: middle;
+    height: 3;
 }
 
 #server_list {

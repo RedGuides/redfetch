@@ -108,15 +108,9 @@ class MainScreen(Screen):
             )
         log.write_line("\n")
 
-        # Set border titles
-        self.query_one("#client_select").border_title = "Client"
+        # Set border titles (settings tab handles its own dynamic titles)
         self.query_one("#client_select_fetch").border_title = "Client"
-        self.query_one("#server_select").border_title = "Server"
         self.query_one("#server_select_fetch").border_title = "Server"
-        self.query_one("#inputs_grid").border_title = "Directories"
-        self.query_one("#settings_grid").border_title = "Settings"
-        self.query_one("#special_resources_grid").border_title = "Special Resources"
-        self.query_one("#maintenance_grid").border_title = "Maintenance"
         self.query_one("#executables_grid").border_title = "Executables ⚡"
         self.query_one("#folders_grid").border_title = "Folders 📁"
         self.query_one("#files_grid").border_title = "Files 📎"
