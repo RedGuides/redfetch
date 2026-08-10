@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+# standard
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, suppress
 import json
 import os
 import sqlite3
 
+# third-party
 import aiosqlite
 from pydantic import TypeAdapter, ValidationError
 
+# local
 from redfetch import config
 from redfetch import meta
 from redfetch.sync_types import (

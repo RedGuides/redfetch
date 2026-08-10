@@ -83,7 +83,7 @@ To run redfetch from the command line:
 > - `run [SHORTCUT]` - Run a shortcut (e.g. **vvmq**, **eqbcs**, **myseq**). **run** by itself will show a full list.
 >   - `SHORTCUT` - Shortcut to run: vvmq, eqbcs, eq, eqgame, etc.
 >   - `--server` / `--client` / `-s` - Run for this client this run only, without changing your active client (LIVE, TEST, EMU).
-> - `open [SHORTCUT]` - Open a folder or file (e.g. **downloads**, **eqhost**). **open** by itself will show a full list.
+> - `open [SHORTCUT]` - Open a folder or file (e.g. **downloads**, **mqini**). **open** by itself will show a full list.
 >   - `SHORTCUT` - Folder/file to open: downloads, vvmq, eq, etc.
 >   - `--server` / `--client` / `-s` - Resolve paths for this client this run only, without changing your active client (LIVE, TEST, EMU).
 > - `web` - Launch the **RedGuides.com** web interface.
@@ -100,6 +100,10 @@ To run redfetch from the command line:
 >   - `CLIENT` - LIVE, TEST, or EMU
 > - `server <SERVER>` - Switch the active emu server: a name like lazarus, or none to use any emu server.
 >   - `SERVER` - An emu server name (e.g. lazarus), or none to use any emu server
+> - `provision <SERVER>` - Create a server's EverQuest folder from a clean RoF2 copy, then set it up.
+>   - `SERVER` - An emu server name (e.g. lazarus)
+>   - `--source` - A clean RoF2 zip, iso, or folder.
+>   - `--destination` - Where to create the new EverQuest folder.
 > - `status` - Show the configuration for the current or specified client.
 >   - `--server` / `--client` / `-s` - Client to show (defaults to current)
 >
@@ -221,7 +225,7 @@ You can set these per-client, e.g. `[TEST.POST_UPDATE_LAUNCH]`, or global `[DEFA
 I'd love help, conceptually and technically. I'm not a developer and this is my first big python script. 
 
 > [!NOTE]
-> This project is built with LLM assistance.
+> This project is built with LLM assistance. (derogatory)
 
 To set up a [development environment](https://hatch.pypa.io/latest/environment/),
 
@@ -241,3 +245,7 @@ Or if the issue is ui-specific, run the [terminal UI in debug mode](https://text
 `textual run --dev .\src\redfetch\main.py`
 
 When you're done, type `exit` to leave the shell.
+
+---
+
+*Not affiliated with or endorsed by EverQuest or its owners.*

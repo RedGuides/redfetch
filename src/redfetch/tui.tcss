@@ -380,6 +380,10 @@ Label {
     height: auto;
 }
 
+#dx9_notice {
+    margin-bottom: 1;
+}
+
 #server_list {
     height: auto;
     max-height: 20;
@@ -399,6 +403,34 @@ Label {
     min-width: 12;
 }
 
+#server_provision_row {
+    height: auto;
+    margin-top: 1;
+    align: left middle;
+}
+
+#server_provision_row #provision_status {
+    width: 1fr;
+    padding-right: 2;
+}
+
+#server_provision_row Button {
+    margin-left: 2;
+}
+
+#server_eq_path_row {
+    height: auto;
+    margin-top: 1;
+}
+
+#server_eq_path_row Input {
+    width: 1fr;
+}
+
+#server_eq_path_row Button {
+    margin-right: 2;
+}
+
 /* Server dialogs (add / rename / delete) */
 
 AddServerScreen, RenameServerScreen, ConfirmDeleteServerScreen {
@@ -409,7 +441,9 @@ AddServerScreen, RenameServerScreen, ConfirmDeleteServerScreen {
 #server_dialog {
     margin: 4 1;
     padding: 1 2;
-    width: 62;
+    /* Wide enough for a real path in the source and destination boxes. */
+    width: 80;
+    max-width: 100%;
     height: auto;
     border: thick $primary-background-darken-3;
     background: $surface;
@@ -417,6 +451,43 @@ AddServerScreen, RenameServerScreen, ConfirmDeleteServerScreen {
 
 #server_dialog > * {
     margin-bottom: 1;
+}
+
+/* The body scrolls: a custom server created from a clean copy is a tall form. */
+#server_dialog_body {
+    height: auto;
+    max-height: 24;
+}
+
+#server_dialog_body > * {
+    margin-bottom: 1;
+}
+
+#add_provision_steps {
+    color: $text-muted;
+    width: 1fr;
+}
+
+/* Field labels sit against the box they name, not a blank line above it. */
+#add_source_label, #add_folder_label {
+    color: $text-accent;
+    width: 1fr;
+    margin-bottom: 0;
+}
+
+#add_source_row {
+    height: auto;
+}
+
+#add_source_row Input {
+    width: 1fr;
+}
+
+/* Two pickers on one row, kept narrow so the path box gets the space. */
+#add_source_row Button {
+    margin-left: 1;
+    width: auto;
+    min-width: 10;
 }
 
 #server_dialog_title {

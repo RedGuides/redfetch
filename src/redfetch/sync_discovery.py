@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+# standard
 import os
 from dataclasses import dataclass, field
 from typing import Any
 
+# local
 from redfetch import config
 from redfetch import utils
 from redfetch.sync_types import (

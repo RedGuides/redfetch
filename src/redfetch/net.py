@@ -1,7 +1,10 @@
 """Async HTTP utilities with retry and simple caching."""
 
+# standard
 import os
 from typing import Any
+
+# third-party
 import httpx
 from tenacity import (
     retry,
@@ -9,6 +12,8 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
+
+# local
 from redfetch import cache
 from redfetch import config
 
@@ -18,6 +23,11 @@ MANIFEST_URL = f"{BASE_URL}/resources-manifest"
 
 # Manifest cache: 60 seconds TTL
 _MANIFEST_TTL_SECONDS = 60
+
+
+def new_unauth_client() -> httpx.AsyncClient:
+    """A client for third-party hosts without auth"""
+    return httpx.AsyncClient(follow_redirects=True)
 
 
 @retry(

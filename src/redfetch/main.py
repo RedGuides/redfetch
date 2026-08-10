@@ -1,6 +1,8 @@
 # standard imports
 import sys
 import os
+import signal
+import threading
 from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
@@ -10,6 +12,7 @@ import asyncio
 from rich.prompt import Prompt
 from rich.console import Console
 from rich.markup import escape
+from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 import typer
 
 # local imports
@@ -20,6 +23,7 @@ from redfetch import meta
 from redfetch import net
 from redfetch import post_update
 from redfetch import processes
+from redfetch import provision
 from redfetch import servers
 from redfetch import utils
 from redfetch import push
@@ -382,7 +386,7 @@ def run_tui():
     """Initialize configuration and launch the Terminal User Interface."""
     _initialize_auth()
     utils.sweep_stale_update_debris()
-    from redfetch.terminal_ui import run_textual_ui
+    from redfetch.tui import run_textual_ui
     run_textual_ui()
 
 
@@ -433,7 +437,7 @@ def run_shortcut_command(
         return
     try:
         shortcuts.run(runnable)
-        console.print(f"Started [bold]{runnable.executable}[/bold].")
+        console.print(f"Started [bold]{escape(shortcuts.runnable_executable(runnable))}[/bold].")
     except (ValueError, RuntimeError, OSError) as exc:
         console.print(f"[red]Couldn't run {runnable.key}:[/red] {exc}")
         raise typer.Exit(1)
@@ -441,7 +445,7 @@ def run_shortcut_command(
 
 @app.command(
     "open",
-    help="Open a folder or file (e.g. [bold]downloads[/bold], [bold]eqhost[/bold]). [bold]open[/bold] by itself will show a full list.",
+    help="Open a folder or file (e.g. [bold]downloads[/bold], [bold]mqini[/bold]). [bold]open[/bold] by itself will show a full list.",
     rich_help_panel="🔧 System & Utilities",
 )
 def open_shortcut_command(
@@ -610,11 +614,16 @@ def server_command(
     if not servers.is_server_configured(slug, server_env):
         label = servers.server_label(slug, server_env)
         try:
-            folder = Prompt.ask(f"EverQuest folder for [bold]{escape(label)}[/bold]")
+            # Strip once so the eqgame.exe check and add_server see the same folder path.
+            folder = Prompt.ask(f"EverQuest folder for [bold]{escape(label)}[/bold]").strip()
         except (KeyboardInterrupt, EOFError):
             # headless/no-stdin: can't configure interactively
             console.print(f"[red]'{slug}' isn't set up; it needs an EverQuest folder.[/red]")
             raise typer.Exit(1)
+        if folder and not utils.validate_file_in_path(folder, "eqgame.exe"):
+            raise typer.BadParameter(
+                f"No eqgame.exe in {folder}, so it isn't an EverQuest folder."
+            )
         try:
             servers.add_server(slug, env=server_env, eqpath=folder)
         except ValueError as exc:
@@ -635,6 +644,120 @@ def server_command(
     for notice in notices:
         console.print(f"[yellow]{escape(notice)}[/yellow]")
     console.print(f"Server: {escape(servers.server_label(slug, server_env))}")
+
+
+@app.command(
+    "provision",
+    help="Create a server's EverQuest folder from a clean RoF2 copy, then set it up.",
+    rich_help_panel="🍔 Configuration",
+)
+def provision_command(
+    server: str = typer.Argument(..., metavar="SERVER", help="An emu server name (e.g. [cyan]lazarus[/cyan])"),
+    source: str | None = typer.Option(None, "--source", help="A clean RoF2 zip, iso, or folder."),
+    destination: str | None = typer.Option(None, "--destination", help="Where to create the new EverQuest folder."),
+):
+    config.initialize_config()
+
+    slug, server_env = _resolve_known_emu_server(server)
+    if servers.is_server_configured(slug, server_env):
+        console.print(
+            f"[red]'{slug}' already has an EverQuest folder. Reset it on the "
+            f"Servers tab to set it up again.[/red]"
+        )
+        raise typer.Exit(1)
+
+    cli_source = (source or "").strip()
+    remembered = provision.clean_source()
+    chosen_source = cli_source or remembered
+    if not chosen_source:
+        console.print(f"[red]{provision.NO_SOURCE_MESSAGE}[/red]")
+        console.print("Point redfetch at yours with --source.")
+        raise typer.Exit(1)
+    if cli_source and not remembered:
+        try:
+            provision.set_clean_source(cli_source)  # lazy write, so next time needs no flag
+        except provision.ProvisionError as exc:
+            console.print(f"[red]{escape(str(exc))}[/red]")
+            raise typer.Exit(1)
+
+    target = (destination or "").strip() or provision.default_destination(slug)
+    console.print(f"Creating {escape(target)} from {escape(chosen_source)}")
+
+    try:
+        with (
+            _sigint_cancellation() as stop,
+            Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                console=console,
+            ) as bar,
+        ):
+            task = bar.add_task("Starting", total=1.0)
+
+            def report(label, fraction):
+                # Called from the copy thread.
+                if fraction is None:
+                    bar.update(task, description=escape(label))
+                else:
+                    bar.update(task, description=escape(label), completed=fraction)
+
+            result = asyncio.run(provision.provision(
+                slug, env=server_env, source=chosen_source, destination=target,
+                progress=report, cancelled=stop.is_set,
+            ))
+    except provision.ProvisionCancelled as exc:
+        console.print(f"[yellow]{escape(str(exc))}[/yellow]")
+        raise typer.Exit(1)
+    except provision.ProvisionError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise typer.Exit(1)
+
+    for notice in result.notices:
+        console.print(f"[yellow]{escape(notice)}[/yellow]")
+    console.print(f"Created {escape(str(result.destination))}")
+    console.print(f"Server '{slug}' added. Switch to it with: redfetch server {slug}")
+
+
+@contextmanager
+def _sigint_cancellation():
+    """A stop flag Ctrl+C sets; a second Ctrl+C gives up on stopping cleanly."""
+    stop = threading.Event()
+    previous_handler = signal.getsignal(signal.SIGINT)
+
+    def on_interrupt(_signum, _frame):
+        if stop.is_set():
+            signal.signal(signal.SIGINT, previous_handler)
+            raise KeyboardInterrupt
+        stop.set()
+        console.print("[yellow]Cancelling…[/yellow]")
+
+    # Ctrl+C has to reach the copy loop, cancelling the await isn't enough
+    signal.signal(signal.SIGINT, on_interrupt)
+    try:
+        yield stop
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
+
+
+def _resolve_known_emu_server(server: str) -> tuple[str, str]:
+    """A bundled emu slug and its env; custom servers arrive with the Add dialog."""
+    try:
+        slug = servers.validate_server_slug(server.strip().lower())
+        server_env = servers.env_for_slug(slug)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if server_env is None or not servers.is_known_server(slug, server_env):
+        known = sorted(
+            slug_
+            for env in config.MULTI_SERVER_ENVS
+            for slug_ in servers.list_servers(env)
+            if servers.is_known_server(slug_, env)
+        )
+        raise typer.BadParameter(
+            f"'{slug}' isn't a known emu server. Valid servers: {', '.join(known)}."
+        )
+    return slug, server_env
 
 
 @app.command("show", hidden=True)

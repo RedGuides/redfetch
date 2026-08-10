@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import subprocess
 import sys
 
 import pytest
@@ -325,6 +326,21 @@ def test_restart_refuses_relaunch_when_folder_not_clear(fake_windows):
         processes.restart_macroquest("C:\\VanillaMQ")
 
     assert ran == []
+
+
+@windows_paths
+def test_folder_executables_resolve_a_junction(tmp_path):
+    """psutil reports resolved paths, so a junction folder must compare by real path too."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "eqgame.exe").write_bytes(b"MZ")
+    link = tmp_path / "link"
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(real)],
+        capture_output=True, check=True,
+    )
+    assert processes._normalized_executables(str(link)) == \
+        processes._normalized_executables(str(real))
 
 
 # --- resolve_post_update_launch_filtered ----------------------------------------------
@@ -841,12 +857,12 @@ class _StubApp:
 
 @pytest.fixture
 def tui_surface_cls():
-    # terminal_ui reads config.settings at import; stub it if tests run unconfigured
+    # tui reads config.settings at import; stub it if tests run unconfigured
     from redfetch import config
 
     if config.settings is None:
         config.settings = _AutoRunSettings(None)
-    from redfetch.terminal_ui import _TuiPostUpdate
+    from redfetch.tui_modals import _TuiPostUpdate
 
     return _TuiPostUpdate
 
@@ -863,7 +879,7 @@ def test_tui_ask_cold_start_maps_modal_responses(tui_surface_cls, response, expe
 def test_tui_run_target_dispatches_startup_and_gates_reentry(tui_surface_cls):
     from types import SimpleNamespace
     from textual.worker import WorkerState
-    from redfetch.terminal_ui import Redfetch
+    from redfetch.tui import Redfetch
 
     runnable = SimpleNamespace(startup=lambda: None, label="Very Vanilla MQ")
     events = []

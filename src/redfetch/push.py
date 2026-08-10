@@ -1,13 +1,16 @@
 """Publish resource updates to RedGuides."""
 
+# standard
 import asyncio
 from pathlib import Path
 
+# third-party
 import httpx
 import keepachangelog
 import typer
 from md2bbcode.main import process_readme
 
+# local
 from redfetch import api
 from redfetch import auth
 from redfetch.net import BASE_URL

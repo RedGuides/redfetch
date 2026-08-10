@@ -1,12 +1,12 @@
 """Tests for emulator servers and switching."""
 import os
-import re
 import tomllib
 
 import pytest
 from dynaconf import Dynaconf
 
-from redfetch import config, servers, store
+from conftest import _install_settings
+from redfetch import config, patcher, servers, store
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -26,43 +26,6 @@ BUNDLE_TWO_CLIENTS = BUNDLE_WITH_KNOWN + """
 label = "Veeshan"
 opt_in = false
 """
-
-
-def _install_settings(tmp_path, monkeypatch, local_toml="", bundle_toml=None, env="EMU",
-                      current_env=None):
-    """Install a real Dynaconf instance backed by temporary settings files.
-
-    A fixture bundle also swaps config._base_settings_cache, so mutator tests
-    prune/validate against the fixture rather than the real bundle.
-    """
-    monkeypatch.setenv("REDFETCH_DATA_DIR", str(tmp_path))
-    if current_env:
-        monkeypatch.setenv("REDFETCH_ENV", current_env)
-    if bundle_toml is None:
-        bundle = os.path.join(config.script_dir, "settings.toml")
-    else:
-        bundle_file = tmp_path / "bundle.toml"
-        bundle_file.write_text(bundle_toml, encoding="utf-8")
-        bundle = str(bundle_file)
-        fixture_base = Dynaconf(
-            settings_files=[bundle],
-            environments=True,
-            merge_enabled=True,
-            env_switcher="REDFETCH_ENV",
-        )
-        monkeypatch.setattr(config, "_base_settings_cache", fixture_base)
-    local = tmp_path / "settings.local.toml"
-    local.write_text(local_toml, encoding="utf-8")
-    real = Dynaconf(
-        settings_files=[bundle, str(local)],
-        environments=True,
-        merge_enabled=True,
-        env_switcher="REDFETCH_ENV",
-    )
-    real.ENV = env
-    monkeypatch.setattr(config, "settings", real)
-    monkeypatch.setattr(config, "config_dir", str(tmp_path))
-    return real
 
 
 def _local_file(tmp_path):
@@ -107,17 +70,13 @@ def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
             guide = entry.get("guide")
             if guide:
                 assert guide.startswith("https://"), f"'{slug}' guide must be HTTPS"
-            eqhost = entry.get("eqhost")
-            if eqhost:
-                assert re.fullmatch(r"[A-Za-z0-9.-]+:\d+", eqhost), (
-                    f"'{slug}' eqhost must be host:port"
-                )
             patcher_url = entry.get("patcher_url")
             if patcher_url:
                 assert patcher_url.startswith("https://")
                 exe = entry.get("patcher_exe")
                 assert exe, f"'{slug}' patcher_url without patcher_exe"
-                assert os.path.basename(exe) == exe, f"'{slug}' patcher_exe must be bare"
+                # the same gate custom servers face at runtime
+                assert patcher.validate_patcher_exe(exe) == exe, f"'{slug}' patcher_exe must be bare"
 
 
 def test_list_servers_returns_local_entries_as_plain_dicts(tmp_path, monkeypatch):
@@ -210,6 +169,94 @@ def test_is_known_server_distinguishes_bundle_from_local(tmp_path, monkeypatch):
     assert servers.is_known_server("lazarus", "EMU") is True
     assert servers.is_known_server("myserver", "EMU") is False
     assert servers.is_known_server("nonexistent", "EMU") is False
+
+
+# --- active_server_context --------------------------------------------------------
+
+# Every extra gets a distinct value, so a transposed field can't hide behind truthiness.
+CONTEXT_BUNDLE = """
+[EMU.SERVERS.thegrind]
+label = "The Grind"
+shortname = "grind-shortname"
+opt_in = false
+guide = "https://guide.test/getting-started"
+patcher_url = "https://patch.test/grind.zip"
+patcher_exe = "GrindPatcher.exe"
+"""
+
+CONTEXT_LOCAL = """
+[EMU]
+EQPATH = "D:/EQ-Grind"
+ACTIVE_SERVER = "thegrind"
+
+[EMU.SERVERS.thegrind]
+opt_in = true
+eqpath = "D:/EQ-Grind-Stale"
+"""
+
+
+def test_context_carries_the_active_servers_extras(tmp_path, monkeypatch):
+    """Slots for the live values, the SERVERS entry for what only a named server has."""
+    _install_settings(tmp_path, monkeypatch, local_toml=CONTEXT_LOCAL, bundle_toml=CONTEXT_BUNDLE)
+
+    ctx = servers.active_server_context("EMU")
+
+    assert ctx.label == "The Grind"
+    # The env slot, not the snapshot: the active server's snapshot lags until switch-away.
+    assert _norm(ctx.eqpath) == _norm("D:/EQ-Grind")
+    assert ctx.patcher_url == "https://patch.test/grind.zip"
+    assert ctx.patcher_exe == "GrindPatcher.exe"
+    assert ctx.guide == "https://guide.test/getting-started"
+
+
+def test_context_for_the_bare_setup_has_no_extras(tmp_path, monkeypatch):
+    """No SERVERS entry behind it, so no patcher can ever be configured."""
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+
+    ctx = servers.active_server_context("EMU")
+
+    assert ctx.label == config.BARE_SERVER_LABEL
+    assert _norm(ctx.eqpath) == _norm("D:/EQ-Bare")
+    assert (ctx.patcher_url, ctx.patcher_exe, ctx.guide) == ("", "", "")
+
+
+def test_context_for_single_server_clients_synthesizes(tmp_path, monkeypatch):
+    """Live and Test get the same shape, so Phase-2 surfaces need no client branch."""
+    _install_settings(tmp_path, monkeypatch, local_toml='[LIVE]\nEQPATH = "D:/EQ-Live"\n')
+
+    ctx = servers.active_server_context("LIVE")
+
+    assert ctx.label == "Live"
+    assert _norm(ctx.eqpath) == _norm("D:/EQ-Live")
+    assert ctx.patcher_url == ""
+
+
+def test_context_ignores_active_server_on_single_server_clients(tmp_path, monkeypatch):
+    """A hand-written ACTIVE_SERVER under [LIVE] stays inert, as everywhere else."""
+    local = """
+[LIVE]
+ACTIVE_SERVER = "lazarus"
+
+[LIVE.SERVERS.lazarus]
+patcher_url = "https://evil.example/patcher.zip"
+patcher_exe = "evil.exe"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+
+    ctx = servers.active_server_context("LIVE")
+
+    assert ctx.label == "Live"
+    assert ctx.patcher_url == ""
+
+
+def test_context_degrades_when_active_server_names_nothing(tmp_path, monkeypatch):
+    """A stale hand-edited slug must not raise — it just carries no extras."""
+    _install_settings(tmp_path, monkeypatch, local_toml='[EMU]\nACTIVE_SERVER = "ghost"\n')
+
+    ctx = servers.active_server_context("EMU")
+
+    assert ctx.label == "ghost"
+    assert ctx.patcher_url == ""
 
 
 # --- multi-server seam ---------------------------------------------------------
@@ -663,6 +710,43 @@ def test_add_known_leaves_label_to_bundle(tmp_path, monkeypatch):
     assert "label" not in snap  # bundle owns known labels
     assert servers.list_servers("EMU")["lazarus"]["label"] == "Project Lazarus"
     assert servers.is_server_configured("lazarus", "EMU") is True
+
+
+def test_add_custom_persists_the_patcher_pair(tmp_path, monkeypatch):
+    """The add dialog's URL + file name both land, so has_patcher can come true.
+
+    Guards the P2 gap where only patcher_url was ever written and a custom
+    server could never satisfy has_patcher (url AND exe).
+    """
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+
+    servers.add_server("myserver", env="EMU", eqpath="D:/EQ-Mine", label="My Server",
+                       patcher_url="https://myserver.example/patcher.zip",
+                       patcher_exe="MyPatcher.exe")
+    servers.switch_server("myserver")
+
+    snap = _parsed(tmp_path)["EMU"]["SERVERS"]["myserver"]
+    assert snap["patcher_url"] == "https://myserver.example/patcher.zip"
+    assert snap["patcher_exe"] == "MyPatcher.exe"
+    ctx = servers.active_server_context("EMU")
+    assert (ctx.patcher_url, ctx.patcher_exe) == ("https://myserver.example/patcher.zip", "MyPatcher.exe")
+    assert patcher.has_patcher(ctx) is True
+
+
+def test_add_never_writes_to_the_everquest_folder(tmp_path, monkeypatch):
+    """add_server is a config mutator; nothing may write into the EverQuest folder.
+
+    Eight tests in this file hand add_server real D:/EQ-* paths; if a write ever moves
+    inside, one of them lands in somebody's actual Lazarus install.
+    """
+    _install_settings(tmp_path, monkeypatch, local_toml=BARE_LOCAL)
+    eq_dir = tmp_path / "EQ"
+    eq_dir.mkdir()
+    (eq_dir / "eqgame.exe").write_bytes(b"MZ")
+
+    servers.add_server("lazarus", env="EMU", eqpath=str(eq_dir))
+
+    assert os.listdir(eq_dir) == ["eqgame.exe"]
 
 
 def test_add_requires_folder(tmp_path, monkeypatch):

@@ -1,15 +1,10 @@
-"""The server domain for multi-server clients i.e. emu (config.MULTI_SERVER_ENVS).
-
-Env-level slots (EQPATH, map opt-ins) always hold the active server's
-values; inactive servers keep theirs in ``SERVERS.<slug>`` snapshots that
-``switch_server`` swaps in and out. Other modules should use this API
-instead of touching ``SERVERS.*`` directly.
-
-An unset ``ACTIVE_SERVER`` means a bare "any emu server"
-"""
+"""Multi-server (emu) domain: active-server state, switching, and slug registry."""
+# standard
 import os
 import re
+from dataclasses import dataclass
 
+# local
 from redfetch import config
 from redfetch import store
 
@@ -35,6 +30,16 @@ SERVER_SLOT_PATHS = (
 
 class ServerSwitchError(ValueError):
     """Blocked server switch."""
+
+
+@dataclass(frozen=True)
+class ServerContext:
+    """One client's active server, uniform across every client."""
+    label: str
+    eqpath: str
+    patcher_url: str = ""
+    patcher_exe: str = ""
+    guide: str = ""
 
 
 def is_multi_server(env: str) -> bool:
@@ -112,6 +117,39 @@ def is_server_configured(slug: str, env: str) -> bool:
 def is_known_server(slug: str, env: str) -> bool:
     """True when the slug ships in the bundled settings.toml."""
     return slug in _bundle_servers(env)
+
+
+def active_server_context(env: str) -> ServerContext:
+    """The active server's env-slot values plus its SERVERS extras (patcher, guide)."""
+    slug = get_active_server(env) if is_multi_server(env) else None
+    # A hand-edited ACTIVE_SERVER can name an entry that isn't there; no extras is the safe read.
+    entry = (list_servers(env).get(slug) or {}) if slug else {}
+    return ServerContext(
+        label=str(entry.get("label") or slug or _implicit_server_label(env)),
+        eqpath=str(config.settings.from_env(env).get("EQPATH") or ""),
+        patcher_url=str(entry.get("patcher_url") or ""),
+        patcher_exe=str(entry.get("patcher_exe") or ""),
+        guide=str(entry.get("guide") or ""),
+    )
+
+
+def server_context(slug: str, env: str, *, eqpath: str) -> ServerContext:
+    """A server's patcher, login, and label at an arbitrary folder. Before the folder exists."""
+    entry = list_servers(env).get(slug)
+    if entry is None:
+        raise ValueError(f"Unknown server '{slug}' on {config.ENVS[env]}.")
+    return ServerContext(
+        label=str(entry.get("label") or slug),
+        eqpath=str(eqpath or ""),
+        patcher_url=str(entry.get("patcher_url") or ""),
+        patcher_exe=str(entry.get("patcher_exe") or ""),
+        guide=str(entry.get("guide") or ""),
+    )
+
+
+def _implicit_server_label(env: str) -> str:
+    """What to call a server that has no entry to name it."""
+    return config.BARE_SERVER_LABEL if is_multi_server(env) else config.ENVS[env]
 
 
 def _bundle_servers(env: str) -> dict[str, dict]:
@@ -312,7 +350,7 @@ def generic_eqpath(env: str) -> str:
 
 
 def add_server(slug: str, *, env: str, eqpath: str, label: str | None = None,
-               patcher_url: str | None = None) -> None:
+               patcher_url: str | None = None, patcher_exe: str | None = None) -> None:
     """Configure a known server or create a custom one."""
     _require_init()
 
@@ -335,6 +373,8 @@ def add_server(slug: str, *, env: str, eqpath: str, label: str | None = None,
     snap["eqpath"] = eqpath
     if patcher_url:
         snap["patcher_url"] = patcher_url
+    if patcher_exe:
+        snap["patcher_exe"] = patcher_exe
 
     if slug == get_active_server(env):
         # The env slots hold the active server's values

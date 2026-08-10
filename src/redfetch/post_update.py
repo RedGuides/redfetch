@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# standard
 import asyncio
 import os
 import sys
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Literal, Protocol
 
+# local
 from redfetch import config
 from redfetch import processes
 from redfetch import shortcuts

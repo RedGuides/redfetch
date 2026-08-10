@@ -159,15 +159,37 @@ def test_slug_from_live_switches_client_first(cli_env, monkeypatch):
     assert fake.ENV == "EMU"
 
 
-def test_unconfigured_known_slug_prompts_then_configures(cli_env, monkeypatch):
+def _eq_folder(tmp_path):
+    """A real EverQuest folder — the prompt path now validates eqgame.exe."""
+    folder = tmp_path / "EverQuest"
+    folder.mkdir()
+    (folder / "eqgame.exe").write_bytes(b"MZ")
+    return folder
+
+
+def test_unconfigured_known_slug_prompts_then_configures(cli_env, monkeypatch, tmp_path):
     fake, calls = cli_env
     fake.ENV = "EMU"
     _set_known_server(
         monkeypatch, slug="lazarus", label="Project Lazarus", configured=False
     )
-    monkeypatch.setattr(main.Prompt, "ask", lambda *a, **k: "D:/EQ-Laz")
+    folder = _eq_folder(tmp_path)
+    monkeypatch.setattr(main.Prompt, "ask", lambda *a, **k: str(folder))
     main.server_command(server="lazarus")
-    assert calls == [("add", "lazarus", "D:/EQ-Laz"), ("server", "lazarus")]
+    assert calls == [("add", "lazarus", str(folder)), ("server", "lazarus")]
+
+
+def test_folder_without_eqgame_at_prompt_rejected(cli_env, monkeypatch, tmp_path):
+    fake, calls = cli_env
+    fake.ENV = "EMU"
+    _set_known_server(monkeypatch, slug="lazarus", configured=False)
+    not_eq = tmp_path / "NotEverQuest"
+    not_eq.mkdir()
+    monkeypatch.setattr(main.Prompt, "ask", lambda *a, **k: str(not_eq))
+    with pytest.raises(typer.BadParameter, match="eqgame.exe"):
+        main.server_command(server="lazarus")
+    # A refusal adds nothing and never switches.
+    assert calls == []
 
 
 def test_blank_folder_at_prompt_rejected(cli_env, monkeypatch):

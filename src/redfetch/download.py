@@ -18,7 +18,7 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
+    retry_if_exception,
 )
 
 # local
@@ -66,10 +66,18 @@ async def download_install_target_async(
         return False
 
 
+def _is_transient(exc: BaseException) -> bool:
+    """retry for some responses."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code >= 500 or code in (408, 429)
+    return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError))
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
-    retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError)),
+    retry=retry_if_exception(_is_transient),
     reraise=True,
 )
 async def download_file_async(
@@ -181,6 +189,16 @@ def _hash_matches(hasher, expected_md5: str, file_path: str) -> bool:
 # zip functions
 #
 
+def check_zip_limits(infos) -> str | None:
+    """Zipbomb caps"""
+    if len(infos) > MAX_FILES_PER_ZIP:
+        return f"ZIP has too many files ({len(infos)} > {MAX_FILES_PER_ZIP})."
+    total_uncompressed_size = sum(zinfo.file_size for zinfo in infos)
+    if total_uncompressed_size > MAX_UNCOMPRESSED_SIZE:
+        return f"Total uncompressed size {total_uncompressed_size} exceeds the 2GB limit."
+    return None
+
+
 def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=False, protected_files=None) -> bool:
     try:
         zip_size = os.path.getsize(zip_path)
@@ -190,15 +208,12 @@ def extract_and_discard_zip(zip_path, extract_to, resource_id, should_flatten=Fa
 
         with ZipFile(zip_path, 'r') as zip_ref:
             infos = zip_ref.infolist()
-            if len(infos) > MAX_FILES_PER_ZIP:
-                print(f"ZIP has too many files ({len(infos)} > {MAX_FILES_PER_ZIP}). Extraction aborted.")
+            limit_error = check_zip_limits(infos)
+            if limit_error:
+                print(f"{limit_error} Extraction aborted.")
                 return False
 
             total_uncompressed_size = sum(zinfo.file_size for zinfo in infos)
-            if total_uncompressed_size > MAX_UNCOMPRESSED_SIZE:
-                print(f"Total uncompressed size {total_uncompressed_size} exceeds the 2GB limit. Extraction aborted.")
-                return False
-
             try:
                 free_bytes = shutil.disk_usage(extract_to).free
                 if free_bytes < total_uncompressed_size + 500 * 1024 * 1024:

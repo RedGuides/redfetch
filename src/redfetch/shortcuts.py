@@ -1,15 +1,43 @@
 """Shared shortcut registry for the TUI and CLI."""
 from __future__ import annotations
 
+# standard
 import os
+import re
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple
 
+# local
 from redfetch import config
+from redfetch import patcher
 from redfetch import processes
+from redfetch import servers
 from redfetch import utils
+
+
+# EverQuest's login-server file, named once so the shortcut and the reader can't drift.
+EQHOST_FILENAME = "eqhost.txt"
+
+# A commented-out "#Host=old:5999" doesn't match.
+_HOST_LINE_RE = re.compile(r"^[ \t]*Host[ \t]*=[ \t]*(\S+)", re.IGNORECASE | re.MULTILINE)
+
+
+def read_login_server(eqpath: str | None) -> str:
+    """The login server a folder's eqhost.txt names, or "" when it names none."""
+    folder = str(eqpath or "").strip()
+    if not folder:
+        return ""
+    try:
+        raw = Path(folder, EQHOST_FILENAME).read_bytes()
+    except OSError:
+        return ""
+    # utf-8-sig drops a hidden editor marker at the start; errors="replace" swaps out
+    # any garbled byte so a hand-mangled file never crashes a tooltip.
+    match = _HOST_LINE_RE.search(raw.decode("utf-8-sig", errors="replace"))
+    return match.group(1) if match else ""
 
 
 # ---- resolvers -------------------------------------------------------------
@@ -64,6 +92,37 @@ def _seed_meshgen_ini() -> None:
         pass  # unwritable config dir, etc. — MeshGenerator will just prompt as before
 
 
+def _active_context() -> servers.ServerContext:
+    # ENV is the one global source of truth. --server rewrites it in memory for the run.
+    return servers.active_server_context(config.settings.ENV)
+
+
+def _patcher_dir() -> str | None:
+    return _active_context().eqpath or None
+
+
+def _patcher_exe() -> str:
+    """The active server's patcher file name, or "" when there is nothing to run."""
+    context = _active_context()
+    if not patcher.has_patcher(context):
+        return ""
+    try:
+        return patcher.validate_patcher_exe(context.patcher_exe)
+    except patcher.PatcherError:
+        return ""
+
+
+def _patcher_label() -> str:
+    context = _active_context()
+    return f"{context.label} patcher 🩹" if patcher.has_patcher(context) else ""
+
+
+def _eqhost_tooltip() -> str:
+    """Name the login server the file points at — the reason people open it."""
+    host = read_login_server(_eq_dir())
+    return f"Currently pointed at {host}." if host else ""
+
+
 # ---- executables: `redfetch run <key>` -------------------------------------
 
 @dataclass(frozen=True)
@@ -77,6 +136,10 @@ class Runnable:
     tooltip: str = ""
     prepare: Callable[[], None] | None = None   # optional pre-launch hook
     startup: Callable[[], StartupResult] | None = None
+    # Per-server entries can't name their exe or label up front
+    resolve_executable: Callable[[], str] | None = None
+    resolve_label: Callable[[], str] | None = None
+    new_console: bool = False                   # console apps need their own window
 
 
 RUNNABLES: tuple[Runnable, ...] = (
@@ -108,6 +171,13 @@ RUNNABLES: tuple[Runnable, ...] = (
         tooltip="Run EverQuest *WITHOUT* updating.",
     ),
     Runnable(
+        "patcher", "Server patcher 🩹", "", _patcher_dir,
+        tooltip="Run the emu server's own patcher.",
+        resolve_executable=_patcher_exe,
+        resolve_label=_patcher_label,
+        new_console=True,
+    ),
+    Runnable(
         "myseq", "MySEQ 📍", "MySEQ.exe", utils.get_myseq_path,
         aliases=("seq",),
         tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.",
@@ -127,6 +197,8 @@ class Openable:
     tooltip: str = ""
     prepare: Callable[[], None] | None = None   # optional pre-open hook
     css: str = "folder"                         # TUI class
+    # Entries whose tooltip can only be written once the file has been read
+    resolve_tooltip: Callable[[], str] | None = None
 
 
 OPENABLES: tuple[Openable, ...] = (
@@ -162,8 +234,9 @@ OPENABLES: tuple[Openable, ...] = (
         css="file", tooltip="Open EverQuest's config file.",
     ),
     Openable(
-        "eqhost", "eqhost.txt 🐲", _eq_dir, "eqhost.txt",
-        css="file", tooltip="Open EverQuest's eqhost.txt, useful for emulators.",
+        "eqhost", "eqhost.txt 🐲", _eq_dir, EQHOST_FILENAME,
+        css="file", tooltip="Open EverQuest's eqhost.txt.",
+        resolve_tooltip=_eqhost_tooltip,
     ),
 )
 
@@ -186,10 +259,33 @@ def find_openable(name: str) -> Openable | None:
     return _OPEN_BY_NAME.get(name.strip().lower())
 
 
+# ---- resolution (static fields, or per-server callables) -------------------
+
+def runnable_executable(r: Runnable) -> str:
+    """The file to launch. "" when this client and server have none."""
+    return r.resolve_executable() if r.resolve_executable else r.executable
+
+
+def runnable_label(r: Runnable) -> str:
+    """The display name, falling back to the static one when nothing resolves."""
+    return (r.resolve_label() if r.resolve_label else "") or r.label
+
+
+def openable_tooltip(o: Openable) -> str:
+    """The hover text, falling back to the static one when nothing resolves."""
+    return (o.resolve_tooltip() if o.resolve_tooltip else "") or o.tooltip
+
+
 # ---- availability (drives TUI disable + CLI listing) -----------------------
 
+def runnable_visible(r: Runnable) -> bool:
+    """False only for a per-server entry with nothing behind it on this client."""
+    return bool(runnable_executable(r))
+
+
 def runnable_available(r: Runnable) -> bool:
-    return utils.validate_file_in_path(r.resolve_dir(), r.executable)
+    executable = runnable_executable(r)
+    return bool(executable) and utils.validate_file_in_path(r.resolve_dir(), executable)
 
 
 def openable_available(o: Openable) -> bool:
@@ -205,9 +301,14 @@ def openable_available(o: Openable) -> bool:
 
 def run(r: Runnable, extra: Sequence[str] | None = None) -> None:
     """Launch a registered executable."""
+    executable = runnable_executable(r)
+    if not executable:
+        raise ValueError(f"Your active client and server have no {r.key} to run.")
     if r.prepare:
         r.prepare()
-    processes.run_executable(r.resolve_dir(), r.executable, [*r.args, *(extra or [])])
+    processes.run_executable(
+        r.resolve_dir(), executable, [*r.args, *(extra or [])], new_console=r.new_console
+    )
 
 
 # ---- full startup: MacroQuest + companion loadout --------------------------

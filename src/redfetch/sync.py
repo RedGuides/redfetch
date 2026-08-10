@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+# standard
 import asyncio
 import os
 
+# third-party
 import httpx
 from filelock import FileLock, Timeout
 from platformdirs import user_data_dir
 
+# local
 from redfetch import api
 from redfetch import config
 from redfetch import net

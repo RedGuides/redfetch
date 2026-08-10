@@ -1,11 +1,12 @@
 """Tests for the shared shortcuts registry (redfetch run / open)."""
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
-from redfetch import shortcuts, processes, config, main, utils
+from redfetch import shortcuts, processes, config, main, servers, utils
 from redfetch.utils import FilteredLaunch, LaunchCommand
 
 windows_only = pytest.mark.skipif(os.name != "nt", reason="uses the Win32 profile API")
@@ -55,6 +56,8 @@ def test_known_static_attributes():
     assert shortcuts.find_runnable("mesh").executable == "MeshGenerator.exe"  # alias preserved
     assert shortcuts.find_runnable("meshgen").prepare is shortcuts._seed_meshgen_ini
     assert shortcuts.find_openable("settings").filename == "settings.local.toml"
+    # one string in two places, so "eqhosts.txt" can never land in only one of them
+    assert shortcuts.find_openable("eqhost").filename == shortcuts.EQHOST_FILENAME
     assert shortcuts.find_openable("mq-config").css == "file"
     assert shortcuts.find_openable("downloads").filename is None  # a folder
 
@@ -64,16 +67,17 @@ def test_known_static_attributes():
 def test_run_passes_resolved_dir_and_merged_args(monkeypatch):
     calls = []
     monkeypatch.setattr(processes, "run_executable",
-                        lambda folder, exe, args: calls.append((folder, exe, args)))
+                        lambda folder, exe, args, new_console=False:
+                            calls.append((folder, exe, args, new_console)))
     r = shortcuts.Runnable("t", "L", "Foo.exe", lambda: "C:/x", args=("a",))
     shortcuts.run(r, extra=["b"])
-    assert calls == [("C:/x", "Foo.exe", ["a", "b"])]
+    assert calls == [("C:/x", "Foo.exe", ["a", "b"], False)]
 
 
 def test_run_invokes_prepare_hook_before_launch(monkeypatch):
     events = []
     monkeypatch.setattr(processes, "run_executable",
-                        lambda folder, exe, args: events.append("run"))
+                        lambda folder, exe, args, new_console=False: events.append("run"))
     r = shortcuts.Runnable("t", "L", "Foo.exe", lambda: "C:/x",
                            prepare=lambda: events.append("prepare"))
     shortcuts.run(r)
@@ -83,6 +87,139 @@ def test_run_invokes_prepare_hook_before_launch(monkeypatch):
 def test_vvmq_startup_hook_late_binds(monkeypatch):
     monkeypatch.setattr(shortcuts, "start_vvmq", lambda: "sentinel")
     assert shortcuts.find_runnable("vvmq").startup() == "sentinel"
+
+
+# --- per-server entries: name and label resolve at read time -----------------
+
+def _dynamic(exe, label="", *, folder="C:/x", **kwargs):
+    return shortcuts.Runnable(
+        "dyn", "Static label", "", lambda: folder,
+        resolve_executable=lambda: exe, resolve_label=lambda: label, **kwargs,
+    )
+
+
+def test_static_entries_resolve_from_their_own_fields():
+    r = shortcuts.find_runnable("eqbcs")
+    assert shortcuts.runnable_executable(r) == "EQBCS.exe"
+    assert shortcuts.runnable_label(r) == r.label
+    assert shortcuts.runnable_visible(r) is True
+
+
+def test_dynamic_entry_resolves_its_name_and_label():
+    r = _dynamic("LazarusPatcherCLI.exe", "Project Lazarus patcher")
+    assert shortcuts.runnable_executable(r) == "LazarusPatcherCLI.exe"
+    assert shortcuts.runnable_label(r) == "Project Lazarus patcher"
+    assert shortcuts.runnable_visible(r) is True
+
+
+def test_dynamic_entry_with_nothing_behind_it_hides():
+    r = _dynamic("", "")
+    assert shortcuts.runnable_visible(r) is False
+    assert shortcuts.runnable_available(r) is False
+    assert shortcuts.runnable_label(r) == "Static label"  # still names itself in errors
+
+
+def test_dynamic_availability_follows_the_resolved_name(tmp_path):
+    (tmp_path / "LazarusPatcherCLI.exe").write_bytes(b"MZ")
+    folder = str(tmp_path)
+    assert shortcuts.runnable_available(_dynamic("LazarusPatcherCLI.exe", folder=folder)) is True
+    assert shortcuts.runnable_available(_dynamic("Other.exe", folder=folder)) is False
+
+
+def test_run_launches_the_resolved_name_in_its_own_console(monkeypatch):
+    calls = []
+    monkeypatch.setattr(processes, "run_executable",
+                        lambda folder, exe, args, new_console=False:
+                            calls.append((exe, new_console)))
+    shortcuts.run(_dynamic("Real.exe", new_console=True))
+    assert calls == [("Real.exe", True)]
+
+
+def test_run_refuses_an_entry_that_resolves_to_nothing(monkeypatch):
+    monkeypatch.setattr(processes, "run_executable",
+                        lambda *a, **k: pytest.fail("nothing to launch"))
+    r = shortcuts.Runnable("patcher", "Server patcher", "", lambda: "C:/x",
+                           resolve_executable=lambda: "",
+                           prepare=lambda: pytest.fail("nothing to prepare"))
+    with pytest.raises(ValueError, match="no patcher to run"):
+        shortcuts.run(r)
+
+
+# --- the patcher entry ------------------------------------------------------
+
+def _active_server(monkeypatch, **kwargs):
+    fields = dict(label="Project Lazarus", eqpath="C:/EQ",
+                  patcher_url="https://laz.example.test/p.zip",
+                  patcher_exe="LazarusPatcherCLI.exe")
+    context = servers.ServerContext(**{**fields, **kwargs})
+    monkeypatch.setattr(shortcuts, "_active_context", lambda: context)
+    return context
+
+
+def test_patcher_entry_names_the_active_server(monkeypatch):
+    _active_server(monkeypatch)
+    r = shortcuts.find_runnable("patcher")
+    assert shortcuts.runnable_executable(r) == "LazarusPatcherCLI.exe"
+    assert shortcuts.runnable_label(r) == "Project Lazarus patcher 🩹"
+    assert shortcuts.runnable_visible(r) is True
+    assert r.resolve_dir() == "C:/EQ"
+    assert r.new_console is True  # a console patcher must not share the TUI's window
+
+
+def test_patcher_entry_hides_without_a_server_patcher(monkeypatch):
+    """Live, and the bare emu setup: no entry behind them, so no patcher_url."""
+    _active_server(monkeypatch, label="EverQuest Live", patcher_url="", patcher_exe="")
+    r = shortcuts.find_runnable("patcher")
+    assert shortcuts.runnable_visible(r) is False
+    assert shortcuts.runnable_available(r) is False
+    assert shortcuts.runnable_label(r) == "Server patcher 🩹"
+
+
+def test_patcher_entry_rejects_a_hostile_exe_name(monkeypatch):
+    """A custom server's exe name is user-authored, so running it uses the bootstrap's gate."""
+    _active_server(monkeypatch, patcher_exe="..\\..\\Windows\\System32\\calc.exe")
+    r = shortcuts.find_runnable("patcher")
+    assert shortcuts.runnable_executable(r) == ""
+    assert shortcuts.runnable_visible(r) is False
+
+
+def test_patcher_entry_reads_the_global_env(monkeypatch):
+    """--server rewrites config.settings.ENV in memory; the shortcut has to follow it."""
+    seen = []
+    monkeypatch.setattr(config, "settings", SimpleNamespace(ENV="EMU"))
+    monkeypatch.setattr(
+        shortcuts.servers, "active_server_context",
+        lambda env: seen.append(env) or servers.ServerContext(label="X", eqpath="C:/EQ"),
+    )
+    shortcuts._active_context()
+    assert seen == ["EMU"]
+
+
+# --- run_executable: console windows ----------------------------------------
+
+def _fake_popen(monkeypatch):
+    """Stand in for subprocess so the creation flag is assertable off Windows."""
+    calls = []
+    monkeypatch.setattr(processes, "IS_WINDOWS", True)
+    monkeypatch.setattr(processes, "subprocess", SimpleNamespace(
+        CREATE_NEW_CONSOLE=0x10,
+        Popen=lambda argv, **kwargs: calls.append(kwargs),
+    ))
+    return calls
+
+
+def test_new_console_reaches_popen(monkeypatch, tmp_path):
+    (tmp_path / "Patcher.exe").write_bytes(b"MZ")
+    calls = _fake_popen(monkeypatch)
+    processes.run_executable(str(tmp_path), "Patcher.exe", new_console=True)
+    assert calls[0]["creationflags"] == 0x10
+
+
+def test_gui_executables_keep_the_shared_console(monkeypatch, tmp_path):
+    (tmp_path / "MacroQuest.exe").write_bytes(b"MZ")
+    calls = _fake_popen(monkeypatch)
+    processes.run_executable(str(tmp_path), "MacroQuest.exe")
+    assert calls[0]["creationflags"] == 0
 
 
 # --- launch_loadout(): the shared companion routine --------------------------
@@ -418,6 +555,91 @@ def test_openable_available_file(tmp_path):
     assert shortcuts.openable_available(present) is True
     absent = shortcuts.Openable("t", "L", lambda: str(tmp_path), "missing.ini")
     assert shortcuts.openable_available(absent) is False
+
+
+# --- the eqhost.txt reader and its tooltip ----------------------------------
+
+LAZ = "login.eqemulator.net:5999"
+
+
+def _eqhost(tmp_path, data):
+    path = tmp_path / shortcuts.EQHOST_FILENAME
+    path.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))
+    return path
+
+
+@pytest.mark.parametrize("body", [
+    f"[LoginServer]\nHost={LAZ}\n",
+    f"[LoginServer]\r\nHost={LAZ}\r\n",                     # CRLF, what a client ships
+    f"[LoginServer]\n\tHost\t=\t{LAZ}\t\n",
+    f"[loginserver]\nhost={LAZ}\n",
+    f"\ufeff[LoginServer]\nHost={LAZ}\n",                   # a BOM from Notepad
+    f"[LoginServer]\n#Host=old.login:5999\nHost={LAZ}\n",   # a commented-out old host
+    f"Host={LAZ}\n",                                        # no header at all
+])
+def test_the_reader_finds_the_active_host(tmp_path, body):
+    _eqhost(tmp_path, body)
+    assert shortcuts.read_login_server(str(tmp_path)) == LAZ
+
+
+@pytest.mark.parametrize("body", [
+    "",
+    "[LoginServer]\n",
+    "[LoginServer]\nHost\n",
+    "[LoginServer]\nHost=\n",
+    "[LoginServer]\n#Host=old.login:5999\n",   # commented out is not active
+    "[LoginServer]\n;Host=old.login:5999\n",
+])
+def test_a_file_with_no_active_host_reads_as_empty(tmp_path, body):
+    _eqhost(tmp_path, body)
+    assert shortcuts.read_login_server(str(tmp_path)) == ""
+
+
+def test_unreadable_files_read_as_empty_instead_of_raising(tmp_path):
+    assert shortcuts.read_login_server(str(tmp_path)) == ""   # no file at all
+    (tmp_path / shortcuts.EQHOST_FILENAME).mkdir()            # a directory of that name
+    assert shortcuts.read_login_server(str(tmp_path)) == ""
+
+
+def test_a_utf16_file_does_not_raise(tmp_path):
+    """errors='replace' matters: a tooltip refresh must never explode on this."""
+    _eqhost(tmp_path, f"[LoginServer]\nHost={LAZ}\n".encode("utf-16"))
+    assert shortcuts.read_login_server(str(tmp_path)) == ""
+
+
+def test_an_ansi_byte_does_not_raise(tmp_path):
+    _eqhost(tmp_path, b"; caf\xe9\r\n[LoginServer]\r\nHost=" + LAZ.encode() + b"\r\n")
+    assert shortcuts.read_login_server(str(tmp_path)) == LAZ
+
+
+@pytest.mark.parametrize("folder", ["", "   ", None])
+def test_reading_without_a_folder_never_touches_the_working_directory(tmp_path, monkeypatch, folder):
+    monkeypatch.chdir(tmp_path)
+    _eqhost(tmp_path, f"[LoginServer]\nHost={LAZ}\n")
+    assert shortcuts.read_login_server(folder) == ""
+
+
+def _at_eq_dir(monkeypatch, folder):
+    # Not shortcuts._eq_dir: the registry captured that function at import, so patching
+    # the name would leave resolve_dir pointing at the real one.
+    monkeypatch.setattr(config, "active_settings", lambda: {"EQPATH": str(folder)})
+
+
+def test_the_eqhost_tooltip_names_the_login_server(tmp_path, monkeypatch):
+    _eqhost(tmp_path, f"[LoginServer]\nHost={LAZ}\n")
+    _at_eq_dir(monkeypatch, tmp_path)
+    assert LAZ in shortcuts.openable_tooltip(shortcuts.find_openable("eqhost"))
+
+
+def test_the_eqhost_tooltip_falls_back_when_there_is_nothing_to_read(tmp_path, monkeypatch):
+    _at_eq_dir(monkeypatch, tmp_path)
+    openable = shortcuts.find_openable("eqhost")
+    assert shortcuts.openable_tooltip(openable) == openable.tooltip
+
+
+def test_a_plain_openable_keeps_its_static_tooltip():
+    o = shortcuts.Openable("t", "L", lambda: "C:/d", tooltip="Static.")
+    assert shortcuts.openable_tooltip(o) == "Static."
 
 
 # --- CLI: `redfetch run` / `redfetch open` ----------------------------------

@@ -187,6 +187,8 @@ def initialize_config():
             Validator("DOWNLOAD_FOLDER", cast=normalize_and_create_path),
             # Separate validator for EQPATH to avoid triggering eqgame.exe check
             Validator("EQPATH", default=None, cast=lambda x: os.path.normpath(x) if x else None),
+            # An optional path to a zip, iso or folder. Not a directory we create, and an unset value shouldn't crash on boot.
+            Validator("CLEAN_SOURCE", default=None, cast=lambda x: os.path.normpath(x) if x else None),
             Validator("SPECIAL_RESOURCES", cast=normalize_paths_in_dict),
             Validator("CATEGORY_PATHS", default={}, cast=normalize_category_paths)
         ]

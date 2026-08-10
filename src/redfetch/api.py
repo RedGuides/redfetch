@@ -1,6 +1,9 @@
 """Resource API client: fetch_*() takes a client, get_*() is self-contained."""
 
+# third-party
 import httpx
+
+# local
 from redfetch import net
 from redfetch.sync_types import SyncInfo
 

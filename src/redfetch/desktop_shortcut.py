@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+# standard
 import os
 import shutil
 import sys
 from pathlib import Path
 
+# third-party
 from platformdirs import user_desktop_path
 
 SHORTCUT_FILENAME = "redfetch.lnk"

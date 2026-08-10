@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+# standard
 import asyncio
 from collections.abc import Awaitable, Callable
 
+# third-party
 import httpx
 
+# local
 from redfetch import download
 from redfetch.sync_types import (
     DesiredInstallTarget,

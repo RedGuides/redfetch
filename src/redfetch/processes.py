@@ -1,6 +1,7 @@
 """Helpers for managing external processes."""
 from __future__ import annotations
 
+# standard
 import configparser
 import os
 import subprocess
@@ -10,6 +11,7 @@ import webbrowser
 from collections.abc import Sequence
 from pathlib import Path
 
+# third-party
 import psutil
 
 IS_WINDOWS = sys.platform == "win32"
@@ -22,7 +24,8 @@ def _norm(path: str) -> str:
 
 
 def _normalized_executables(folder_path: str) -> list[str]:
-    folder = os.path.normpath(os.path.abspath(folder_path))
+    # realpath resolves junctions so we can compare against psutil's resolved paths.
+    folder = os.path.realpath(folder_path)
     if not os.path.isdir(folder):
         return []
     return [
@@ -253,8 +256,9 @@ def restart_macroquest(mq_folder: str) -> None:
     run_executable(mq_folder, "MacroQuest.exe")
 
 
-def run_executable(folder_path: str, executable_name: str, args: Sequence[str] | None = None) -> bool:
-    """Launch ``executable_name`` located in ``folder_path`` with optional arguments."""
+def run_executable(folder_path: str, executable_name: str, args: Sequence[str] | None = None,
+                   *, new_console: bool = False) -> bool:
+    """Launch ``executable_name`` located in ``folder_path``. ``new_console`` is for console programs"""
     if not IS_WINDOWS:
         raise RuntimeError("Running executables is only supported on Windows.")
 
@@ -265,7 +269,11 @@ def run_executable(folder_path: str, executable_name: str, args: Sequence[str] |
     if not os.path.isfile(executable_path):
         raise FileNotFoundError(f"{executable_name} not found in the specified folder.")
 
-    subprocess.Popen([executable_path, *(args or [])], cwd=folder_path)
+    subprocess.Popen(
+        [executable_path, *(args or [])],
+        cwd=folder_path,
+        creationflags=subprocess.CREATE_NEW_CONSOLE if new_console else 0,
+    )
     print(f"{executable_name} started successfully.")
     return True
 

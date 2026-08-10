@@ -1,17 +1,21 @@
 """
 NavMesh sync module - downloads Nav mesh files from mqmesh.com
 """
+# standard
 import os
 import hashlib
 import json
 import asyncio
 from dataclasses import dataclass
 from typing import NamedTuple
+
+# third-party
 import httpx
 import aiosqlite
 from hishel import AsyncSqliteStorage
 from hishel.httpx import AsyncCacheClient
 
+# local
 from redfetch import config
 from redfetch.sync_types import SyncEventCallback
 from redfetch.utils import get_vvmq_path

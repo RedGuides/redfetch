@@ -4,7 +4,9 @@
 import os
 import re
 import shlex
+import shutil
 import sys
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -45,6 +47,40 @@ def is_safe_path(base_directory: str, target_path: str) -> bool:
     abs_base = os.path.realpath(base_directory)
     abs_target = os.path.realpath(target_path)
     return Path(abs_target).is_relative_to(abs_base)
+
+
+def paths_overlap(first: str, second: str) -> bool:
+    """True when either path contains the other, even through symlinks."""
+    if not str(first or "").strip() or not str(second or "").strip():
+        return False
+    return is_safe_path(first, second) or is_safe_path(second, first)
+
+
+def nearest_dir(path: str) -> Path:
+    """Closest existing directory at or above path, defaulting to home."""
+    if path:
+        for candidate in (Path(path), *Path(path).parents):
+            if candidate.is_dir():
+                return candidate
+    return Path.home()
+
+
+def sweep_stale_dirs(parent: str, prefix: str, max_age: float) -> None:
+    """Clear work dirs left by a run that died before its own cleanup."""
+    cutoff = time.time() - max_age
+    try:
+        entries = list(Path(parent).iterdir())
+    except OSError:
+        return
+    for stale in entries:
+        if not stale.name.startswith(prefix):
+            continue
+        try:
+            if stale.stat().st_mtime >= cutoff:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(stale, ignore_errors=True)
 
 
 def get_current_vvmq_id(settings_env: str | None = None) -> str | None:
@@ -168,6 +204,20 @@ def validate_file_in_path(path: str | None, filename: str) -> bool:
         return os.path.isfile(os.path.join(path, filename))
     except (TypeError, ValueError):
         return False
+
+
+#
+# machine checks
+#
+
+DX9_INSTALLER_URL = "https://www.microsoft.com/download/details.aspx?id=35"
+# eqgame.exe is 32-bit, so Windows keeps its DLLs in SysWOW64.
+DX9_DLL_PATH = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "SysWOW64", "d3dx9_43.dll")
+
+
+def dx9_missing() -> bool:
+    """True when launching EverQuest would fail with a missing-d3dx9_43.dll error."""
+    return not os.path.isfile(DX9_DLL_PATH)
 
 
 #
