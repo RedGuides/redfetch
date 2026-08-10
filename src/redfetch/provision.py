@@ -332,26 +332,22 @@ def _scan_iso(source: Path) -> SourcePlan:
 
 
 def _scan_tree(source: Path) -> SourcePlan:
-    walked = [(dirpath, filenames) for dirpath, _dirs, filenames in source.walk()]
-    found = [
-        (path, str(path))
-        for path, filenames in walked
-        if any(name.lower() == EQGAME for name in filenames)
-    ]
-    root = _require_one_root(found, source)
-
+    # Never hunt through subfolders if the user pointed at a folder
+    if not detecteq.is_valid_eq_dir(str(source)):
+        raise ProvisionError(
+            f"There's no {EQGAME} in {source}, so it isn't a RoF2 copy. "
+            f"Point redfetch at the folder that holds {EQGAME} itself."
+        )
     total = 0
     count = 0
-    for path, filenames in walked:
-        if not path.is_relative_to(root):
-            continue
+    for dirpath, _dirnames, filenames in source.walk():
         for name in filenames:
             try:
-                total += (path / name).stat().st_size
+                total += (dirpath / name).stat().st_size
             except OSError:
                 continue
             count += 1
-    return SourcePlan(SourceKind.TREE, root, total, count)
+    return SourcePlan(SourceKind.TREE, source, total, count)
 
 
 #

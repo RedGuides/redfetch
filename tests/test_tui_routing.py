@@ -163,8 +163,7 @@ class FakeButton:
         self._tooltip = Content.from_markup(value) if isinstance(value, str) else value
 
 
-def _patcher_button(monkeypatch, tmp_path, *, slug, selected_active, context, listed=None,
-                    running=False, enabling=False):
+def _patcher_button(*, context, running=False, enabling=False):
     """Drive ServersTab._refresh_patcher_button with stand-ins; real patcher gates."""
     button = FakeButton()
     tab = SimpleNamespace(
@@ -172,9 +171,7 @@ def _patcher_button(monkeypatch, tmp_path, *, slug, selected_active, context, li
                             provision_running=False),
         query_one=lambda selector, _type=None: button,
     )
-    monkeypatch.setattr(tui.servers, "active_server_context", lambda env: context)
-    monkeypatch.setattr(tui.servers, "list_servers", lambda env: listed or {})
-    tui_servers.ServersTab._refresh_patcher_button(tab, "EMU", slug, selected_active)
+    tui_servers.ServersTab._refresh_patcher_button(tab, context)
     return button
 
 
@@ -186,76 +183,51 @@ def _context(tmp_path, **kwargs):
     return tui.servers.ServerContext(**{**fields, **kwargs})
 
 
-def test_patcher_button_enabled_for_the_active_server(monkeypatch, tmp_path):
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug="lazarus", selected_active=True, context=_context(tmp_path)
-    )
+def test_patcher_button_enabled_for_the_active_server(tmp_path):
+    button = _patcher_button(context=_context(tmp_path))
     assert button.disabled is False
     assert "Download the Project Lazarus patcher" in button.tooltip.plain
 
 
-def test_patcher_button_disabled_once_installed(monkeypatch, tmp_path):
+def test_patcher_button_disabled_once_installed(tmp_path):
     (tmp_path / "LazarusPatcherCLI.exe").write_bytes(b"MZ")
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug="lazarus", selected_active=True, context=_context(tmp_path)
-    )
+    button = _patcher_button(context=_context(tmp_path))
     assert button.disabled is True
     assert "already" in button.tooltip.plain
 
 
-def test_patcher_button_sends_you_to_switch_first(monkeypatch, tmp_path):
-    """An inactive row's folder lives in its snapshot, so bootstrap can't act on it."""
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug="other", selected_active=False, context=_context(tmp_path),
-        listed={"other": {"patcher_url": "https://other.example.test/p.zip"}},
-    )
-    assert button.disabled is True
-    assert "Switch to this server first" in button.tooltip.plain
-
-
-def test_patcher_button_disabled_on_the_bare_setup(monkeypatch, tmp_path):
+def test_patcher_button_disabled_on_the_bare_setup(tmp_path):
     """No entry behind it, so no patcher_url — the data hides the action, not a branch."""
     bare = _context(tmp_path, label=config.BARE_SERVER_LABEL,
                     patcher_url="", patcher_exe="")
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug=tui.BARE_SETUP_ID, selected_active=True, context=bare
-    )
+    button = _patcher_button(context=bare)
     assert button.disabled is True
     assert "no patcher" in button.tooltip.plain
 
 
-def test_patcher_button_disabled_while_downloading(monkeypatch, tmp_path):
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug="lazarus", selected_active=True,
-        context=_context(tmp_path), running=True,
-    )
+def test_patcher_button_disabled_while_downloading(tmp_path):
+    button = _patcher_button(context=_context(tmp_path), running=True)
     assert button.disabled is True
     assert "Downloading" in button.tooltip.plain
 
 
-def test_patcher_button_keeps_free_text_labels_literal(monkeypatch, tmp_path):
+def test_patcher_button_keeps_free_text_labels_literal(tmp_path):
     """Tooltips are a markup sink, and escape() misses any tag that isn't [a-z#/@]-initial.
 
     'PEQ [TAKP]' is a real emu server's name: escape() leaves it untouched and the
     tooltip then renders 'PEQ ' — silent text loss, no exception.
     """
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug="lazarus", selected_active=True,
-        context=_context(tmp_path, label="PEQ [TAKP]"),
-    )
+    button = _patcher_button(context=_context(tmp_path, label="PEQ [TAKP]"))
     assert button.disabled is False
     assert button.tooltip.plain == (
         "Download the PEQ [TAKP] patcher into its EverQuest folder."
     )
 
 
-def test_patcher_button_names_the_missing_exe_on_the_active_server(monkeypatch, tmp_path):
-    """A hand-edited URL-only entry must not tell an active user to switch."""
+def test_patcher_button_names_the_missing_exe(tmp_path):
+    """A hand-edited URL-only entry names what's missing instead of playing dead."""
     half = _context(tmp_path, patcher_exe="")
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug="lazarus", selected_active=True, context=half,
-        listed={"lazarus": {"patcher_url": "https://laz.example.test/p.zip"}},
-    )
+    button = _patcher_button(context=half)
     assert button.disabled is True
     assert "patcher_exe" in button.tooltip.plain
 
@@ -510,7 +482,7 @@ def test_stale_active_server_falls_back_to_bare(fake_app, monkeypatch):
 LAZ = "login.eqemulator.net:5999"
 
 
-def _run_patcher_button(monkeypatch, *, selected_active, context):
+def _run_patcher_button(monkeypatch, *, context):
     """Drive ServersTab._refresh_run_patcher_button against the real shortcuts registry."""
     button = FakeButton()
     tab = SimpleNamespace(
@@ -519,20 +491,18 @@ def _run_patcher_button(monkeypatch, *, selected_active, context):
         query_one=lambda selector, _type=None: button,
     )
     monkeypatch.setattr(tui_servers.shortcuts, "_active_context", lambda: context)
-    monkeypatch.setattr(tui.servers, "active_server_context", lambda env: context)
-    tui_servers.ServersTab._refresh_run_patcher_button(tab, "EMU", selected_active)
+    tui_servers.ServersTab._refresh_run_patcher_button(tab, context)
     return button
 
 
 def test_run_patcher_button_takes_the_resolved_label(monkeypatch, tmp_path):
     """The tab has to re-resolve it like the Shortcuts tab; compose's is only a fallback."""
-    button = _run_patcher_button(
-        monkeypatch, selected_active=True, context=_context(tmp_path, label="PEQ [TAKP]"))
+    button = _run_patcher_button(monkeypatch, context=_context(tmp_path, label="PEQ [TAKP]"))
 
     assert button.label.plain == "PEQ [TAKP] patcher 🩹"
 
 
-def _eqhost_button(monkeypatch, *, selected_active, eq_dir=None, provisioning=False):
+def _eqhost_button(monkeypatch, *, eq_dir=None, provisioning=False):
     """Drive ServersTab._refresh_eqhost_button against the real shortcuts registry."""
     button = FakeButton()
     tab = SimpleNamespace(
@@ -542,7 +512,7 @@ def _eqhost_button(monkeypatch, *, selected_active, eq_dir=None, provisioning=Fa
     # The registry captured _eq_dir at import, so the folder has to arrive through config.
     monkeypatch.setattr(tui_servers.shortcuts.config, "active_settings",
                         lambda: {"EQPATH": eq_dir or ""})
-    tui_servers.ServersTab._refresh_eqhost_button(tab, selected_active)
+    tui_servers.ServersTab._refresh_eqhost_button(tab)
     return button
 
 
@@ -553,45 +523,33 @@ def _with_eqhost(tmp_path, host=LAZ):
     return folder
 
 
-def test_eqhost_button_sends_you_to_switch_first(monkeypatch, tmp_path):
-    """The shortcut always resolves the active server, never the highlighted one."""
-    button = _eqhost_button(
-        monkeypatch, selected_active=False, eq_dir=str(_with_eqhost(tmp_path)))
-    assert button.disabled is True
-    assert "Switch to this server first" in button.tooltip.plain
-
-
 def test_eqhost_button_names_the_login_server_in_use(monkeypatch, tmp_path):
-    button = _eqhost_button(
-        monkeypatch, selected_active=True, eq_dir=str(_with_eqhost(tmp_path)))
+    button = _eqhost_button(monkeypatch, eq_dir=str(_with_eqhost(tmp_path)))
     assert button.disabled is False
     assert LAZ in button.tooltip.plain
 
 
 def test_eqhost_button_is_dead_without_a_file_to_open(monkeypatch, tmp_path):
-    button = _eqhost_button(
-        monkeypatch, selected_active=True, eq_dir=str(_eq_folder(tmp_path)))
+    button = _eqhost_button(monkeypatch, eq_dir=str(_eq_folder(tmp_path)))
     assert button.disabled is True
     assert "No eqhost.txt" in button.tooltip.plain
 
 
 def test_eqhost_button_waits_for_a_folder(monkeypatch, tmp_path):
-    button = _eqhost_button(monkeypatch, selected_active=True, eq_dir=None)
+    button = _eqhost_button(monkeypatch, eq_dir=None)
     assert button.disabled is True
 
 
 def test_eqhost_button_waits_out_a_provision(monkeypatch, tmp_path):
     button = _eqhost_button(
-        monkeypatch, selected_active=True, eq_dir=str(_with_eqhost(tmp_path)),
-        provisioning=True)
+        monkeypatch, eq_dir=str(_with_eqhost(tmp_path)), provisioning=True)
     assert button.disabled is True
 
 
 def test_eqhost_button_keeps_free_text_literal(monkeypatch, tmp_path):
     """A hand-edited Host line reaches the tooltip verbatim, brackets and all."""
     button = _eqhost_button(
-        monkeypatch, selected_active=True,
-        eq_dir=str(_with_eqhost(tmp_path, host="[TAKP]:5999")))
+        monkeypatch, eq_dir=str(_with_eqhost(tmp_path, host="[TAKP]:5999")))
     assert "[TAKP]:5999" in button.tooltip.plain
 
 
@@ -621,7 +579,7 @@ def _laa_folder(tmp_path, *, laa_on=False):
     return _eq(tmp_path, body=_pe_bytes(laa_on=laa_on))
 
 
-def _laa_button(monkeypatch, *, selected_active, context, running=False, enabling=False):
+def _laa_button(*, context, running=False, enabling=False):
     """Drive ServersTab._refresh_laa_button with stand-ins; the real laa gates."""
     button = FakeButton()
     tab = SimpleNamespace(
@@ -629,92 +587,69 @@ def _laa_button(monkeypatch, *, selected_active, context, running=False, enablin
                             provision_running=False),
         query_one=lambda selector, _type=None: button,
     )
-    monkeypatch.setattr(tui.servers, "active_server_context", lambda env: context)
-    tui_servers.ServersTab._refresh_laa_button(tab, "EMU", selected_active)
+    tui_servers.ServersTab._refresh_laa_button(tab, context)
     return button
 
 
-def test_laa_button_sends_you_to_switch_first(monkeypatch, tmp_path):
-    button = _laa_button(
-        monkeypatch, selected_active=False, context=_context(tmp_path))
-    assert button.disabled is True
-    assert "Switch to this server first" in button.tooltip.plain
-
-
-def test_laa_button_waits_for_a_folder(monkeypatch, tmp_path):
-    button = _laa_button(
-        monkeypatch, selected_active=True,
-        context=_context(tmp_path, eqpath=""))
+def test_laa_button_waits_for_a_folder(tmp_path):
+    button = _laa_button(context=_context(tmp_path, eqpath=""))
     assert button.disabled is True
     assert "folder first" in button.tooltip.plain
 
 
-def test_laa_button_names_a_folder_that_isnt_everquest(monkeypatch, tmp_path):
+def test_laa_button_names_a_folder_that_isnt_everquest(tmp_path):
     plain = tmp_path / "not-eq"
     plain.mkdir()
-    button = _laa_button(
-        monkeypatch, selected_active=True,
-        context=_context(tmp_path, eqpath=str(plain)))
+    button = _laa_button(context=_context(tmp_path, eqpath=str(plain)))
     assert button.disabled is True
     assert "eqgame.exe" in button.tooltip.plain
 
 
-def test_laa_button_blocks_on_an_exe_that_isnt_a_program(monkeypatch, tmp_path):
-    button = _laa_button(
-        monkeypatch, selected_active=True,
-        context=_context(tmp_path, eqpath=str(_eq_folder(tmp_path))))
+def test_laa_button_blocks_on_an_exe_that_isnt_a_program(tmp_path):
+    button = _laa_button(context=_context(tmp_path, eqpath=str(_eq_folder(tmp_path))))
     assert button.disabled is True
     assert "Windows program" in button.tooltip.plain
 
 
-def test_laa_button_settles_when_the_flag_is_already_on(monkeypatch, tmp_path):
+def test_laa_button_settles_when_the_flag_is_already_on(tmp_path):
     folder = _laa_folder(tmp_path, laa_on=True)
-    button = _laa_button(
-        monkeypatch, selected_active=True,
-        context=_context(tmp_path, eqpath=str(folder)))
+    button = _laa_button(context=_context(tmp_path, eqpath=str(folder)))
     assert button.disabled is True
     assert "already use 4GB" in button.tooltip.plain
 
 
-def test_laa_button_offers_the_change(monkeypatch, tmp_path):
+def test_laa_button_offers_the_change(tmp_path):
     folder = _laa_folder(tmp_path)
-    button = _laa_button(
-        monkeypatch, selected_active=True,
-        context=_context(tmp_path, eqpath=str(folder)))
+    button = _laa_button(context=_context(tmp_path, eqpath=str(folder)))
     assert button.disabled is False
     assert "4GB" in button.tooltip.plain and "eqgame.exe.bak" in button.tooltip.plain
 
 
-def test_laa_button_works_for_the_bare_setup(monkeypatch, tmp_path):
+def test_laa_button_works_for_the_bare_setup(tmp_path):
     folder = _laa_folder(tmp_path)
     context = tui.servers.ServerContext(label="Any emu server", eqpath=str(folder))
-    button = _laa_button(monkeypatch, selected_active=True, context=context)
+    button = _laa_button(context=context)
     assert button.disabled is False
 
 
-def test_laa_button_waits_out_a_patcher_download(monkeypatch, tmp_path):
+def test_laa_button_waits_out_a_patcher_download(tmp_path):
     """The patcher payload can carry a fresh eqgame.exe."""
     folder = _laa_folder(tmp_path)
-    button = _laa_button(
-        monkeypatch, selected_active=True,
-        context=_context(tmp_path, eqpath=str(folder)), running=True)
+    button = _laa_button(context=_context(tmp_path, eqpath=str(folder)), running=True)
     assert button.disabled is True
     assert "patcher download" in button.tooltip.plain
 
 
-def test_laa_button_waits_out_its_own_run(monkeypatch, tmp_path):
+def test_laa_button_waits_out_its_own_run(tmp_path):
     folder = _laa_folder(tmp_path)
-    button = _laa_button(
-        monkeypatch, selected_active=True,
-        context=_context(tmp_path, eqpath=str(folder)), enabling=True)
+    button = _laa_button(context=_context(tmp_path, eqpath=str(folder)), enabling=True)
     assert button.disabled is True
     assert "Setting the 4GB flag" in button.tooltip.plain
 
 
-def test_laa_button_keeps_free_text_literal(monkeypatch, tmp_path):
+def test_laa_button_keeps_free_text_literal(tmp_path):
     folder = _laa_folder(tmp_path)
     button = _laa_button(
-        monkeypatch, selected_active=True,
         context=_context(tmp_path, eqpath=str(folder), label="PEQ [TAKP]"))
     assert "PEQ [TAKP]" in button.tooltip.plain
 
@@ -762,11 +697,9 @@ def test_enable_active_laa_declines_when_the_flag_is_on(monkeypatch, tmp_path):
     assert runs == []
 
 
-def test_patcher_button_waits_out_a_laa_change(monkeypatch, tmp_path):
+def test_patcher_button_waits_out_a_laa_change(tmp_path):
     """Mirror of the 4GB button's courtesy: both rewrite eqgame.exe."""
-    button = _patcher_button(
-        monkeypatch, tmp_path, slug="lazarus", selected_active=True,
-        context=_context(tmp_path), enabling=True)
+    button = _patcher_button(context=_context(tmp_path), enabling=True)
     assert button.disabled is True
     assert "4GB memory" in button.tooltip.plain
 

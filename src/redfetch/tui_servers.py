@@ -65,72 +65,76 @@ class ServersTab(ScrollableContainer):
                     variant="default",
                     tooltip="Hide this warning for good.",
                 )
-            yield OptionList(id="server_list")
-            with Horizontal(id="server_actions"):
-                yield Button(
-                    "Add",
-                    id="server_add",
-                    variant="default",
-                    tooltip="Set up a known emu server, or add your own.",
-                )
+            with Vertical(id="server_browser"):
+                yield OptionList(id="server_list")
+                # Compact toolbar for the highlighted row
+                with Horizontal(id="server_actions"):
+                    yield Button(
+                        "＋ Add",
+                        id="server_add",
+                        compact=True,
+                        tooltip="Set up a known emu server, or add your own.",
+                    )
+                    yield Button(
+                        "✎ Rename",
+                        id="server_rename",
+                        compact=True,
+                        tooltip="Rename a custom server. Known server names come from redfetch.",
+                    )
+                    yield Button(
+                        "✕ Remove",
+                        id="server_delete",
+                        compact=True,
+                        tooltip="Remove a custom server from settings or reset a known one back to available. "
+                                "The EverQuest folder is not deleted.",
+                    )
+            with Vertical(id="active_server_panel"):
                 label = servers.active_server_context(self.app.current_env).label
-                yield Button(
-                    "Get patcher",
-                    id="server_patcher",
-                    variant="default",
-                    tooltip=Content(f"Download the {label} patcher into its EverQuest folder."),
-                )
-                yield Button(
-                    PATCHER_SHORTCUT.label,
-                    id="server_run_patcher",
-                    variant="default",
-                    tooltip=PATCHER_SHORTCUT.tooltip,
-                )
-                yield Button(
-                    EQHOST_SHORTCUT.label,
-                    id="server_eqhost",
-                    variant="default",
-                    tooltip=EQHOST_SHORTCUT.tooltip,
-                )
-                yield Button(
-                    "Allow 4GB Memory",
-                    id="server_laa",
-                    variant="default",
-                    tooltip="Let eqgame.exe use up to 4GB of memory.",
-                )
-                yield Button(
-                    "Rename",
-                    id="server_rename",
-                    variant="default",
-                    tooltip="Rename a custom server. Known server names come from redfetch.",
-                )
-                yield Button(
-                    "Remove",
-                    id="server_delete",
-                    variant="error",
-                    tooltip="Remove a custom server from settings or reset a known one back to available. "
-                            "The EverQuest folder is not deleted.",
-                )
-            # Only visible during a provision, which is the one action long enough to watch.
-            with Horizontal(id="server_provision_row", classes="hidden"):
-                # markup=False: the labels quote server names and paths.
-                yield Label("", id="provision_status", markup=False)
-                yield ProgressBar(total=1.0, show_eta=False, id="provision_progress")
-                yield Button("Cancel", id="provision_cancel", variant="error")
-            # The same setting as the Settings tab's copy: the active server's folder.
-            with Horizontal(id="server_eq_path_row"):
-                yield Button(
-                    "EverQuest Folder",
-                    id="server_select_eq_path",
-                    variant="default",
-                    tooltip="The active server's EverQuest directory, the one with eqgame.exe.",
-                )
-                yield Input(
-                    value=config.settings.from_env(self.app.current_env).EQPATH or "",
-                    placeholder=f"{input_verb} the active server's EverQuest directory",
-                    id="server_eq_path_input",
-                    tooltip="The active server's EverQuest directory, the one with eqgame.exe.",
-                )
+                with Horizontal(id="server_tools_row"):
+                    yield Button(
+                        "Get patcher",
+                        id="server_patcher",
+                        variant="default",
+                        tooltip=Content(f"Download the {label} patcher into its EverQuest folder."),
+                    )
+                    yield Button(
+                        PATCHER_SHORTCUT.label,
+                        id="server_run_patcher",
+                        variant="default",
+                        tooltip=PATCHER_SHORTCUT.tooltip,
+                    )
+                    yield Button(
+                        EQHOST_SHORTCUT.label,
+                        id="server_eqhost",
+                        variant="default",
+                        tooltip=EQHOST_SHORTCUT.tooltip,
+                    )
+                    yield Button(
+                        "Allow 4GB Memory",
+                        id="server_laa",
+                        variant="default",
+                        tooltip="Let eqgame.exe use up to 4GB of memory.",
+                    )
+                # Only visible during a provision, which is the one action long enough to watch.
+                with Horizontal(id="server_provision_row", classes="hidden"):
+                    # markup=False: the labels quote server names and paths.
+                    yield Label("", id="provision_status", markup=False)
+                    yield ProgressBar(total=1.0, show_eta=False, id="provision_progress")
+                    yield Button("Cancel", id="provision_cancel", variant="error")
+                # The same setting as the Settings tab's copy: the active server's folder.
+                with Horizontal(id="server_eq_path_row"):
+                    yield Button(
+                        "EverQuest Folder",
+                        id="server_select_eq_path",
+                        variant="default",
+                        tooltip="The active server's EverQuest directory, the one with eqgame.exe.",
+                    )
+                    yield Input(
+                        value=config.settings.from_env(self.app.current_env).EQPATH or "",
+                        placeholder=f"{input_verb} the active server's EverQuest directory",
+                        id="server_eq_path_input",
+                        tooltip="The active server's EverQuest directory, the one with eqgame.exe.",
+                    )
 
     def on_mount(self) -> None:
         for attr in ("is_updating", "interface_running", "current_env", "active_server",
@@ -212,11 +216,9 @@ class ServersTab(ScrollableContainer):
     def _refresh_buttons(self) -> None:
         env = self.app.current_env
         slug = self._highlighted_slug()
-        active = servers.get_active_server(env)
         bare = slug == BARE_SETUP_ID
         known = bool(slug) and not bare and servers.is_known_server(slug, env)
         configured = bool(slug) and not bare and servers.is_server_configured(slug, env)
-        selected_active = slug == active or (bare and active is None)
         # A provision owns the tab, cancel is the only control left alive
         provisioning = self.app.provision_running
         for widget_id in ("#server_list", "#server_add", "#server_select_eq_path",
@@ -230,16 +232,21 @@ class ServersTab(ScrollableContainer):
         self.query_one("#server_delete", Button).disabled = (
             provisioning or not slug or bare or (known and not configured)
         )
-        self._refresh_patcher_button(env, slug, selected_active)
-        self._refresh_run_patcher_button(env, selected_active)
-        self._refresh_eqhost_button(selected_active)
-        self._refresh_laa_button(env, selected_active)
+        # The panel is the active server's, whichever row is highlighted.
+        context = servers.active_server_context(env)
+        # Text(), not markup for server names like "PEQ [TAKP]"
+        self.query_one("#active_server_panel").border_title = Text(
+            f"Active server: {context.label}"
+        )
+        self._refresh_patcher_button(context)
+        self._refresh_run_patcher_button(context)
+        self._refresh_eqhost_button()
+        self._refresh_laa_button(context)
 
-    def _refresh_patcher_button(self, env: str, slug: str | None, selected_active: bool) -> None:
+    def _refresh_patcher_button(self, context: servers.ServerContext) -> None:
         """Enable the patcher button only when the active server has a patcher and it isn't already installed or downloading."""
         button = self.query_one("#server_patcher", Button)
-        context = servers.active_server_context(env)
-        if selected_active and patcher.has_patcher(context):
+        if patcher.has_patcher(context):
             # Content(), not escape()
             label = context.label
             downloading = self.app.patcher_install_running
@@ -256,25 +263,17 @@ class ServersTab(ScrollableContainer):
                 button.tooltip = Content(f"Download the {label} patcher into its EverQuest folder.")
             return
         button.disabled = True
-        entry = (servers.list_servers(env).get(slug) or {}) if slug else {}
-        if not entry.get("patcher_url"):
-            button.tooltip = "This server has no patcher, according to my settings.local.toml"
-        elif selected_active:
+        if context.patcher_url:
             # Reachable only by hand-editing: a link with no file name to install or run.
             button.tooltip = "This server's patcher entry needs a patcher_exe file name in settings.local.toml."
         else:
-            button.tooltip = "Switch to this server first, then download its patcher."
+            button.tooltip = "This server has no patcher, according to my settings.local.toml"
 
-    def _refresh_run_patcher_button(self, env: str, selected_active: bool) -> None:
+    def _refresh_run_patcher_button(self, context: servers.ServerContext) -> None:
         """Run the active server's patcher, once it's on disk."""
         button = self.query_one("#server_run_patcher", Button)
         # Like the Shortcuts tab, the label comes from settings.local.toml
         button.label = Content(shortcuts.runnable_label(PATCHER_SHORTCUT))
-        if not selected_active:
-            # The runnable always resolves the active server's folder, never the highlighted one.
-            button.disabled = True
-            button.tooltip = "Switch to this server first, then run its patcher."
-            return
         if not shortcuts.runnable_visible(PATCHER_SHORTCUT):
             button.disabled = True
             button.tooltip = "This server has no patcher, according to my settings.local.toml"
@@ -288,16 +287,11 @@ class ServersTab(ScrollableContainer):
             or self.app.laa_enable_running
         )
         # Content(), not escape() since the label comes from settings
-        button.tooltip = Content(f"Run the {servers.active_server_context(env).label} patcher.")
+        button.tooltip = Content(f"Run the {context.label} patcher.")
 
-    def _refresh_eqhost_button(self, selected_active: bool) -> None:
+    def _refresh_eqhost_button(self) -> None:
         """Open the active server's eqhost.txt, naming the login server it holds."""
         button = self.query_one("#server_eqhost", Button)
-        if not selected_active:
-            # The shortcut always resolves the active server's folder, never the highlighted one.
-            button.disabled = True
-            button.tooltip = "Switch to this server first, then open its eqhost.txt."
-            return
         if not shortcuts.openable_available(EQHOST_SHORTCUT):
             button.disabled = True
             button.tooltip = "No eqhost.txt in this server's EverQuest folder."
@@ -306,38 +300,33 @@ class ServersTab(ScrollableContainer):
         # Content(), not escape(): the host is read from a file the user can hand-edit.
         button.tooltip = Content(shortcuts.openable_tooltip(EQHOST_SHORTCUT))
 
-    def _refresh_laa_button(self, env: str, selected_active: bool) -> None:
+    def _refresh_laa_button(self, context: servers.ServerContext) -> None:
         """Enable the 4GB button only when eqgame lacks the flag."""
         button = self.query_one("#server_laa", Button)
-        if selected_active:
-            # No per-server key: the folder alone decides.
-            context = servers.active_server_context(env)
-            info = laa.status(context.eqpath)
-            enabling = self.app.laa_enable_running
-            downloading = self.app.patcher_install_running
-            button.disabled = (
-                enabling or downloading or self.app.provision_running
-                or info.state is not laa.LaaState.OFF
+        # No per-server key: the folder alone decides.
+        info = laa.status(context.eqpath)
+        enabling = self.app.laa_enable_running
+        downloading = self.app.patcher_install_running
+        button.disabled = (
+            enabling or downloading or self.app.provision_running
+            or info.state is not laa.LaaState.OFF
+        )
+        if enabling:
+            button.tooltip = "Setting the 4GB flag on eqgame.exe..."
+        elif downloading:
+            # The patcher zip might carry an exe that already has the flag.
+            button.tooltip = "Wait for the patcher download to finish."
+        elif info.state is laa.LaaState.HIDDEN:
+            button.tooltip = "Pick this server's EverQuest folder first, on the Settings tab."
+        elif info.state is laa.LaaState.BLOCKED:
+            button.tooltip = Content(info.problem)
+        elif info.state is laa.LaaState.ON:
+            button.tooltip = "eqgame.exe can already use 4GB of memory."
+        else:
+            button.tooltip = Content(
+                f"Let {context.label}'s eqgame.exe use up to 4GB of memory. "
+                f"The original is kept as {laa.BACKUP_NAME}."
             )
-            if enabling:
-                button.tooltip = "Setting the 4GB flag on eqgame.exe..."
-            elif downloading:
-                # The patcher zip might carry an exe that already has the flag.
-                button.tooltip = "Wait for the patcher download to finish."
-            elif info.state is laa.LaaState.HIDDEN:
-                button.tooltip = "Pick this server's EverQuest folder first, on the Settings tab."
-            elif info.state is laa.LaaState.BLOCKED:
-                button.tooltip = Content(info.problem)
-            elif info.state is laa.LaaState.ON:
-                button.tooltip = "eqgame.exe can already use 4GB of memory."
-            else:
-                button.tooltip = Content(
-                    f"Let {context.label}'s eqgame.exe use up to 4GB of memory. "
-                    f"The original is kept as {laa.BACKUP_NAME}."
-                )
-            return
-        button.disabled = True
-        button.tooltip = "Switch to this server first, then allow its 4GB of memory."
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         self._refresh_buttons()

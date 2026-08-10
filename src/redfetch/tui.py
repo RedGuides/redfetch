@@ -114,7 +114,7 @@ class MainScreen(Screen):
         self.query_one("#executables_grid").border_title = "Executables ⚡"
         self.query_one("#folders_grid").border_title = "Folders 📁"
         self.query_one("#files_grid").border_title = "Files 📎"
-        self.query_one("#server_list").border_title = "Emu servers"
+        self.query_one("#server_browser").border_title = "Emu servers"
         # The environment watcher does not run at mount.
         self.app.apply_servers_tab_visibility()
         # Initial widget state is applied by each tab's own on_mount watch wiring (init=True).
@@ -506,8 +506,8 @@ class Redfetch(App):
             callback=lambda path: self.update_selected_directory(path, input_id)
         )
 
-    def select_clean_source(self, input_id: str) -> None:
-        """Pick a clean RoF2 archive. A folder source is typed, or picked in the Add dialog."""
+    def select_clean_source(self, input_id: str, *, folder: bool = False) -> None:
+        """Pick a clean RoF2 source: an archive, folder or disc image."""
         main_screen = self._get_main_screen()
         if not main_screen:
             return
@@ -520,9 +520,11 @@ class Redfetch(App):
             input_widget.value = str(path)
             self.handle_input_update(input_id, str(path))
 
-        self.push_screen(
-            FileOpen(location=start, filters=clean_source_filters()), callback=picked
+        picker = (
+            SelectDirectory(location=start) if folder
+            else FileOpen(location=start, filters=clean_source_filters())
         )
+        self.push_screen(picker, callback=picked)
 
     def update_selected_directory(self, selected_path: Path | None, input_id: str) -> None:
         main_screen = self._get_main_screen()

@@ -25,6 +25,8 @@ FIXTURE = {
     "clientfolder/eqclient.ini": b"[Defaults]\n",
     "clientfolder/uifiles/default/window.xml": b"<XML/>",
 }
+# FIXTURE as the game folder itself — the only shape a tree source may take.
+GAME_FILES = {member.removeprefix("clientfolder/"): data for member, data in FIXTURE.items()}
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -199,15 +201,16 @@ def test_discovery_refuses_when_there_is_no_eqgame(tmp_path, make):
         _plan(source)
 
 
-@pytest.mark.parametrize("make", [_zip, _iso, _tree], ids=["zip", "iso", "tree"])
+@pytest.mark.parametrize("make", [_zip, _iso], ids=["zip", "iso"])
 def test_discovery_refuses_two_roots_and_lists_them(tmp_path, make):
+    """Archives only: a tree source isn't searched, so it can't have two roots."""
     source = make(tmp_path, {"a/eqgame.exe": EQGAME, "b/eqgame.exe": EQGAME})
     with pytest.raises(provision.ProvisionError) as caught:
         _plan(source)
     message = str(caught.value)
     assert "more than one EverQuest folder" in message
-    listed = message.splitlines()[-2:]  # a zip lists members, a tree lists full paths
-    assert sorted(Path(line.strip()).name for line in listed) == ["a", "b"]
+    listed = message.splitlines()[-2:]
+    assert sorted(line.strip() for line in listed) == ["a", "b"]
 
 
 def test_zip_discovery_reads_backslash_members(tmp_path):
@@ -243,11 +246,19 @@ def test_an_unsupported_compression_method_is_refused_at_scan_time(tmp_path):
         _plan(source)
 
 
-def test_tree_discovery_finds_the_nested_root(tmp_path):
-    source = _tree(tmp_path)
+def test_tree_discovery_takes_the_folder_itself(tmp_path):
+    source = _tree(tmp_path, GAME_FILES)
     plan = _plan(source)
-    assert plan.root == source / "clientfolder"
-    assert plan.file_count == len(FIXTURE)
+    assert plan.root == source
+    assert plan.file_count == len(GAME_FILES)
+    assert plan.total_bytes == sum(len(data) for data in GAME_FILES.values())
+
+
+def test_tree_discovery_never_searches_subfolders(tmp_path):
+    """Pointing at something broad like C:\\Users must refuse instantly, not walk it."""
+    source = _tree(tmp_path)  # eqgame.exe sits one level down, in clientfolder/
+    with pytest.raises(provision.ProvisionError, match="folder that holds"):
+        _plan(source)
 
 
 def test_iso_discovery_finds_the_nested_root(tmp_path):
@@ -421,8 +432,8 @@ def test_the_copy_leaves_everything_outside_the_root_behind(tmp_path, make):
 
 
 def test_tree_route_leaves_a_read_only_source_alone_and_copies_writable(tmp_path):
-    source = _tree(tmp_path)
-    read_only = source / "clientfolder" / "eqclient.ini"
+    source = _tree(tmp_path, GAME_FILES)
+    read_only = source / "eqclient.ini"
     os.chmod(read_only, stat.S_IREAD)
     destination = tmp_path / "new"
     try:

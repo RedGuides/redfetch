@@ -231,6 +231,17 @@ Label {
     border: round $secondary-background;
     min-width: 50;
 }
+
+/* Both pickers share one grid cell, so they read as a single labeled row. */
+#clean_source_row {
+    width: auto;
+    height: auto;
+}
+
+#clean_source_row Button {
+    width: auto;
+    margin-right: 1;
+}
 #settings_grid {
     layout: grid;
     grid-size: 2;
@@ -391,21 +402,49 @@ Label {
     height: 3;
 }
 
+/* The list and its toolbar share one box */
+#server_browser {
+    height: auto;
+    margin-bottom: 1;
+    border: round $secondary-background;
+    border-title-color: $text-secondary;
+    border-title-style: bold;
+}
+
 #server_list {
     height: auto;
     max-height: 20;
-    margin-bottom: 1;
+    padding: 0 1;
+    border: none;
+}
+
+#server_actions {
+    height: auto;
+    padding: 0 1;
+    background: $boost;
+}
+
+#server_actions Button {
+    margin-right: 2;
+}
+
+#server_actions #server_delete {
+    color: $text-error;
+}
+
+#active_server_panel {
+    height: auto;
     padding: 0 1;
     border: round $secondary-background;
     border-title-color: $text-secondary;
     border-title-style: bold;
 }
 
-#server_actions {
+#server_tools_row {
     height: auto;
 }
 
-#server_actions Button {
+#server_tools_row Button {
     margin-right: 2;
     min-width: 12;
 }

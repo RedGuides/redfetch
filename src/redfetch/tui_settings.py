@@ -162,12 +162,20 @@ class SettingsTab(ScrollableContainer):
             clean_source_tooltip = (
                 "Your untouched copy of EverQuest RoF2. Can be a zip, an ISO, a folder, or DVD drive. "
             )
-            yield Button(
-                "Clean RoF2 Copy",
-                id="select_clean_source",
-                variant="default",
-                tooltip=clean_source_tooltip,
-            )
+            # Two pickers, since the source can be file or folder.
+            with Horizontal(id="clean_source_row"):
+                yield Button(
+                    "RoF2 File",
+                    id="select_clean_source_file",
+                    variant="default",
+                    tooltip=clean_source_tooltip,
+                )
+                yield Button(
+                    "RoF2 Folder",
+                    id="select_clean_source_folder",
+                    variant="default",
+                    tooltip=clean_source_tooltip,
+                )
             yield Input(
                 value=provision.clean_source(),
                 placeholder=f"{input_verb} a clean RoF2 archive or folder",
@@ -284,7 +292,7 @@ class SettingsTab(ScrollableContainer):
 
         # Only emu clients provision. Both cells, or the grid's later rows shift.
         provisions = servers.is_multi_server(app.current_env)
-        self.query_one("#select_clean_source", Button).display = provisions
+        self.query_one("#clean_source_row").display = provisions
         clean_source_input = self.query_one("#clean_source_input", Input)
         clean_source_input.display = provisions
         clean_source_input.value = provision.clean_source()
@@ -408,9 +416,13 @@ class SettingsTab(ScrollableContainer):
     def handle_select_vvmq_path_pressed(self, event: Button.Pressed) -> None:
         self.app.select_directory("vvmq_path_input")
 
-    @on(Button.Pressed, "#select_clean_source")
-    def handle_select_clean_source_pressed(self, event: Button.Pressed) -> None:
+    @on(Button.Pressed, "#select_clean_source_file")
+    def handle_select_clean_source_file_pressed(self, event: Button.Pressed) -> None:
         self.app.select_clean_source("clean_source_input")
+
+    @on(Button.Pressed, "#select_clean_source_folder")
+    def handle_select_clean_source_folder_pressed(self, event: Button.Pressed) -> None:
+        self.app.select_clean_source("clean_source_input", folder=True)
 
     @on(Button.Pressed, "#reset_downloads")
     def handle_reset_downloads_pressed(self, event: Button.Pressed) -> None:
