@@ -11,9 +11,11 @@ from types import SimpleNamespace
 import pytest
 from rich.text import Text
 from textual.content import Content
+from textual.widgets.option_list import Option
 
 from redfetch import config
 from redfetch import tui_servers
+from redfetch import tui_settings
 from redfetch import tui_shortcuts
 from redfetch import tui_widgets
 
@@ -508,6 +510,28 @@ def test_stale_active_server_falls_back_to_bare(fake_app, monkeypatch):
 LAZ = "login.eqemulator.net:5999"
 
 
+def _run_patcher_button(monkeypatch, *, selected_active, context):
+    """Drive ServersTab._refresh_run_patcher_button against the real shortcuts registry."""
+    button = FakeButton()
+    tab = SimpleNamespace(
+        app=SimpleNamespace(provision_running=False, patcher_install_running=False,
+                            laa_enable_running=False),
+        query_one=lambda selector, _type=None: button,
+    )
+    monkeypatch.setattr(tui_servers.shortcuts, "_active_context", lambda: context)
+    monkeypatch.setattr(tui.servers, "active_server_context", lambda env: context)
+    tui_servers.ServersTab._refresh_run_patcher_button(tab, "EMU", selected_active)
+    return button
+
+
+def test_run_patcher_button_takes_the_resolved_label(monkeypatch, tmp_path):
+    """The tab has to re-resolve it like the Shortcuts tab; compose's is only a fallback."""
+    button = _run_patcher_button(
+        monkeypatch, selected_active=True, context=_context(tmp_path, label="PEQ [TAKP]"))
+
+    assert button.label.plain == "PEQ [TAKP] patcher 🩹"
+
+
 def _eqhost_button(monkeypatch, *, selected_active, eq_dir=None, provisioning=False):
     """Drive ServersTab._refresh_eqhost_button against the real shortcuts registry."""
     button = FakeButton()
@@ -978,3 +1002,80 @@ def test_cancel_greys_once_the_folder_has_landed(monkeypatch):
     tui_servers.ServersTab._recompute(tab)
 
     assert widgets["#provision_cancel"].disabled is True
+
+
+# --- which row the server list opens on ---
+
+
+class FakeOptionList:
+    """The slice of OptionList _rebuild_list drives."""
+
+    def __init__(self, options=(), highlighted=None):
+        self.options = list(options)
+        self.highlighted = highlighted
+
+    def clear_options(self):
+        self.options.clear()
+        self.highlighted = None
+
+    def add_option(self, option):
+        self.options.append(option)
+
+    def get_option_at_index(self, index):
+        return self.options[index]
+
+
+def _rebuild(monkeypatch, *, active, option_list=None):
+    listed = {
+        "aporia": {"label": "Aporia", "eqpath": "D:/EQ-Ap"},
+        "lazarus": {"label": "Project Lazarus", "eqpath": "D:/EQ-Laz"},
+    }
+    monkeypatch.setattr(tui.servers, "list_servers", lambda env: listed)
+    monkeypatch.setattr(tui.servers, "get_active_server", lambda env: active)
+    monkeypatch.setattr(tui.servers, "is_server_configured", lambda slug, env: True)
+    monkeypatch.setattr(tui.servers, "generic_eqpath", lambda env: "D:/EQ")
+    option_list = option_list if option_list is not None else FakeOptionList()
+    tab = SimpleNamespace(
+        app=SimpleNamespace(current_env="EMU", eq_path="D:/EQ-Laz"),
+        query_one=lambda selector, _type=None: option_list,
+    )
+    tab._highlighted_slug = lambda: tui_servers.ServersTab._highlighted_slug(tab)
+    tui_servers.ServersTab._rebuild_list(tab)
+    return option_list
+
+
+def test_first_build_highlights_the_active_server(monkeypatch):
+    """Nothing to preserve yet, so the list opens on the server you're on, not row 0."""
+    option_list = _rebuild(monkeypatch, active="lazarus")
+
+    assert option_list.get_option_at_index(option_list.highlighted).id == "lazarus"
+
+
+def test_first_build_lands_on_the_bare_setup_when_nothing_is_active(monkeypatch):
+    option_list = _rebuild(monkeypatch, active=None)
+
+    assert option_list.get_option_at_index(option_list.highlighted).id == tui.BARE_SETUP_ID
+
+
+def test_settings_recompute_waits_out_a_recompose():
+    """Resetting the active server queues a pass that can land while the tab is empty --
+    a recompose removes its children first, and the screen's pump runs meanwhile."""
+    queued = []
+    tab = SimpleNamespace(
+        app=SimpleNamespace(active_server=None),
+        query=lambda selector: [],
+        call_after_refresh=queued.append,
+    )
+    tab._recompute = lambda: None
+
+    tui_settings.SettingsTab._recompute(tab)  # NoMatches on #vvmq_path_input before
+
+    assert queued == [tab._recompute]
+
+
+def test_rebuild_keeps_the_row_you_moved_to(monkeypatch):
+    """A refresh mid-browse can't yank the highlight back to the active server."""
+    browsing = FakeOptionList([Option(Text("Aporia"), id="aporia")], highlighted=0)
+    option_list = _rebuild(monkeypatch, active="lazarus", option_list=browsing)
+
+    assert option_list.get_option_at_index(option_list.highlighted).id == "aporia"

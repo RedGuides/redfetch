@@ -35,6 +35,7 @@ from redfetch.tui_widgets import BARE_SETUP_ID, clean_source_filters
 
 # The Servers tab surfaces the Shortcuts tab's eqhost.txt entry, rather than its own.
 EQHOST_SHORTCUT = shortcuts.find_openable("eqhost")
+PATCHER_SHORTCUT = shortcuts.find_runnable("patcher")
 
 
 class ProvisionProgress(Message):
@@ -80,6 +81,12 @@ class ServersTab(ScrollableContainer):
                     tooltip=Content(f"Download the {label} patcher into its EverQuest folder."),
                 )
                 yield Button(
+                    PATCHER_SHORTCUT.label,
+                    id="server_run_patcher",
+                    variant="default",
+                    tooltip=PATCHER_SHORTCUT.tooltip,
+                )
+                yield Button(
                     EQHOST_SHORTCUT.label,
                     id="server_eqhost",
                     variant="default",
@@ -98,10 +105,11 @@ class ServersTab(ScrollableContainer):
                     tooltip="Rename a custom server. Known server names come from redfetch.",
                 )
                 yield Button(
-                    "Delete",
+                    "Remove",
                     id="server_delete",
                     variant="error",
-                    tooltip="Remove a custom server, or reset a known one back to available.",
+                    tooltip="Remove a custom server from settings or reset a known one back to available. "
+                            "The EverQuest folder is not deleted.",
                 )
             # Only visible during a provision, which is the one action long enough to watch.
             with Horizontal(id="server_provision_row", classes="hidden"):
@@ -197,8 +205,9 @@ class ServersTab(ScrollableContainer):
             option_list.add_option(Option(Text.from_markup(prompt), id=slug))
         if previous in slugs:
             option_list.highlighted = slugs.index(previous)
-        elif slugs:
-            option_list.highlighted = 0
+        else:
+            # highlight the active server on first view
+            option_list.highlighted = slugs.index(active) if active in slugs else 0
 
     def _refresh_buttons(self) -> None:
         env = self.app.current_env
@@ -222,6 +231,7 @@ class ServersTab(ScrollableContainer):
             provisioning or not slug or bare or (known and not configured)
         )
         self._refresh_patcher_button(env, slug, selected_active)
+        self._refresh_run_patcher_button(env, selected_active)
         self._refresh_eqhost_button(selected_active)
         self._refresh_laa_button(env, selected_active)
 
@@ -254,6 +264,31 @@ class ServersTab(ScrollableContainer):
             button.tooltip = "This server's patcher entry needs a patcher_exe file name in settings.local.toml."
         else:
             button.tooltip = "Switch to this server first, then download its patcher."
+
+    def _refresh_run_patcher_button(self, env: str, selected_active: bool) -> None:
+        """Run the active server's patcher, once it's on disk."""
+        button = self.query_one("#server_run_patcher", Button)
+        # Like the Shortcuts tab, the label comes from settings.local.toml
+        button.label = Content(shortcuts.runnable_label(PATCHER_SHORTCUT))
+        if not selected_active:
+            # The runnable always resolves the active server's folder, never the highlighted one.
+            button.disabled = True
+            button.tooltip = "Switch to this server first, then run its patcher."
+            return
+        if not shortcuts.runnable_visible(PATCHER_SHORTCUT):
+            button.disabled = True
+            button.tooltip = "This server has no patcher, according to my settings.local.toml"
+            return
+        if not shortcuts.runnable_available(PATCHER_SHORTCUT):
+            button.disabled = True
+            button.tooltip = "Get the patcher first, then run it."
+            return
+        button.disabled = (
+            self.app.provision_running or self.app.patcher_install_running
+            or self.app.laa_enable_running
+        )
+        # Content(), not escape() since the label comes from settings
+        button.tooltip = Content(f"Run the {servers.active_server_context(env).label} patcher.")
 
     def _refresh_eqhost_button(self, selected_active: bool) -> None:
         """Open the active server's eqhost.txt, naming the login server it holds."""
@@ -384,6 +419,10 @@ class ServersTab(ScrollableContainer):
             # Greys out this button and Set Login Server until the worker's recompute
             self._refresh_buttons()
 
+    @on(Button.Pressed, "#server_run_patcher")
+    def handle_run_patcher_pressed(self, event: Button.Pressed) -> None:
+        self.app.run_target(PATCHER_SHORTCUT)
+
     @on(Button.Pressed, "#server_eqhost")
     def handle_eqhost_pressed(self, event: Button.Pressed) -> None:
         self.app.open_target(EQHOST_SHORTCUT)
@@ -484,11 +523,6 @@ class ServersTab(ScrollableContainer):
         )
 
 
-def source_note() -> Content:
-    """The sourcing note."""
-    return Content(f"{provision.NO_SOURCE_MESSAGE} {provision.SOURCE_NOTE_DETAIL}")
-
-
 class AddServerScreen(ModalScreen[dict | None]):
     """Collect a server: an existing EverQuest folder, or a new one from a clean RoF2 copy."""
 
@@ -534,7 +568,6 @@ class AddServerScreen(ModalScreen[dict | None]):
                                 id="add_source")
                     yield Button("File…", id="add_source_file", variant="default")
                     yield Button("Folder…", id="add_source_folder", variant="default")
-                yield Label(source_note(), id="add_source_note")
                 # _sync_mode names it: the same box is a destination or an existing folder.
                 yield Label("", id="add_folder_label")
                 with Horizontal(id="add_folder_row"):
@@ -577,8 +610,6 @@ class AddServerScreen(ModalScreen[dict | None]):
             self.query_one(widget_id, Input).display = custom
         for widget_id in ("#add_source_label", "#add_source_row"):
             self.query_one(widget_id).display = provisioning
-        needs_source = provisioning and not provision.clean_source()
-        self.query_one("#add_source_note", Label).display = needs_source
         # Named up front, so the whole chain is the user's own choice.
         self.query_one("#add_provision_steps", Label).display = provisioning
         # A folder that doesn't exist yet is nothing to browse to.
@@ -812,17 +843,20 @@ class ConfirmDeleteServerScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         if self._known:
             message = (
-                f"Reset {self._label}? Your folder and map choices for it are removed, "
-                "and it goes back to the available list."
+                f"Reset {self._label}? redfetch forgets your folder and map choices for it, "
+                "and it goes back to the available list. Nothing on disk is deleted."
             )
         else:
-            message = f"Delete {self._label}? Its settings are removed from settings.local.toml."
+            message = (
+                f"Remove {self._label}? Its settings are removed from settings.local.toml. "
+                "Nothing on disk is deleted."
+            )
         if self._is_active:
             message += f"\n\nThis is your active server, so you'll switch to {self._lands_on}."
         with Vertical(id="server_dialog"):
             yield Label(message, id="server_dialog_title", markup=False)
             with Horizontal(id="server_dialog_buttons"):
-                yield Button("Reset" if self._known else "Delete", id="delete_confirm", variant="error")
+                yield Button("Reset" if self._known else "Remove", id="delete_confirm", variant="error")
                 yield Button("Cancel", id="delete_cancel", variant="default")
 
     @on(Button.Pressed, "#delete_confirm")
