@@ -10,6 +10,7 @@ from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ItemGrid, ScrollableContainer
 from textual.content import Content
+from textual.reactive import reactive
 from textual.widgets import Button, Checkbox, Input, Label, RadioSet, Select, Switch
 
 # local
@@ -59,6 +60,14 @@ def staff_picks_enabled(env: str) -> bool:
 class SettingsTab(ScrollableContainer):
     """Content for the Settings tab."""
 
+    server_scoped: reactive[bool] = reactive(False, recompose=True)
+    _rebuilding = False
+
+    def __init__(self, *, server_scoped: bool = False, id: str | None = None) -> None:
+        super().__init__(id=id)
+        # Set the reactive directly to avoid triggering recompose before the widget is mounted.
+        self.set_reactive(SettingsTab.server_scoped, server_scoped)
+
     def _eq_folder_cells(self, input_verb: str, current_env: str) -> ComposeResult:
         yield Button(
             "EverQuest Folder",
@@ -97,7 +106,7 @@ class SettingsTab(ScrollableContainer):
         current_env = self.app.current_env
         # EQPATH and maps are per-server slots (servers.SERVER_SLOT_PATHS);
         # so they get a server-labeled box.
-        server_scoped = self.app.active_server is not None
+        server_scoped = self.server_scoped
 
         with Horizontal(id="dropdowns_grid"):
             client_select = make_client_select(current_env, "client_select")
@@ -162,20 +171,12 @@ class SettingsTab(ScrollableContainer):
             clean_source_tooltip = (
                 "Your untouched copy of EverQuest RoF2. Can be a zip, an ISO, a folder, or DVD drive. "
             )
-            # Two pickers, since the source can be file or folder.
-            with Horizontal(id="clean_source_row"):
-                yield Button(
-                    "RoF2 File",
-                    id="select_clean_source_file",
-                    variant="default",
-                    tooltip=clean_source_tooltip,
-                )
-                yield Button(
-                    "RoF2 Folder",
-                    id="select_clean_source_folder",
-                    variant="default",
-                    tooltip=clean_source_tooltip,
-                )
+            yield Button(
+                "RoF2 Source",
+                id="select_clean_source",
+                variant="default",
+                tooltip=clean_source_tooltip,
+            )
             yield Input(
                 value=provision.clean_source(),
                 placeholder=f"{input_verb} a clean RoF2 archive or folder",
@@ -261,23 +262,20 @@ class SettingsTab(ScrollableContainer):
             self.watch(self.app, attr, self._recompute)
 
     def on_show(self) -> None:
-        # Only the shortcut switch needs an fs re-probe; _recompute would clobber path-input text
+        # Only the shortcut switch needs an fs re-probe
         self._refresh_desktop_shortcut()
 
     def _recompute(self) -> None:
         """Derive every Settings widget from app state + per-env config."""
         app = self.app
 
-        # Defer if a recompose hasn't rebuilt the children yet.
-        if not self.query("#inputs_grid"):
-            self.call_after_refresh(self._recompute)
+        if self._rebuilding:
             return
 
-        # Rebuild when EQPATH + maps need to move between boxes.
         server_scoped = app.active_server is not None
-        if server_scoped != bool(self.query("#server_settings_grid")):
-            self.refresh(recompose=True)
-            self.call_after_refresh(self._recompute)
+        if server_scoped != self.server_scoped:
+            self._rebuilding = True
+            self.server_scoped = server_scoped
             return
 
         busy = app.is_updating or app.interface_running or app.provision_running
@@ -292,10 +290,13 @@ class SettingsTab(ScrollableContainer):
 
         # Only emu clients provision. Both cells, or the grid's later rows shift.
         provisions = servers.is_multi_server(app.current_env)
-        self.query_one("#clean_source_row").display = provisions
+        self.query_one("#select_clean_source", Button).display = provisions
         clean_source_input = self.query_one("#clean_source_input", Input)
         clean_source_input.display = provisions
         clean_source_input.value = provision.clean_source()
+
+        # Only emu servers have patchers.
+        self.query_one("#launch_patcher", Checkbox).display = provisions
 
         sync_client_select(self, "client_select")
         sync_server_select(self, "server_select")
@@ -361,6 +362,17 @@ class SettingsTab(ScrollableContainer):
 
         self._refresh_desktop_shortcut()
 
+    async def recompose(self) -> None:
+        # Children prune before their parents, so a pass landing mid-teardown would
+        # query widgets that are already gone.
+        self._rebuilding = True
+        try:
+            await super().recompose()
+        finally:
+            self._rebuilding = False
+        if self.children:
+            self._recompute()
+
     def _refresh_desktop_shortcut(self) -> None:
         """Sync the Desktop-shortcut switch to the filesystem (win32; no reactive source)."""
         if sys.platform != "win32":
@@ -416,13 +428,9 @@ class SettingsTab(ScrollableContainer):
     def handle_select_vvmq_path_pressed(self, event: Button.Pressed) -> None:
         self.app.select_directory("vvmq_path_input")
 
-    @on(Button.Pressed, "#select_clean_source_file")
-    def handle_select_clean_source_file_pressed(self, event: Button.Pressed) -> None:
+    @on(Button.Pressed, "#select_clean_source")
+    def handle_select_clean_source_pressed(self, event: Button.Pressed) -> None:
         self.app.select_clean_source("clean_source_input")
-
-    @on(Button.Pressed, "#select_clean_source_folder")
-    def handle_select_clean_source_folder_pressed(self, event: Button.Pressed) -> None:
-        self.app.select_clean_source("clean_source_input", folder=True)
 
     @on(Button.Pressed, "#reset_downloads")
     def handle_reset_downloads_pressed(self, event: Button.Pressed) -> None:

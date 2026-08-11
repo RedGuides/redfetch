@@ -89,34 +89,35 @@ def test_vvmq_startup_hook_late_binds(monkeypatch):
     assert shortcuts.find_runnable("vvmq").startup() == "sentinel"
 
 
-# --- per-server entries: name and label resolve at read time -----------------
+# --- per-server entries: name and tooltip resolve at read time ---------------
 
-def _dynamic(exe, label="", *, folder="C:/x", **kwargs):
+def _dynamic(exe, *, folder="C:/x", **kwargs):
     return shortcuts.Runnable(
-        "dyn", "Static label", "", lambda: folder,
-        resolve_executable=lambda: exe, resolve_label=lambda: label, **kwargs,
+        "dyn", "Static label", "", lambda: folder, tooltip="Static tooltip",
+        resolve_executable=lambda: exe,
+        visible=lambda: bool(exe), **kwargs,
     )
 
 
 def test_static_entries_resolve_from_their_own_fields():
     r = shortcuts.find_runnable("eqbcs")
     assert shortcuts.runnable_executable(r) == "EQBCS.exe"
-    assert shortcuts.runnable_label(r) == r.label
+    assert shortcuts.runnable_tooltip(r) == f"EQBCS.exe - {r.tooltip}"
     assert shortcuts.runnable_visible(r) is True
 
 
-def test_dynamic_entry_resolves_its_name_and_label():
-    r = _dynamic("LazarusPatcherCLI.exe", "Project Lazarus patcher")
+def test_dynamic_entry_resolves_its_name_into_the_tooltip():
+    r = _dynamic("LazarusPatcherCLI.exe")
     assert shortcuts.runnable_executable(r) == "LazarusPatcherCLI.exe"
-    assert shortcuts.runnable_label(r) == "Project Lazarus patcher"
+    assert shortcuts.runnable_tooltip(r) == "LazarusPatcherCLI.exe - Static tooltip"
     assert shortcuts.runnable_visible(r) is True
 
 
 def test_dynamic_entry_with_nothing_behind_it_hides():
-    r = _dynamic("", "")
+    r = _dynamic("")
     assert shortcuts.runnable_visible(r) is False
     assert shortcuts.runnable_available(r) is False
-    assert shortcuts.runnable_label(r) == "Static label"  # still names itself in errors
+    assert shortcuts.runnable_tooltip(r) == "Static tooltip"  # no exe to name
 
 
 def test_dynamic_availability_follows_the_resolved_name(tmp_path):
@@ -152,15 +153,16 @@ def _active_server(monkeypatch, **kwargs):
                   patcher_url="https://laz.example.test/p.zip",
                   patcher_exe="LazarusPatcherCLI.exe")
     context = servers.ServerContext(**{**fields, **kwargs})
-    monkeypatch.setattr(shortcuts, "_active_context", lambda: context)
+    monkeypatch.setattr(config, "settings", SimpleNamespace(ENV="EMU"))
+    monkeypatch.setattr(servers, "active_server_context", lambda env: context)
     return context
 
 
-def test_patcher_entry_names_the_active_server(monkeypatch):
+def test_patcher_entry_names_the_exe_it_runs(monkeypatch):
     _active_server(monkeypatch)
     r = shortcuts.find_runnable("patcher")
     assert shortcuts.runnable_executable(r) == "LazarusPatcherCLI.exe"
-    assert shortcuts.runnable_label(r) == "Project Lazarus patcher 🩹"
+    assert shortcuts.runnable_tooltip(r) == "LazarusPatcherCLI.exe - Run the emu server's own patcher."
     assert shortcuts.runnable_visible(r) is True
     assert r.resolve_dir() == "C:/EQ"
     assert r.new_console is True  # a console patcher must not share the TUI's window
@@ -172,7 +174,7 @@ def test_patcher_entry_hides_without_a_server_patcher(monkeypatch):
     r = shortcuts.find_runnable("patcher")
     assert shortcuts.runnable_visible(r) is False
     assert shortcuts.runnable_available(r) is False
-    assert shortcuts.runnable_label(r) == "Server patcher 🩹"
+    assert shortcuts.runnable_tooltip(r) == "Run the emu server's own patcher."
 
 
 def test_patcher_entry_rejects_a_hostile_exe_name(monkeypatch):
@@ -188,11 +190,23 @@ def test_patcher_entry_reads_the_global_env(monkeypatch):
     seen = []
     monkeypatch.setattr(config, "settings", SimpleNamespace(ENV="EMU"))
     monkeypatch.setattr(
-        shortcuts.servers, "active_server_context",
+        servers, "active_server_context",
         lambda env: seen.append(env) or servers.ServerContext(label="X", eqpath="C:/EQ"),
     )
-    shortcuts._active_context()
+    assert utils.get_patcher_dir() == "C:/EQ"
     assert seen == ["EMU"]
+
+
+# --- the launchpad entry ----------------------------------------------------
+
+def test_launchpad_hides_on_the_emu_client(monkeypatch):
+    """RoF2 has no LaunchPad — the server's own patcher takes its place."""
+    r = shortcuts.find_runnable("launchpad")
+    assert shortcuts.runnable_executable(r) == "LaunchPad.exe"  # it still runs the same file
+    monkeypatch.setattr(config, "settings", SimpleNamespace(ENV="EMU"))
+    assert shortcuts.runnable_visible(r) is False
+    monkeypatch.setattr(config, "settings", SimpleNamespace(ENV="LIVE"))
+    assert shortcuts.runnable_visible(r) is True
 
 
 # --- run_executable: console windows ----------------------------------------
@@ -231,7 +245,7 @@ def test_launch_loadout_empty_when_nothing_configured(monkeypatch):
 
 
 def test_launch_loadout_reports_launches_skips_and_failures_in_order(monkeypatch):
-    def _run(command, cwd=None):
+    def _run(command, cwd=None, new_console=False):
         if command == "bad --flag":
             raise FileNotFoundError("bad")
         return True
@@ -252,6 +266,26 @@ def test_launch_loadout_reports_launches_skips_and_failures_in_order(monkeypatch
     ]
 
 
+def test_launch_loadout_gives_console_programs_their_own_window(monkeypatch):
+    consoles = []
+    monkeypatch.setattr(
+        shortcuts.processes, "run_command",
+        lambda command, cwd=None, new_console=False: consoles.append(new_console) or True,
+    )
+    monkeypatch.setattr(
+        shortcuts.utils, "resolve_post_update_launch_filtered",
+        lambda env=None, running=None: FilteredLaunch(
+            [
+                LaunchCommand(["C:\\EQ\\ThePatcher.exe"], "C:\\EQ", new_console=True),
+                LaunchCommand(["C:\\x\\EQBCS.exe"], "C:\\x"),
+            ],
+            [],
+        ),
+    )
+    shortcuts.launch_loadout(frozenset())
+    assert consoles == [True, False]
+
+
 # --- start_vvmq(): full startup (MacroQuest + companion loadout) -------------
 
 @pytest.fixture
@@ -266,7 +300,7 @@ def vvmq_env(monkeypatch):
     )
     monkeypatch.setattr(
         shortcuts.processes, "run_command",
-        lambda command, cwd=None: calls["commands"].append((command, cwd)) or True,
+        lambda command, cwd=None, new_console=False: calls["commands"].append((command, cwd)) or True,
     )
     monkeypatch.setattr(
         shortcuts.utils, "resolve_post_update_launch_filtered",
@@ -358,7 +392,7 @@ def test_start_vvmq_companion_failure_continues(vvmq_env):
         ),
     )
 
-    def _run(command, cwd=None):
+    def _run(command, cwd=None, new_console=False):
         if command == "bad --flag":
             raise FileNotFoundError("bad")
         calls["commands"].append((command, cwd))

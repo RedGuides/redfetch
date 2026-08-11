@@ -347,42 +347,44 @@ def _shortcuts_recompute(monkeypatch, runnables):
     return buttons
 
 
-def _patcher_runnable(folder, exe, label):
+def _patcher_runnable(folder, exe, tooltip=""):
     return tui.shortcuts.Runnable(
-        "patcher", "Server patcher", "", lambda: str(folder),
-        resolve_executable=lambda: exe, resolve_label=lambda: label,
+        "patcher", "Emu Patcher 🩹", "", lambda: str(folder), tooltip=tooltip,
+        resolve_executable=lambda: exe,
+        visible=lambda: bool(exe),
     )
 
 
 def test_shortcuts_tab_hides_a_patcher_with_no_server_behind_it(monkeypatch, tmp_path):
     """Live and the bare setup can't have one, so the button isn't there to press."""
-    buttons = _shortcuts_recompute(monkeypatch, [_patcher_runnable(tmp_path, "", "")])
+    buttons = _shortcuts_recompute(monkeypatch, [_patcher_runnable(tmp_path, "")])
     assert buttons["#run_patcher"].display is False
 
 
 def test_shortcuts_tab_disables_a_patcher_that_isnt_downloaded_yet(monkeypatch, tmp_path):
     """Shown but dead: 'not bootstrapped yet' is exactly what unavailable means here."""
     buttons = _shortcuts_recompute(
-        monkeypatch, [_patcher_runnable(tmp_path, "LazarusPatcherCLI.exe", "Lazarus patcher")]
+        monkeypatch, [_patcher_runnable(tmp_path, "LazarusPatcherCLI.exe")]
     )
     assert buttons["#run_patcher"].display is True
     assert buttons["#run_patcher"].disabled is True
 
 
-def test_shortcuts_tab_enables_the_installed_patcher_and_keeps_its_label_literal(monkeypatch, tmp_path):
-    """Button labels parse markup, and rich's escape() is too narrow to stop it.
+def test_shortcuts_tab_enables_the_installed_patcher_and_keeps_its_tooltip_literal(monkeypatch, tmp_path):
+    """Tooltips parse markup, and rich's escape() is too narrow to stop it.
 
-    'PEQ [TAKP]' is a realistic server name whose tag is uppercase-initial, so
+    'PEQ [TAKP]' is a realistic name whose tag is uppercase-initial, so
     rich.markup.escape leaves it alone and textual then eats it. Content does not.
+    Every tooltip now carries an exe name, so any exe name can carry markup.
     """
-    (tmp_path / "LazarusPatcherCLI.exe").write_bytes(b"MZ")
+    (tmp_path / "PEQ [TAKP] Patcher.exe").write_bytes(b"MZ")
     buttons = _shortcuts_recompute(
         monkeypatch,
-        [_patcher_runnable(tmp_path, "LazarusPatcherCLI.exe", "PEQ [TAKP] patcher")],
+        [_patcher_runnable(tmp_path, "PEQ [TAKP] Patcher.exe", "Run the emu server's own patcher.")],
     )
     button = buttons["#run_patcher"]
     assert button.display is True and button.disabled is False
-    assert button.label.plain == "PEQ [TAKP] patcher"
+    assert button.tooltip.plain == "PEQ [TAKP] Patcher.exe - Run the emu server's own patcher."
 
 
 def test_shortcuts_tab_keeps_static_entries_visible_when_missing(monkeypatch, tmp_path):
@@ -390,7 +392,6 @@ def test_shortcuts_tab_keeps_static_entries_visible_when_missing(monkeypatch, tm
     buttons = _shortcuts_recompute(monkeypatch, [static])
     assert buttons["#run_eqbcs"].display is True     # never hidden...
     assert buttons["#run_eqbcs"].disabled is True    # ...just dead until it's installed
-    assert buttons["#run_eqbcs"].label == "EQBCS 💬"
 
 
 def test_shortcuts_tab_reconditions_on_a_server_switch():
@@ -490,16 +491,25 @@ def _run_patcher_button(monkeypatch, *, context):
                             laa_enable_running=False),
         query_one=lambda selector, _type=None: button,
     )
-    monkeypatch.setattr(tui_servers.shortcuts, "_active_context", lambda: context)
-    tui_servers.ServersTab._refresh_run_patcher_button(tab, context)
+    monkeypatch.setattr(config, "settings", SimpleNamespace(ENV="EMU"))
+    monkeypatch.setattr(tui.servers, "active_server_context", lambda env: context)
+    tui_servers.ServersTab._refresh_run_patcher_button(tab)
     return button
 
 
-def test_run_patcher_button_takes_the_resolved_label(monkeypatch, tmp_path):
-    """The tab has to re-resolve it like the Shortcuts tab; compose's is only a fallback."""
-    button = _run_patcher_button(monkeypatch, context=_context(tmp_path, label="PEQ [TAKP]"))
+def test_run_patcher_button_names_the_exe_in_its_tooltip(monkeypatch, tmp_path):
+    """The label is fixed, so only the hover text says what this launches.
 
-    assert button.label.plain == "PEQ [TAKP] patcher 🩹"
+    A custom server's exe name is user-authored, and [brackets] are legal in a
+    Windows file name. The tag has to be uppercase-initial to be worth testing:
+    escape() already covers [x86], so only [TAKP] tells Content from escape().
+    """
+    (tmp_path / "PEQ [TAKP] Patcher.exe").write_bytes(b"MZ")
+    context = _context(tmp_path, patcher_exe="PEQ [TAKP] Patcher.exe")
+    button = _run_patcher_button(monkeypatch, context=context)
+
+    assert button.disabled is False
+    assert button.tooltip.plain == "PEQ [TAKP] Patcher.exe - Run the emu server's own patcher."
 
 
 def _eqhost_button(monkeypatch, *, eq_dir=None, provisioning=False):
@@ -991,19 +1001,89 @@ def test_first_build_lands_on_the_bare_setup_when_nothing_is_active(monkeypatch)
 
 
 def test_settings_recompute_waits_out_a_recompose():
-    """Resetting the active server queues a pass that can land while the tab is empty --
-    a recompose removes its children first, and the screen's pump runs meanwhile."""
-    queued = []
+    """Removing the active server queues a pass that can land mid-teardown, where a
+    grid is still in the DOM but its own inputs are gone -- children prune first, and
+    the screen's pump runs the queued pass while the tab awaits its recompose."""
+    reached = []
     tab = SimpleNamespace(
         app=SimpleNamespace(active_server=None),
-        query=lambda selector: [],
-        call_after_refresh=queued.append,
+        query_one=lambda selector, _type=None: reached.append(selector),
+        server_scoped=True,
+        _rebuilding=True,
     )
-    tab._recompute = lambda: None
 
     tui_settings.SettingsTab._recompute(tab)  # NoMatches on #vvmq_path_input before
 
-    assert queued == [tab._recompute]
+    assert reached == []
+
+
+def test_settings_recompute_latches_until_the_rebuild():
+    """The recompose is queued, so the value leads the mounted layout. A pass in
+    between would derive a per-server box that isn't there yet."""
+    reached = []
+    tab = SimpleNamespace(
+        app=SimpleNamespace(active_server="myserver"),
+        query_one=lambda selector, _type=None: reached.append(selector),
+        server_scoped=False,
+        _rebuilding=False,
+    )
+
+    tui_settings.SettingsTab._recompute(tab)
+    assert (tab.server_scoped, tab._rebuilding) == (True, True)
+
+    tui_settings.SettingsTab._recompute(tab)  # the explicit second pass
+
+    assert reached == []
+
+
+def test_recompose_recomputes_once_the_children_are_back(monkeypatch):
+    """Awaited, so the recompute lands after the mount; call_after_refresh ran it
+    during the teardown instead."""
+    order = []
+    tab = tui_settings.SettingsTab(server_scoped=True)
+
+    async def recompose(self):
+        order.append(("recompose", tab._rebuilding))
+
+    monkeypatch.setattr(tui_settings.ScrollableContainer, "recompose", recompose)
+    monkeypatch.setattr(tui_settings.SettingsTab, "children", (object(),))
+    tab._recompute = lambda: order.append(("recompute", tab._rebuilding))
+
+    asyncio.run(tui_settings.SettingsTab.recompose(tab))
+
+    assert order == [("recompose", True), ("recompute", False)]
+
+
+def test_recompose_derives_nothing_when_the_mount_was_skipped():
+    """A quit mid-rebuild leaves the tab pruned, and Widget.mount silently no-ops
+    while it is -- so the children the recompute wants never arrive."""
+    tab = tui_settings.SettingsTab(server_scoped=True)
+    tab._recompute = lambda: pytest.fail("nothing to recompute")
+
+    asyncio.run(tui_settings.SettingsTab.recompose(tab))
+
+    assert tab._rebuilding is False
+
+
+def test_select_clean_source_asks_file_or_folder_then_routes():
+    """One button for both source kinds: the chooser modal picks the picker."""
+    pushed = []
+    input_widget = FakeInput("")
+    screen = SimpleNamespace(query_one=lambda selector, _type=None: input_widget)
+    app = SimpleNamespace(
+        _get_main_screen=lambda: screen,
+        push_screen=lambda modal, callback=None: pushed.append((modal, callback)),
+        handle_input_update=lambda input_id, value: None,
+    )
+
+    tui.Redfetch.select_clean_source(app, "clean_source_input")
+    chooser, chosen = pushed[0]
+    assert isinstance(chooser, tui.SourceTypeScreen)
+
+    chosen(tui.SourceTypeScreen.FILE)
+    chosen(tui.SourceTypeScreen.FOLDER)
+    chosen(None)  # cancelled: no picker
+    assert [type(modal) for modal, _ in pushed[1:]] == [tui.FileOpen, tui.SelectDirectory]
 
 
 def test_rebuild_keeps_the_row_you_moved_to(monkeypatch):

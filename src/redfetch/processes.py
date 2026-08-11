@@ -278,8 +278,9 @@ def run_executable(folder_path: str, executable_name: str, args: Sequence[str] |
     return True
 
 
-def run_command(command: str | Sequence[str], cwd: str | None = None) -> bool:
-    """Launch a command that may be resolved through PATH."""
+def run_command(command: str | Sequence[str], cwd: str | None = None,
+                *, new_console: bool = False) -> bool:
+    """Launch a command that may be resolved through PATH. ``new_console`` is for console programs."""
     if isinstance(command, str):
         if not command.strip():
             raise ValueError("No command to run.")
@@ -292,7 +293,11 @@ def run_command(command: str | Sequence[str], cwd: str | None = None) -> bool:
         popen_arg = argv
         display = subprocess.list2cmdline(argv)
 
-    subprocess.Popen(popen_arg, cwd=cwd)
+    subprocess.Popen(
+        popen_arg,
+        cwd=cwd,
+        creationflags=subprocess.CREATE_NEW_CONSOLE if (new_console and IS_WINDOWS) else 0,
+    )
     print(f"Started: {display}")
     return True
 

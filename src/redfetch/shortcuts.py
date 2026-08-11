@@ -12,7 +12,6 @@ from typing import NamedTuple
 
 # local
 from redfetch import config
-from redfetch import patcher
 from redfetch import processes
 from redfetch import servers
 from redfetch import utils
@@ -92,29 +91,14 @@ def _seed_meshgen_ini() -> None:
         pass  # unwritable config dir, etc. — MeshGenerator will just prompt as before
 
 
-def _active_context() -> servers.ServerContext:
-    # ENV is the one global source of truth. --server rewrites it in memory for the run.
-    return servers.active_server_context(config.settings.ENV)
+def _patcher_visible() -> bool:
+    """No exe to name means no patcher to show."""
+    return bool(utils.get_patcher_exe())
 
 
-def _patcher_dir() -> str | None:
-    return _active_context().eqpath or None
-
-
-def _patcher_exe() -> str:
-    """The active server's patcher file name, or "" when there is nothing to run."""
-    context = _active_context()
-    if not patcher.has_patcher(context):
-        return ""
-    try:
-        return patcher.validate_patcher_exe(context.patcher_exe)
-    except patcher.PatcherError:
-        return ""
-
-
-def _patcher_label() -> str:
-    context = _active_context()
-    return f"{context.label} patcher 🩹" if patcher.has_patcher(context) else ""
+def _launchpad_visible() -> bool:
+    """LaunchPad updates the Live and Test clients."""
+    return not servers.is_multi_server(config.settings.ENV)
 
 
 def _eqhost_tooltip() -> str:
@@ -136,9 +120,9 @@ class Runnable:
     tooltip: str = ""
     prepare: Callable[[], None] | None = None   # optional pre-launch hook
     startup: Callable[[], StartupResult] | None = None
-    # Per-server entries can't name their exe or label up front
+    # Per-server entries can't name their exe up front
     resolve_executable: Callable[[], str] | None = None
-    resolve_label: Callable[[], str] | None = None
+    visible: Callable[[], bool] | None = None   # entries that aren't for every client/server
     new_console: bool = False                   # console apps need their own window
 
 
@@ -146,7 +130,7 @@ RUNNABLES: tuple[Runnable, ...] = (
     Runnable(
         "vvmq", "Very Vanilla MQ 🍦", "MacroQuest.exe", utils.get_vvmq_path,
         aliases=("mq", "macroquest"),
-        tooltip="Run MacroQuest, the legendary add-on platform for EverQuest, plus any post-update selections.",
+        tooltip="The legendary add-on platform for EverQuest, plus any post-update selections.",
         startup=lambda: start_vvmq(),
     ),
     Runnable(
@@ -158,29 +142,30 @@ RUNNABLES: tuple[Runnable, ...] = (
     Runnable(
         "eqbcs", "EQBCS 💬", "EQBCS.exe", utils.get_vvmq_path,
         aliases=("bcs",),
-        tooltip="run EQBCs.exe, the server for EQ Box Chat (MQ2EQBC).",
+        tooltip="The server for EQ Box Chat (MQ2EQBC).",
     ),
     Runnable(
         "launchpad", "EQ LaunchPad 🐲", "LaunchPad.exe", _eq_dir,
         aliases=("eqlp", "eq"),
         tooltip="The official launcher and updater for EverQuest.",
+        visible=_launchpad_visible,
     ),
     Runnable(
         "eqgame", "EQGame 🐲🩹", "eqgame.exe", _eq_dir, args=("patchme",),
         aliases=("eqclient",),
-        tooltip="Run EverQuest *WITHOUT* updating.",
+        tooltip="Run EverQuest *WITHOUT* updating. (aka PATCHME).",
     ),
     Runnable(
-        "patcher", "Server patcher 🩹", "", _patcher_dir,
+        "patcher", "Emu Patcher 🩹", "", utils.get_patcher_dir,
         tooltip="Run the emu server's own patcher.",
-        resolve_executable=_patcher_exe,
-        resolve_label=_patcher_label,
+        resolve_executable=utils.get_patcher_exe,
+        visible=_patcher_visible,
         new_console=True,
     ),
     Runnable(
         "myseq", "MySEQ 📍", "MySEQ.exe", utils.get_myseq_path,
         aliases=("seq",),
-        tooltip="run MySEQ.exe, a real-time map viewer for EverQuest.",
+        tooltip="A real-time map viewer for EverQuest.",
     ),
 )
 
@@ -266,9 +251,10 @@ def runnable_executable(r: Runnable) -> str:
     return r.resolve_executable() if r.resolve_executable else r.executable
 
 
-def runnable_label(r: Runnable) -> str:
-    """The display name, falling back to the static one when nothing resolves."""
-    return (r.resolve_label() if r.resolve_label else "") or r.label
+def runnable_tooltip(r: Runnable) -> str:
+    """Lead each tooltip with the exe name."""
+    # ASCII dash: this same string goes to the `redfetch run` table on legacy consoles.
+    return " - ".join(p for p in (runnable_executable(r), r.tooltip) if p)
 
 
 def openable_tooltip(o: Openable) -> str:
@@ -279,8 +265,8 @@ def openable_tooltip(o: Openable) -> str:
 # ---- availability (drives TUI disable + CLI listing) -----------------------
 
 def runnable_visible(r: Runnable) -> bool:
-    """False only for a per-server entry with nothing behind it on this client."""
-    return bool(runnable_executable(r))
+    """False for an entry that doesn't apply to the active client and server."""
+    return r.visible() if r.visible else True
 
 
 def runnable_available(r: Runnable) -> bool:
@@ -333,7 +319,7 @@ def launch_loadout(running: set[str] | None = None) -> list[LaunchMessage]:
     for launch in filtered.to_run:
         label = os.path.basename(launch.program) or "post-update program"
         try:
-            processes.run_command(launch.command, launch.cwd)
+            processes.run_command(launch.command, launch.cwd, new_console=launch.new_console)
             messages.append(LaunchMessage(f"{label} started."))
         except Exception as exc:
             messages.append(LaunchMessage(f"Failed to start {label}: {exc}", is_error=True))

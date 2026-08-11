@@ -30,6 +30,7 @@ from redfetch import provision
 from redfetch import servers
 from redfetch import shortcuts
 from redfetch import utils
+from redfetch.tui_modals import SourceTypeScreen
 from redfetch.tui_widgets import BARE_SETUP_ID, clean_source_filters
 
 
@@ -92,47 +93,54 @@ class ServersTab(ScrollableContainer):
                 label = servers.active_server_context(self.app.current_env).label
                 with Horizontal(id="server_tools_row"):
                     yield Button(
-                        "Get patcher",
+                        "⇣ Get patcher",
                         id="server_patcher",
-                        variant="default",
+                        compact=True,
                         tooltip=Content(f"Download the {label} patcher into its EverQuest folder."),
                     )
                     yield Button(
                         PATCHER_SHORTCUT.label,
                         id="server_run_patcher",
-                        variant="default",
+                        compact=True,
                         tooltip=PATCHER_SHORTCUT.tooltip,
                     )
                     yield Button(
                         EQHOST_SHORTCUT.label,
                         id="server_eqhost",
-                        variant="default",
+                        compact=True,
                         tooltip=EQHOST_SHORTCUT.tooltip,
                     )
                     yield Button(
                         "Allow 4GB Memory",
                         id="server_laa",
-                        variant="default",
+                        compact=True,
                         tooltip="Let eqgame.exe use up to 4GB of memory.",
+                    )
+                    yield Button(
+                        "↗ Setup guide",
+                        id="server_guide",
+                        compact=True,
+                        tooltip=Content(f"Open {label}'s setup guide in your browser."),
                     )
                 # Only visible during a provision, which is the one action long enough to watch.
                 with Horizontal(id="server_provision_row", classes="hidden"):
                     # markup=False: the labels quote server names and paths.
                     yield Label("", id="provision_status", markup=False)
                     yield ProgressBar(total=1.0, show_eta=False, id="provision_progress")
-                    yield Button("Cancel", id="provision_cancel", variant="error")
+                    yield Button("Cancel", id="provision_cancel", variant="error", compact=True)
                 # The same setting as the Settings tab's copy: the active server's folder.
                 with Horizontal(id="server_eq_path_row"):
                     yield Button(
-                        "EverQuest Folder",
+                        "EverQuest Folder…",
                         id="server_select_eq_path",
-                        variant="default",
+                        compact=True,
                         tooltip="The active server's EverQuest directory, the one with eqgame.exe.",
                     )
                     yield Input(
                         value=config.settings.from_env(self.app.current_env).EQPATH or "",
                         placeholder=f"{input_verb} the active server's EverQuest directory",
                         id="server_eq_path_input",
+                        compact=True,
                         tooltip="The active server's EverQuest directory, the one with eqgame.exe.",
                     )
 
@@ -239,9 +247,10 @@ class ServersTab(ScrollableContainer):
             f"Active server: {context.label}"
         )
         self._refresh_patcher_button(context)
-        self._refresh_run_patcher_button(context)
+        self._refresh_run_patcher_button()
         self._refresh_eqhost_button()
         self._refresh_laa_button(context)
+        self._refresh_guide_button(context)
 
     def _refresh_patcher_button(self, context: servers.ServerContext) -> None:
         """Enable the patcher button only when the active server has a patcher and it isn't already installed or downloading."""
@@ -269,11 +278,9 @@ class ServersTab(ScrollableContainer):
         else:
             button.tooltip = "This server has no patcher, according to my settings.local.toml"
 
-    def _refresh_run_patcher_button(self, context: servers.ServerContext) -> None:
+    def _refresh_run_patcher_button(self) -> None:
         """Run the active server's patcher, once it's on disk."""
         button = self.query_one("#server_run_patcher", Button)
-        # Like the Shortcuts tab, the label comes from settings.local.toml
-        button.label = Content(shortcuts.runnable_label(PATCHER_SHORTCUT))
         if not shortcuts.runnable_visible(PATCHER_SHORTCUT):
             button.disabled = True
             button.tooltip = "This server has no patcher, according to my settings.local.toml"
@@ -286,8 +293,8 @@ class ServersTab(ScrollableContainer):
             self.app.provision_running or self.app.patcher_install_running
             or self.app.laa_enable_running
         )
-        # Content(), not escape() since the label comes from settings
-        button.tooltip = Content(f"Run the {context.label} patcher.")
+        # Content(), not escape(): the exe name it quotes comes from settings
+        button.tooltip = Content(shortcuts.runnable_tooltip(PATCHER_SHORTCUT))
 
     def _refresh_eqhost_button(self) -> None:
         """Open the active server's eqhost.txt, naming the login server it holds."""
@@ -327,6 +334,17 @@ class ServersTab(ScrollableContainer):
                 f"Let {context.label}'s eqgame.exe use up to 4GB of memory. "
                 f"The original is kept as {laa.BACKUP_NAME}."
             )
+
+    def _refresh_guide_button(self, context: servers.ServerContext) -> None:
+        """Link the active server's guide if in settings."""
+        button = self.query_one("#server_guide", Button)
+        # Alive during a provision: a web page is worth reading while the copy runs.
+        button.disabled = not context.guide
+        if context.guide:
+            # Content(), not escape() since the label comes from settings
+            button.tooltip = Content(f"Open {context.label}'s setup guide in your browser.")
+        else:
+            button.tooltip = "This server has no guide, according to my settings.local.toml"
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         self._refresh_buttons()
@@ -423,6 +441,12 @@ class ServersTab(ScrollableContainer):
         self.app.enable_active_laa()
         # Unconditional: a declined stale click heals the button to disabled-with-why.
         self._refresh_buttons()
+
+    @on(Button.Pressed, "#server_guide")
+    def handle_guide_pressed(self, event: Button.Pressed) -> None:
+        guide = servers.active_server_context(self.app.current_env).guide
+        if guide:
+            self.app.action_link(guide)
 
     @on(Button.Pressed, "#server_add")
     def handle_add_pressed(self, event: Button.Pressed) -> None:
@@ -555,8 +579,7 @@ class AddServerScreen(ModalScreen[dict | None]):
                     yield Input(value=provision.clean_source(),
                                 placeholder="A zip, an iso, a DVD drive, or a folder",
                                 id="add_source")
-                    yield Button("File…", id="add_source_file", variant="default")
-                    yield Button("Folder…", id="add_source_folder", variant="default")
+                    yield Button("Browse", id="add_source_browse", variant="default")
                 # _sync_mode names it: the same box is a destination or an existing folder.
                 yield Label("", id="add_folder_label")
                 with Horizontal(id="add_folder_row"):
@@ -654,15 +677,17 @@ class AddServerScreen(ModalScreen[dict | None]):
 
         self.app.push_screen(SelectDirectory(location=start), callback=picked)
 
-    @on(Button.Pressed, "#add_source_file")
-    def handle_source_file(self, event: Button.Pressed) -> None:
-        self._pick_source(
-            FileOpen(location=self._source_start(), filters=clean_source_filters())
-        )
+    @on(Button.Pressed, "#add_source_browse")
+    def handle_source_browse(self, event: Button.Pressed) -> None:
+        def chosen(kind: str | None) -> None:
+            if kind == SourceTypeScreen.FOLDER:
+                self._pick_source(SelectDirectory(location=self._source_start()))
+            elif kind == SourceTypeScreen.FILE:
+                self._pick_source(
+                    FileOpen(location=self._source_start(), filters=clean_source_filters())
+                )
 
-    @on(Button.Pressed, "#add_source_folder")
-    def handle_source_folder(self, event: Button.Pressed) -> None:
-        self._pick_source(SelectDirectory(location=self._source_start()))
+        self.app.push_screen(SourceTypeScreen(), callback=chosen)
 
     def _source_start(self) -> Path:
         return utils.nearest_dir(self.query_one("#add_source", Input).value.strip())

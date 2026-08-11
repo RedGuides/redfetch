@@ -43,7 +43,7 @@ from redfetch.sync_types import ExecutionPlan, SyncEvent, SyncOutcome
 from redfetch.runtime_errors import display_fatal_error
 from redfetch.tui_account import AccountTab
 from redfetch.tui_fetch import FetchTab
-from redfetch.tui_modals import UninstallScreen, _TuiPostUpdate
+from redfetch.tui_modals import SourceTypeScreen, UninstallScreen, _TuiPostUpdate
 from redfetch.tui_servers import ProvisionProgress, ServersTab
 from redfetch.tui_settings import SettingsTab, get_staff_pick_ids_for_env
 from redfetch.tui_shortcuts import ShortcutsTab
@@ -81,7 +81,8 @@ class MainScreen(Screen):
                 yield FetchTab(id="fetch_scroll")
 
             with TabPane("Settings", id="settings"):
-                yield SettingsTab(id="settings_scroll")
+                yield SettingsTab(id="settings_scroll",
+                                  server_scoped=self.app.active_server is not None)
 
             with TabPane("Servers", id="servers"):
                 yield ServersTab(id="servers_scroll")
@@ -506,8 +507,8 @@ class Redfetch(App):
             callback=lambda path: self.update_selected_directory(path, input_id)
         )
 
-    def select_clean_source(self, input_id: str, *, folder: bool = False) -> None:
-        """Pick a clean RoF2 source: an archive, folder or disc image."""
+    def select_clean_source(self, input_id: str) -> None:
+        """Pick a clean RoF2 source."""
         main_screen = self._get_main_screen()
         if not main_screen:
             return
@@ -520,11 +521,16 @@ class Redfetch(App):
             input_widget.value = str(path)
             self.handle_input_update(input_id, str(path))
 
-        picker = (
-            SelectDirectory(location=start) if folder
-            else FileOpen(location=start, filters=clean_source_filters())
-        )
-        self.push_screen(picker, callback=picked)
+        def chosen(kind: str | None) -> None:
+            if kind is None:
+                return
+            picker = (
+                SelectDirectory(location=start) if kind == SourceTypeScreen.FOLDER
+                else FileOpen(location=start, filters=clean_source_filters())
+            )
+            self.push_screen(picker, callback=picked)
+
+        self.push_screen(SourceTypeScreen(), callback=chosen)
 
     def update_selected_directory(self, selected_path: Path | None, input_id: str) -> None:
         main_screen = self._get_main_screen()
@@ -997,7 +1003,7 @@ class Redfetch(App):
             self.notify(f"{shortcuts.runnable_executable(runnable)} started successfully.", markup=False)
         except Exception as exc:
             # Use the label, not the executable: a failed resolve has no exe to name.
-            message = f"Failed to start {shortcuts.runnable_label(runnable)}: {exc}"
+            message = f"Failed to start {runnable.label}: {exc}"
             print(message)
             self.notify(message, severity="error", markup=False)
 

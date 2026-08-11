@@ -390,9 +390,10 @@ def run_tui():
     run_textual_ui()
 
 
-def _print_shortcut_table(entries, available) -> None:
+def _print_shortcut_table(entries, available, describe) -> None:
     """List shortcuts (key, aliases, availability) for the bare `run`/`open` verb."""
     from rich.table import Table
+    from rich.text import Text
 
     # ASCII-only content for legacy Windows consoles
     table = Table(show_header=True, header_style="bold")
@@ -402,7 +403,7 @@ def _print_shortcut_table(entries, available) -> None:
     table.add_column("description", style="dim")
     for entry in entries:
         mark = "[green]yes[/green]" if available(entry) else "[dim]no[/dim]"
-        table.add_row(entry.key, ", ".join(entry.aliases) or "-", mark, entry.tooltip)
+        table.add_row(entry.key, ", ".join(entry.aliases) or "-", mark, Text(describe(entry)))
     console.print(table)
 
 
@@ -418,7 +419,8 @@ def run_shortcut_command(
     config.initialize_config()
     _apply_server_override(server)
     if target is None:
-        _print_shortcut_table(shortcuts.RUNNABLES, shortcuts.runnable_available)
+        _print_shortcut_table(shortcuts.RUNNABLES, shortcuts.runnable_available,
+                              shortcuts.runnable_tooltip)
         return
     runnable = shortcuts.find_runnable(target)
     if runnable is None:
@@ -455,7 +457,8 @@ def open_shortcut_command(
     config.initialize_config()
     _apply_server_override(server)
     if target is None:
-        _print_shortcut_table(shortcuts.OPENABLES, shortcuts.openable_available)
+        _print_shortcut_table(shortcuts.OPENABLES, shortcuts.openable_available,
+                              shortcuts.openable_tooltip)
         return
     openable = shortcuts.find_openable(target)
     if openable is None:

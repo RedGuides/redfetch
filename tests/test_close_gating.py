@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+from conftest import _install_settings
 from redfetch import main, post_update, processes, sync, utils
 from redfetch.sync_types import ExecutionResult, ExecutionResultItem, SyncOutcome
 from redfetch.utils import FilteredLaunch, LaunchCommand
@@ -383,6 +384,45 @@ def test_filter_always_runs_non_file_program(monkeypatch, tmp_path):
     assert filtered.skipped == []
 
 
+# --- the emu patcher preset: resolved from the active server at launch time ------------
+
+def _install_emu_with_eq_folder(tmp_path, monkeypatch, active_server='ACTIVE_SERVER = "lazarus"'):
+    """Real settings on the EMU client, with an EQ folder on disk."""
+    eq = tmp_path / "EQ"
+    eq.mkdir()
+    _install_settings(tmp_path, monkeypatch, local_toml=(
+        f'[EMU]\n{active_server}\nEQPATH = "{eq.as_posix()}"\n'
+    ))
+    return eq
+
+
+def test_patcher_is_offered_as_a_launch_choice():
+    choices = utils.post_update_launch_choices()
+    assert ("patcher", "Emu Patcher") in choices
+    assert choices[-1] == ("custom", "Custom")  # custom stays last in the settings row
+
+
+def test_patcher_target_resolves_the_active_servers_own_patcher(tmp_path, monkeypatch):
+    eq = _install_emu_with_eq_folder(tmp_path, monkeypatch)
+    (eq / "LazarusPatcherCLI.exe").write_bytes(b"MZ")
+
+    launch = utils._resolve_launch_target("patcher")
+    folder = eq.as_posix()
+    assert launch == LaunchCommand(
+        [os.path.join(folder, "LazarusPatcherCLI.exe")], folder, new_console=True
+    )
+
+
+def test_patcher_target_skips_until_the_patcher_is_on_disk(tmp_path, monkeypatch):
+    _install_emu_with_eq_folder(tmp_path, monkeypatch)
+    assert utils._resolve_launch_target("patcher") is None
+
+
+def test_patcher_target_skips_when_no_server_is_active(tmp_path, monkeypatch):
+    _install_emu_with_eq_folder(tmp_path, monkeypatch, active_server="")
+    assert utils._resolve_launch_target("patcher") is None
+
+
 # --- vvmq_was_updated: resource-level "did we write MacroQuest.exe" --------------------
 
 def _item(resource_id, outcome):
@@ -517,7 +557,7 @@ def exec_env(monkeypatch):
     monkeypatch.setattr(post_update.processes, "running_executable_paths", lambda: FRESH)
     monkeypatch.setattr(
         post_update.processes, "run_command",
-        lambda command, cwd=None: calls["commands"].append((command, cwd)) or True,
+        lambda command, cwd=None, new_console=False: calls["commands"].append((command, cwd)) or True,
     )
     def _resolve_loadout(env=None, running=None):
         calls["loadouts"].append(running)
@@ -723,7 +763,7 @@ def test_execute_loadout_failure_notifies_and_continues(exec_env):
         ),
     )
 
-    def _run(command, cwd=None):
+    def _run(command, cwd=None, new_console=False):
         if command == "missing-tool --flag":
             raise FileNotFoundError("missing-tool")
         calls["commands"].append((command, cwd))

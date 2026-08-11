@@ -232,16 +232,6 @@ Label {
     min-width: 50;
 }
 
-/* Both pickers share one grid cell, so they read as a single labeled row. */
-#clean_source_row {
-    width: auto;
-    height: auto;
-}
-
-#clean_source_row Button {
-    width: auto;
-    margin-right: 1;
-}
 #settings_grid {
     layout: grid;
     grid-size: 2;
@@ -415,6 +405,7 @@ Label {
     height: auto;
     max-height: 20;
     padding: 0 1;
+    margin-bottom: 1;
     border: none;
 }
 
@@ -434,7 +425,6 @@ Label {
 
 #active_server_panel {
     height: auto;
-    padding: 0 1;
     border: round $secondary-background;
     border-title-color: $text-secondary;
     border-title-style: bold;
@@ -442,16 +432,18 @@ Label {
 
 #server_tools_row {
     height: auto;
+    padding: 0 1;
+    background: $boost;
 }
 
 #server_tools_row Button {
     margin-right: 2;
-    min-width: 12;
 }
 
 #server_provision_row {
     height: auto;
     margin-top: 1;
+    padding: 0 1;
     align: left middle;
 }
 
@@ -467,6 +459,7 @@ Label {
 #server_eq_path_row {
     height: auto;
     margin-top: 1;
+    padding: 0 1;
 }
 
 #server_eq_path_row Input {
@@ -529,7 +522,7 @@ AddServerScreen, RenameServerScreen, ConfirmDeleteServerScreen {
     width: 1fr;
 }
 
-/* Two pickers on one row, kept narrow so the path box gets the space. */
+/* Kept narrow so the path box gets the space. */
 #add_source_row Button {
     margin-left: 1;
     width: auto;
@@ -628,6 +621,20 @@ CloseEQScreen {
 }
 
 CloseEQScreen Center {
+    column-span: 2;
+    width: 1fr;
+}
+
+SourceTypeScreen {
+    align: center top;
+    background: $background-darken-2 70%;
+}
+
+SourceTypeScreen Button {
+    width: 100%;
+}
+
+SourceTypeScreen Center {
     column-span: 2;
     width: 1fr;
 }

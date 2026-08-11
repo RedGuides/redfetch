@@ -114,6 +114,40 @@ class RunVVMQScreen(ModalScreen):
         self.dismiss(self.RESPONSE_SKIP)
 
 
+class SourceTypeScreen(ModalScreen[str | None]):
+    """File or a folder picker."""
+
+    FILE = "file"
+    FOLDER = "folder"
+
+    BINDINGS = [("escape", "dismiss", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label(
+                "Is your clean RoF2 copy a file (zip, iso)\n"
+                "or a folder (DVD drive, folder)?",
+                id="question",
+            ),
+            Button("File", variant="primary", id="source_file"),
+            Button("Folder", variant="primary", id="source_folder"),
+            Center(Button("Cancel", variant="default", id="source_cancel")),
+            id="dialog",
+        )
+
+    @on(Button.Pressed, "#source_file")
+    def handle_file_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.FILE)
+
+    @on(Button.Pressed, "#source_folder")
+    def handle_folder_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(self.FOLDER)
+
+    @on(Button.Pressed, "#source_cancel")
+    def handle_cancel_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+
 class UninstallScreen(ModalScreen):
     """A modal screen to confirm uninstallation."""
 

@@ -56,9 +56,9 @@ class ShortcutsTab(ScrollableContainer):
         for runnable in shortcuts.RUNNABLES:
             button = self.query_one(f"#run_{runnable.key}", Button)
             # Use Content, not escape(): Rich only escapes [a-z#/@]-initial tags,
-            # but Textual strips all [...], mangling "PEQ [TAKP]" to "PEQ ".
-            button.label = Content(shortcuts.runnable_label(runnable))
-            # Per-server shortcuts without a server hide instead of erroring.
+            # but Textual strips all [...], mangling "PEQ [TAKP]".
+            button.tooltip = Content(shortcuts.runnable_tooltip(runnable))
+            # Entries this client or server has no use for hide instead of erroring.
             button.display = shortcuts.runnable_visible(runnable)
             button.disabled = not shortcuts.runnable_available(runnable)
         for openable in shortcuts.OPENABLES:

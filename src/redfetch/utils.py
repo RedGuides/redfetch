@@ -239,6 +239,7 @@ class LaunchCommand:
     """A resolved post-update launch."""
     command: list[str] | str    # argv, or a Windows shell string for custom targets
     cwd: str | None = None
+    new_console: bool = False   # console programs need their own window
 
     @property
     def program(self) -> str:
@@ -255,18 +256,40 @@ class FilteredLaunch:
 
 class Preset(NamedTuple):
     resolve_dir: Callable[[], str | None]
-    executable: str
+    executable: str | Callable[[], str]     # callable when the name isn't known until launch
+    new_console: bool = False
+
+
+def get_patcher_dir() -> str | None:
+    """The active server's EQ folder, where its patcher lives."""
+    # ENV is the one global source of truth. --server rewrites it in memory for the run.
+    from redfetch import servers
+    return servers.active_server_context(config.settings.ENV).eqpath or None
+
+
+def get_patcher_exe() -> str:
+    """The active server's patcher file name, or "" when there is nothing to run."""
+    from redfetch import patcher, servers
+    context = servers.active_server_context(config.settings.ENV)
+    if not patcher.has_patcher(context):
+        return ""
+    try:
+        return patcher.validate_patcher_exe(context.patcher_exe)
+    except patcher.PatcherError:
+        return ""
 
 
 # Presets offered as "Also start post-update" toggles.
 POST_UPDATE_PRESETS = {
     "eqbcs": Preset(get_vvmq_path, "EQBCS.exe"),
     "myseq": Preset(get_myseq_path, "MySEQ.exe"),
+    "patcher": Preset(get_patcher_dir, get_patcher_exe, new_console=True),
 }
 
 POST_UPDATE_PRESET_LABELS = {
     "eqbcs": "EQBCS",
     "myseq": "MySEQ",
+    "patcher": "Emu Patcher",
     "custom": "Custom",
 }
 
@@ -394,6 +417,7 @@ def _resolve_launch_target(
         print(f"Unknown POST_UPDATE_LAUNCH target: {target}; skipping.")
         return None
     folder = preset.resolve_dir()
-    if folder and validate_file_in_path(folder, preset.executable):
-        return LaunchCommand([os.path.join(folder, preset.executable)], folder)
+    exe = preset.executable() if callable(preset.executable) else preset.executable
+    if folder and exe and validate_file_in_path(folder, exe):
+        return LaunchCommand([os.path.join(folder, exe)], folder, new_console=preset.new_console)
     return None
