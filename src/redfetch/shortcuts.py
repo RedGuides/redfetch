@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 # standard
+import ntpath
 import os
 import re
 import sys
@@ -315,9 +316,9 @@ def launch_loadout(running: set[str] | None = None) -> list[LaunchMessage]:
     filtered = utils.resolve_post_update_launch_filtered(running=running)
     messages: list[LaunchMessage] = []
     for program in filtered.skipped:
-        messages.append(LaunchMessage(f"{os.path.basename(program)} is already running; not starting another."))
+        messages.append(LaunchMessage(f"{ntpath.basename(program)} is already running; not starting another."))
     for launch in filtered.to_run:
-        label = os.path.basename(launch.program) or "post-update program"
+        label = ntpath.basename(launch.program) or "post-update program"
         try:
             processes.run_command(launch.command, launch.cwd, new_console=launch.new_console)
             messages.append(LaunchMessage(f"{label} started."))

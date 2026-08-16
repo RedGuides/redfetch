@@ -2,6 +2,7 @@
 
 # standard
 import asyncio
+import os
 from pathlib import Path
 
 # third-party
@@ -147,7 +148,7 @@ def generate_version_message(
     domain: str | None = None,
 ) -> str:
     """Build a version message from text or a file."""
-    if not message or not Path(message).is_file():
+    if not message or not os.path.isfile(message):
         return _truncate_text(str(message))
 
     message_path = Path(message)
