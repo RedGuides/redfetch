@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-08-15
+
+### Changed
+- redfetch now refers to Live/Test/Emu as clients, e.g. `redfetch client live`, after the MacroQuest client type you're using. Previous commands still work.
+- The "Very Vanilla MQ" button in the shortcuts tab (or `redfetch run mq`) will also run your configured post-update programs. 
+
+### Added
+- Multiple Emu-RoF2 server support. Emu players keep multiple copies of EverQuest, and redfetch will now support map updates and more for each copy. You can add servers from the TUI or CLI, e.g. `redfetch server lazarus`. Selecting "Any emu server" in the TUI or `redfetch server none` will return you to the previous functionality, a plain one-EQ-folder setup.
+- The MeshGenerator shortcut from the TUI or `redfetch run meshgen` will seed the config with your current EQ & MQ path, if no previous config exists.
+
+### Fixed
+- First-run setup and uninstall could crash when encountering some çhä̶rä̶cté̶rs. 
+- The standalone .exe uninstaller now works when redfetch.exe sits in a path with spaces.
+- CLI prompts could hang forever if a previous app had set raw input mode in the terminal.
+
 ## [1.5.0] - 2026-07-21
 
 ### Added

@@ -983,6 +983,7 @@ def root(
 
 def main():
     try:
+        utils.ensure_cooked_console()
         # Launch TUI when no arguments are provided
         if len(sys.argv) == 1:
             run_tui()

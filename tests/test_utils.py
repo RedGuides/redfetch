@@ -12,3 +12,7 @@ def test_dx9_present_when_the_dll_exists(tmp_path, monkeypatch):
     dll.write_bytes(b"")
     monkeypatch.setattr(utils, "DX9_DLL_PATH", str(dll))
     assert not utils.dx9_missing()
+
+
+def test_ensure_cooked_console_tolerates_no_console():
+    utils.ensure_cooked_console()  # piped stdin: must be a silent no-op

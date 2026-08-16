@@ -230,6 +230,30 @@ def dismiss_dx9_notice() -> None:
     config.update_setting(["DX9_NOTICE_DISMISSED"], True)
 
 
+def ensure_cooked_console() -> None:
+    """Restore normal console input if the terminal's in raw mode."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    ENABLE_PROCESSED_INPUT = 0x0001
+    ENABLE_LINE_INPUT = 0x0002
+    ENABLE_ECHO_INPUT = 0x0004
+    ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200
+    STD_INPUT_HANDLE = -10
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
+    mode = ctypes.c_uint32()
+    if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+        return  # stdin isn't a console
+    cooked = (
+        mode.value | ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT
+    ) & ~ENABLE_VIRTUAL_TERMINAL_INPUT
+    if cooked != mode.value:
+        kernel32.SetConsoleMode(handle, cooked)
+
+
 #
 # post-update launch
 #
