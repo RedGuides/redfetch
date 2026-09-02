@@ -314,6 +314,19 @@ def test_zip_with_a_nested_folder_installs_it(tmp_path, monkeypatch):
     assert (tmp_path / EXE).exists()
 
 
+def test_zip_with_a_wrapper_folder_installs_its_contents(tmp_path, monkeypatch):
+    """Clumsy's World ships CWPatcher/CWPatcher.exe — the exe still lands in the EQ root."""
+    payload = _zip_bytes({f"CWPatcher/{EXE}": b"MZ-patcher", "CWPatcher/logo.png": b"png"})
+    _serve(monkeypatch, lambda r: httpx.Response(200, content=payload))
+
+    installed = _install(_ctx(tmp_path))
+
+    assert installed == tmp_path / EXE
+    assert (tmp_path / EXE).read_bytes() == b"MZ-patcher"
+    assert (tmp_path / "logo.png").read_bytes() == b"png"  # companions ride along
+    assert _work_dirs(tmp_path) == []
+
+
 def test_an_unwritable_eq_folder_is_reported(tmp_path, monkeypatch):
     """install() promises a PatcherError for every failure — mkdtemp included."""
     def refuse(*args, **kwargs):

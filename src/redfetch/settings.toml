@@ -335,3 +335,27 @@ opt_in = false
 guide = "https://ascendanteq.com/getting-started"
 patcher_url = "https://downloads.ascendanteq.com/EQAscendant.zip"
 patcher_exe = "EQAscendant.exe"
+
+[EMU.SERVERS.eqmight]
+label = "EQ Might"
+shortname = "EQ Might"
+opt_in = false
+guide = "https://www.eqmight.com/setup"
+patcher_url = "https://github.com/DerpleDude/EQMightPatcher/releases/latest/download/EQMightPatcher.zip"
+patcher_exe = "EQMightPatcher.exe"
+
+[EMU.SERVERS.profusion]
+label = "E9 Profusion"
+shortname = "E9 Profusion"
+opt_in = false
+guide = "https://www.eqprofusion.org/wiki/Setting_up_your_client"
+patcher_url = "https://github.com/eniner/EQ-Profusion-Patcher/releases/latest/download/eqprofusionpatcher.exe"
+patcher_exe = "eqprofusionpatcher.exe"
+
+[EMU.SERVERS.clumsysworld]
+label = "Clumsy's World"
+shortname = "CWR"
+opt_in = false
+guide = "https://www.clumsysworld.com/getting-started/"
+patcher_url = "https://patch.clumsysworld.com/CWPatcher.zip"
+patcher_exe = "CWPatcher.exe"

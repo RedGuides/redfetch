@@ -169,12 +169,21 @@ def _unpack_into_place(ctx: ServerContext, archive: Path, work_dir: Path, target
     payload = work_dir / "payload"
     _extract_patcher_zip(archive, payload)
     exe_name = target.name
-    if not (payload / exe_name).is_file():
+    _move_payload_into_place(_payload_root(ctx, payload, exe_name), Path(ctx.eqpath), exe_name)
+
+
+def _payload_root(ctx: ServerContext, payload: Path, exe_name: str) -> Path:
+    """The folder whose contents get installed: the zip's root, or the folder
+    that wraps the promised exe."""
+    if (payload / exe_name).is_file():
+        return payload
+    found = next((p for p in payload.rglob(exe_name) if p.is_file()), None)
+    if found is None:
         # Verified before anything moves, so a wrong archive installs nothing at all.
         raise PatcherError(
             f"The {ctx.label} download didn't contain {exe_name}, so nothing was installed."
         )
-    _move_payload_into_place(payload, Path(ctx.eqpath), exe_name)
+    return found.parent
 
 
 def _extract_patcher_zip(zip_path: Path, dest: Path) -> None:
