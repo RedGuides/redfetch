@@ -5,6 +5,16 @@ Most notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-02
+
+### Added
+- Navmeshes for emu RoF2, if you like them thank derple for making the repo
+- New (to redfetch) emu servers: EQMight, E9 Profusion, and Clumsy's World
+
+### Fixed
+- The wizards no longer accept a drive root for the configuration directory. 
+- If a drive root was already saved as the configuration directory, setup asks for a new one.
+
 ## [1.6.9] - 2026-08-26
 
 ### Added

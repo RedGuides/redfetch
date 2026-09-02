@@ -4,6 +4,7 @@
 import os
 import platform
 import json
+import tempfile
 import time
 from pathlib import Path
 
@@ -75,10 +76,45 @@ def get_rg_utility_paths():
         return {}
 
 
+def _shape_problem(path: str) -> str | None:
+    """Says why a drive root or other bad path is being refused"""
+    # An empty or relative answer would install redfetch to wherever it was launched from.
+    if not os.path.isabs(path):
+        return f"'{path}' is not a full path. Enter something like C:\\redfetch."
+
+    if Path(path) == Path(path).parent:
+        suggestion = os.path.join(path, "redfetch")
+        return f"'{path}' is the root of a drive, which can cause permission errors. Use a subfolder such as {suggestion}."
+
+    return None
+
+
+def _write_problem(config_dir: str) -> str | None:
+    """Says why redfetch can't save settings in a directory."""
+    if not os.path.isdir(config_dir):
+        return f"'{config_dir}' is not a directory."
+
+    try:
+        with tempfile.NamedTemporaryFile(dir=config_dir, prefix=".redfetch-write-test-"):
+            pass
+    except OSError as e:
+        return f"redfetch can't create files in '{config_dir}' ({e.strerror or e})."
+
+    return None
+
+
+def _reject_directory(problem: str) -> None:
+    """Explains why a directory was turned down, then waits before the picker runs again."""
+    console.print(f"[bold red]{problem}[/bold red]")
+    console.print("[yellow]*Sigh* We will restart the directory selection process now.[/yellow]")
+    Prompt.ask("\nPress Enter to continue")
+
+
 def setup_directories():
+    """Asks where to keep settings, reprompting until success."""
     default_config_dir = user_config_dir("redfetch", "RedGuides")
     windows_public_dir = os.path.expandvars(r'%PUBLIC%\redfetch') if platform.system() == "Windows" else None
-    
+
     options = []
     if windows_public_dir:
         options.append(f"1. Windows Public Directory ({windows_public_dir})")
@@ -89,73 +125,83 @@ def setup_directories():
         options.append(f"1. OS Config Directory ({default_config_dir})")
         options.append("2. Custom Directory")
         default_choice = '1'
-    
+
     choice_text = "\n".join(options)
-    panel = Panel(
-        Text(choice_text, style="cyan"),
-        expand=False
-    )
-    console.print(panel)
-    
-    choice = Prompt.ask("Enter your choice", choices=[str(i) for i in range(1, len(options) + 1)], default=default_choice)
-    
-    if (windows_public_dir and choice == '3') or (not windows_public_dir and choice == '2'):
-        # User wants a custom directory
-        custom_dir = Prompt.ask("Enter the path to your custom directory")
-        custom_dir = os.path.expanduser(os.path.normpath(custom_dir))
 
-        # Check if the directory exists first
-        if not os.path.isdir(custom_dir):
-            console.print(f"[yellow]Directory does not exist: {custom_dir}[/yellow]")
-            create_dir = CustomConfirm.ask("Would you like to create this directory?")
-            if create_dir:
-                try:
-                    os.makedirs(custom_dir, exist_ok=True)
-                    console.print(f"[green]Directory created: {custom_dir}[/green]")
-                except Exception as e:
-                    console.print(f"[bold red]Error creating directory: {e}[/bold red]")
-                    console.print("[yellow]We will restart the directory selection process now.[/yellow]")
-                    Prompt.ask("\nPress Enter to continue")
-                    # Restart the directory selection process on failure
-                    return setup_directories()
-            else:
-                console.print("\n[bold yellow]Directory creation canceled. We'll restart the selection process now.[/bold yellow]")
-                Prompt.ask("\nPress Enter to continue")
-                return setup_directories()
+    while True:
+        panel = Panel(
+            Text(choice_text, style="cyan"),
+            expand=False
+        )
+        console.print(panel)
 
-        # At this point, the directory should exist (either pre-existing or newly created).
-        if detecteq.is_valid_eq_dir(custom_dir):
-            console.print(
-                Panel(
-                    Text.from_markup(
-                        "[bold red blink]WHAT THE FUCK ARE YOU DOING?!?!![/bold red blink]\n"
-                        "There's an EQGame.exe in this path!!\n"
-                        "Please select a different folder, please, thank you in advance. :pray:",
-                        justify="center"
-                    ),
-                    title="[bold underline red]Critical Warning[/bold underline red]",
-                    border_style="bold red",
-                    expand=False
+        choice = Prompt.ask("Enter your choice", choices=[str(i) for i in range(1, len(options) + 1)], default=default_choice)
+
+        if (windows_public_dir and choice == '3') or (not windows_public_dir and choice == '2'):
+            # User wants a custom directory
+            custom_dir = os.path.expanduser(os.path.normpath(Prompt.ask("Enter the path to your custom directory").strip()))
+
+            # Screened before the "create it?" offer, so we never make a folder we'd refuse.
+            problem = _shape_problem(custom_dir)
+            if problem:
+                _reject_directory(problem)
+                continue
+
+            # Check if the directory exists first
+            if not os.path.isdir(custom_dir):
+                console.print(f"[yellow]Directory does not exist: {custom_dir}[/yellow]")
+                create_dir = CustomConfirm.ask("Would you like to create this directory?")
+                if create_dir:
+                    try:
+                        os.makedirs(custom_dir, exist_ok=True)
+                        console.print(f"[green]Directory created: {custom_dir}[/green]")
+                    except Exception as e:
+                        _reject_directory(f"Error creating directory: {e}")
+                        continue
+                else:
+                    _reject_directory("Directory creation canceled.")
+                    continue
+
+            # At this point, the directory should exist (either pre-existing or newly created).
+            if detecteq.is_valid_eq_dir(custom_dir):
+                console.print(
+                    Panel(
+                        Text.from_markup(
+                            "[bold red blink]WHAT THE FUCK ARE YOU DOING?!?!![/bold red blink]\n"
+                            "There's an EQGame.exe in this path!!\n"
+                            "Please select a different folder, please, thank you in advance. :pray:",
+                            justify="center"
+                        ),
+                        title="[bold underline red]Critical Warning[/bold underline red]",
+                        border_style="bold red",
+                        expand=False
+                    )
                 )
-            )
-            choice = CustomPrompt.ask(
-                "[o]k,  /  [f] you, I'm staying",
-                choices=["o", "f"],
-                default="o",
-            )
-            if choice == "o":
-                return setup_directories()
+                choice = CustomPrompt.ask(
+                    "[o]k,  /  [f] you, I'm staying",
+                    choices=["o", "f"],
+                    default="o",
+                )
+                if choice == "o":
+                    continue
 
-        # Use the custom directory if it exists and is valid
-        config_dir = custom_dir
+            # Use the custom directory if it exists and is valid
+            config_dir = custom_dir
 
-    elif windows_public_dir and choice == '1':
-        config_dir = windows_public_dir
-    else:
-        config_dir = default_config_dir
+        elif windows_public_dir and choice == '1':
+            config_dir = windows_public_dir
+        else:
+            config_dir = default_config_dir
 
-    os.makedirs(config_dir, exist_ok=True)
-    return config_dir
+        os.makedirs(config_dir, exist_ok=True)
+
+        # The built-in choices get probed too, in case %PUBLIC% has been locked down.
+        problem = _write_problem(config_dir)
+        if problem:
+            _reject_directory(problem)
+            continue
+
+        return config_dir
 
 
 def create_first_run_flag(default_config_dir, chosen_config_dir):
@@ -344,10 +390,15 @@ def first_run_setup():
         with open(os.path.join(default_config_dir, "first_run_complete"), "r", encoding="utf-8", errors="replace") as f:
             config_dir = f.read().strip()
 
-        if os.path.exists(os.path.join(config_dir, ".env")):
+        problem = _shape_problem(config_dir)
+        if problem:
+            console.print(f"[bold red]Your saved configuration directory can't be used:[/bold red] {problem}")
+            console.print("[yellow]Rerunning setup so you can pick another one.[/yellow]")
+        elif os.path.exists(os.path.join(config_dir, ".env")):
             _show_env_banner(config_dir)
             return config_dir
-        console.print("[bold red]The .env file was not found. Rerunning setup.[/bold red]")
+        else:
+            console.print("[bold red]The .env file was not found. Rerunning setup.[/bold red]")
 
     eq_path = find_everquest_uninstall_location()
 
