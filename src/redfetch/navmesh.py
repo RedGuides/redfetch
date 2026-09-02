@@ -1,5 +1,5 @@
 """
-NavMesh sync module - downloads Nav mesh files from mqmesh.com
+NavMesh sync module - downloads Nav mesh files listed in a manifest
 """
 # standard
 import os
@@ -16,12 +16,10 @@ from hishel.httpx import AsyncCacheClient
 
 # local
 from redfetch import config
+from redfetch import servers
 from redfetch.sync_types import SyncEventCallback
 from redfetch.utils import get_vvmq_path
 from redfetch.download import download_file_async
-
-
-NAVMESH_MANIFEST_URL = "https://mqmesh.com/updater.json"
 
 
 @dataclass
@@ -55,6 +53,13 @@ def is_navmesh_enabled() -> bool:
         return False
 
 
+def get_manifest_url() -> str:
+    """Manifest source: the active server's override, else the env's NAVMESH_MANIFEST."""
+    context = servers.active_server_context(config.settings.ENV)
+    return context.navmesh_manifest or \
+        str(config.active_settings().get("NAVMESH_MANIFEST") or "")
+
+
 def get_protected_navmeshes() -> list[str]:
     """Get list of protected navmesh filenames (case-insensitive) for current env."""
     try:
@@ -69,13 +74,11 @@ def _manifest_cache_path(db_path: str) -> str:
     return os.path.join(os.path.dirname(db_path), "navmesh_http_cache.sqlite")
 
 
-async def fetch_manifest(db_path: str) -> dict:
-    """Fetch and return the latest navmesh manifest from the server, bypassing any stale cache."""
+async def fetch_manifest(db_path: str, url: str) -> dict:
+    """Fetch and return the navmesh manifest at *url*, bypassing any stale cache."""
     storage = AsyncSqliteStorage(database_path=_manifest_cache_path(db_path))
     async with AsyncCacheClient(timeout=30.0, storage=storage) as client:
-        response = await client.get(
-            NAVMESH_MANIFEST_URL, headers={"Cache-Control": "no-cache"}
-        )
+        response = await client.get(url, headers={"Cache-Control": "no-cache"})
         response.raise_for_status()
         return response.json()
 
@@ -231,11 +234,17 @@ async def sync_navmeshes(
         print(f"navmesh sync error: Could not create directory {navmesh_dir}: {e}")
         return True  # Don't fail the whole sync for navmesh issues
 
+    manifest_url = get_manifest_url()
+    if not manifest_url:
+        print("navmesh sync skipped: no manifest URL configured")
+        return True
+
     protected_meshes = get_protected_navmeshes()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         # 1: Fetch manifest
-        manifest = await fetch_manifest(db_path)
+        print(f"navmesh: manifest source {manifest_url}")
+        manifest = await fetch_manifest(db_path, manifest_url)
 
         # 2: Get local file state
         local_state = await get_local_navmesh_state(db_path, navmesh_dir)

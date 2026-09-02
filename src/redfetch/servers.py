@@ -43,6 +43,7 @@ class ServerContext:
     patcher_url: str = ""
     patcher_exe: str = ""
     guide: str = ""
+    navmesh_manifest: str = ""
 
 
 def is_multi_server(env: str) -> bool:
@@ -161,6 +162,7 @@ def active_server_context(env: str) -> ServerContext:
         patcher_url=str(entry.get("patcher_url") or ""),
         patcher_exe=str(entry.get("patcher_exe") or ""),
         guide=str(entry.get("guide") or ""),
+        navmesh_manifest=str(entry.get("navmesh_manifest") or ""),
     )
 
 
@@ -175,6 +177,7 @@ def server_context(slug: str, env: str, *, eqpath: str) -> ServerContext:
         patcher_url=str(entry.get("patcher_url") or ""),
         patcher_exe=str(entry.get("patcher_exe") or ""),
         guide=str(entry.get("guide") or ""),
+        navmesh_manifest=str(entry.get("navmesh_manifest") or ""),
     )
 
 

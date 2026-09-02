@@ -204,7 +204,7 @@ class SettingsTab(ScrollableContainer):
                 id="navmesh",
                 value=navmesh.is_navmesh_enabled(),
                 tooltip=(
-                    "Download pre-made navigation meshes for the Nav plugin (via mqmesh.com). "
+                    "Download pre-made navigation meshes for the Nav plugin (h/t mqmesh.com). "
                 ),
             )
             yield Label("Staff Picks:", classes="left_middle")

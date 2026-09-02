@@ -33,3 +33,20 @@ def test_readers_default_on_when_unset(tmp_path, monkeypatch):
     _install_settings(tmp_path, monkeypatch, env="LIVE")
     assert utils.is_auto_update_enabled() is True
     assert navmesh.is_navmesh_enabled() is True
+
+
+@pytest.mark.parametrize("env", ENVS)
+def test_navmesh_manifest_resolves_everywhere(tmp_path, monkeypatch, env):
+    """Every env ships a manifest URL, so navmesh sync never runs URL-less."""
+    settings = _install_settings(tmp_path, monkeypatch, env=env)
+    url = settings.from_env(env).get("NAVMESH_MANIFEST")
+    assert url and url.startswith("https://")
+
+
+def test_emu_manifest_differs_from_live(tmp_path, monkeypatch):
+    """EMU must not point at live mqmesh — its geometry is wrong for RoF2 zones."""
+    settings = _install_settings(tmp_path, monkeypatch)
+    assert (
+        settings.from_env("EMU").get("NAVMESH_MANIFEST")
+        != settings.from_env("LIVE").get("NAVMESH_MANIFEST")
+    )

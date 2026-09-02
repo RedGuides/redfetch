@@ -70,6 +70,9 @@ def test_bundled_known_entries_are_wellformed(tmp_path, monkeypatch):
             guide = entry.get("guide")
             if guide:
                 assert guide.startswith("https://"), f"'{slug}' guide must be HTTPS"
+            mesh_manifest = entry.get("navmesh_manifest")
+            if mesh_manifest:
+                assert mesh_manifest.startswith("https://"), f"'{slug}' navmesh_manifest must be HTTPS"
             patcher_url = entry.get("patcher_url")
             if patcher_url:
                 assert patcher_url.startswith("https://")
@@ -182,6 +185,7 @@ opt_in = false
 guide = "https://guide.test/getting-started"
 patcher_url = "https://patch.test/grind.zip"
 patcher_exe = "GrindPatcher.exe"
+navmesh_manifest = "https://meshes.test/grind-updater.json"
 """
 
 CONTEXT_LOCAL = """
@@ -207,6 +211,7 @@ def test_context_carries_the_active_servers_extras(tmp_path, monkeypatch):
     assert ctx.patcher_url == "https://patch.test/grind.zip"
     assert ctx.patcher_exe == "GrindPatcher.exe"
     assert ctx.guide == "https://guide.test/getting-started"
+    assert ctx.navmesh_manifest == "https://meshes.test/grind-updater.json"
 
 
 def test_context_for_the_bare_setup_has_no_extras(tmp_path, monkeypatch):
@@ -217,7 +222,7 @@ def test_context_for_the_bare_setup_has_no_extras(tmp_path, monkeypatch):
 
     assert ctx.label == config.BARE_SERVER_LABEL
     assert _norm(ctx.eqpath) == _norm("D:/EQ-Bare")
-    assert (ctx.patcher_url, ctx.patcher_exe, ctx.guide) == ("", "", "")
+    assert (ctx.patcher_url, ctx.patcher_exe, ctx.guide, ctx.navmesh_manifest) == ("", "", "", "")
 
 
 def test_context_for_single_server_clients_synthesizes(tmp_path, monkeypatch):
@@ -363,6 +368,38 @@ label = "Server B"
 opt_in = true
 eqpath = "D:/EQ-B"
 """
+
+
+def test_navmesh_manifest_rides_the_servers_entry_through_switches(tmp_path, monkeypatch):
+    """The override lives in SERVERS, not the slot swap — switching can't drop or leak it."""
+    local = """
+[EMU]
+EQPATH = "D:/EQ-A"
+ACTIVE_SERVER = "a"
+
+[EMU.SERVERS.a]
+label = "Server A"
+opt_in = true
+eqpath = "D:/EQ-A"
+navmesh_manifest = "https://meshes.test/a-updater.json"
+
+[EMU.SERVERS.b]
+label = "Server B"
+opt_in = true
+eqpath = "D:/EQ-B"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+
+    servers.switch_server("b")
+    assert servers.active_server_context("EMU").navmesh_manifest == ""  # no leak from a
+
+    servers.switch_server("a")
+    assert servers.active_server_context("EMU").navmesh_manifest == "https://meshes.test/a-updater.json"
+    snap = _parsed(tmp_path)["EMU"]["SERVERS"]["a"]
+    assert snap["navmesh_manifest"] == "https://meshes.test/a-updater.json"
+    # the pre-folder builder carries it too
+    ctx = servers.server_context("a", "EMU", eqpath="D:/anywhere")
+    assert ctx.navmesh_manifest == "https://meshes.test/a-updater.json"
 
 
 def test_switch_applies_incoming_and_saves_back_outgoing(tmp_path, monkeypatch):

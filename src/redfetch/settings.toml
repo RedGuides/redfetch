@@ -15,6 +15,9 @@ AUTO_UPDATE = true
 # Download navmesh files alongside Very Vanilla MQ.
 NAVMESH_DOWNLOADS = true
 
+# A server can override this in its SERVERS entry.
+NAVMESH_MANIFEST = "https://mqmesh.com/updater.json"
+
 # Start MQ after update "ask"/"always"/"never"
 AUTO_RUN_VVMQ = "ask"
 
@@ -232,6 +235,9 @@ staff_pick = true
 # Server options write to [EMU.SERVERS.<slug>] (or [EMU.GENERIC] for the bare "any server" setup).
 [EMU]
 THEME = "dracula"
+
+# RoF2-era meshes
+NAVMESH_MANIFEST = "https://www.redguides.com/update/emu/navmesh.json"
 
 [EMU.PROTECTED_FILES_BY_RESOURCE]
 60 = ["CharSelect.cfg", "Zoned.cfg", "MQ2Map.ini", "MQ2MoveUtils.ini"]
