@@ -950,3 +950,52 @@ label = "Claimed"
         servers.rename_server("a", "lazarus", env="EMU")  # bundle slug collision (unconfigured counts)
     with pytest.raises(ValueError, match="already in use"):
         servers.rename_server("a", "claimed", env="EMU")  # cross-client collision
+
+
+# --- per-server Very Vanilla dependencies ------------------------------------------
+
+def test_real_bundle_ships_lazarus_easyfind_override(tmp_path, monkeypatch):
+    """3235 rides Very Vanilla EMU into resources/EasyFind, off by default, on for Lazarus."""
+    settings = _install_settings(tmp_path, monkeypatch)
+    dependency = settings.from_env("EMU").SPECIAL_RESOURCES["60"]["dependencies"]["3235"]
+    assert dependency["opt_in"] is False
+    assert _norm(dependency["subfolder"]) == _norm("resources/EasyFind")
+    lazarus = servers.list_servers("EMU")["lazarus"]
+    assert lazarus["SPECIAL_RESOURCES"]["60"]["dependencies"]["3235"]["opt_in"] is True
+
+
+def test_easyfind_override_follows_the_active_server(tmp_path, monkeypatch):
+    local = """
+[EMU]
+EQPATH = "D:/EQ-Other"
+ACTIVE_SERVER = "other"
+
+[EMU.SERVERS.lazarus]
+opt_in = true
+eqpath = "D:/EQ-Laz"
+
+[EMU.SERVERS.other]
+label = "Other"
+opt_in = true
+eqpath = "D:/EQ-Other"
+"""
+    _install_settings(tmp_path, monkeypatch, local_toml=local)
+
+    def override_opt_in():
+        return config.settings.from_env("EMU").SPECIAL_RESOURCES["60"]["dependencies"]["3235"]["opt_in"]
+
+    assert override_opt_in() is False
+
+    servers.switch_server("lazarus")
+    assert override_opt_in() is True
+
+    servers.switch_server("other")
+    assert override_opt_in() is False
+    emu = _parsed(tmp_path)["EMU"]
+    # Lazarus's value equals its bundled entry, so nothing extra is written for it.
+    assert "60" not in emu["SERVERS"]["lazarus"].get("SPECIAL_RESOURCES", {})
+    # The other server keeps it off even after Lazarus turned the env slot on.
+    assert emu["SERVERS"]["other"]["SPECIAL_RESOURCES"]["60"]["dependencies"]["3235"]["opt_in"] is False
+
+    servers.switch_to_generic("EMU")
+    assert override_opt_in() is False

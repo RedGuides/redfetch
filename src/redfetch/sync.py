@@ -6,6 +6,7 @@ import os
 
 # third-party
 import httpx
+import yaml
 from filelock import FileLock, Timeout
 from platformdirs import user_data_dir
 
@@ -265,6 +266,29 @@ async def sync(
     )
 
 
+def force_easyfind_emu_mode() -> None:
+    """MQ2EasyFind can't zone on RoF2 servers unless it ignores its zone connection data."""
+    try:
+        if config.settings.ENV not in config.MULTI_SERVER_ENVS:
+            return  # live and test need that data
+        mq_folder = utils.get_vvmq_path()
+        if not mq_folder or not os.path.isdir(os.path.join(mq_folder, "config")):
+            return  # no MQ folder yet
+        path = os.path.join(mq_folder, "config", "EasyFind.yaml")
+        settings = {}
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                loaded = yaml.safe_load(f)
+            settings = loaded if isinstance(loaded, dict) else {}
+        if settings.get("IgnoreZoneConnectionData") is True:
+            return
+        settings["IgnoreZoneConnectionData"] = True
+        config.atomic_write_text(path, yaml.safe_dump(settings, sort_keys=False))
+        print("EasyFind: set IgnoreZoneConnectionData to true for emu servers.")
+    except Exception as exc:
+        print(f"EasyFind config warning: {exc}")  # never fails the sync
+
+
 async def run_sync(
     db_path: str,
     headers: dict,
@@ -303,6 +327,8 @@ async def run_sync(
                     except Exception as exc:
                         # A navmesh failure must never fail the full sync
                         print(f"navmesh sync warning: {exc}")
+
+                    force_easyfind_emu_mode()
 
                 return result
     except (KeyboardInterrupt, asyncio.CancelledError):

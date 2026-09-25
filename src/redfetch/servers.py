@@ -28,6 +28,8 @@ SERVER_SLOT_PATHS = (
         for resource_id in config.MAPS_MAP.values()
         for leaf in ("opt_in", "custom_path")
     ),
+    # Project Lazarus EasyFind override
+    ("SPECIAL_RESOURCES", "60", "dependencies", "3235", "opt_in"),
 )
 
 

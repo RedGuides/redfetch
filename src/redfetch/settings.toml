@@ -247,6 +247,11 @@ default_path = "VanillaMQ_EMU"
 custom_path = ""
 opt_in = true
 
+# EasyFind override
+[EMU.SPECIAL_RESOURCES.60.dependencies.3235]
+subfolder = "resources/EasyFind"
+opt_in = false
+
 [EMU.SPECIAL_RESOURCES.153]
 default_path = "@format {this.eqpath}/maps"
 custom_path = ""
@@ -327,6 +332,9 @@ opt_in = false
 guide = "https://www.lazaruseq.com/pages/getting-started-guide"
 patcher_url = "https://www.lazaruseq.com/lazarus-patcher-windows.zip"
 patcher_exe = "LazarusPatcherCLI.exe"
+
+[EMU.SERVERS.lazarus.SPECIAL_RESOURCES.60.dependencies.3235]
+opt_in = true
 
 [EMU.SERVERS.ascendant]
 label = "Ascendant"
