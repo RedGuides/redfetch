@@ -130,7 +130,7 @@ class Runnable:
 RUNNABLES: tuple[Runnable, ...] = (
     Runnable(
         "vvmq", "Very Vanilla MQ 🍦", "MacroQuest.exe", utils.get_vvmq_path,
-        aliases=("mq", "macroquest"),
+        aliases=("vv", "mq", "macroquest"),
         tooltip="The legendary add-on platform for EverQuest, plus any post-update selections.",
         startup=lambda: start_vvmq(),
     ),
@@ -195,7 +195,7 @@ OPENABLES: tuple[Openable, ...] = (
     ),
     Openable(
         "vvmq", "Very Vanilla MQ 🍦", utils.get_vvmq_path,
-        aliases=("mq",), tooltip="Open MacroQuest folder",
+        aliases=("vv", "mq"), tooltip="Open MacroQuest folder",
     ),
     Openable(
         "eq", "EverQuest 🐲", _eq_dir,
