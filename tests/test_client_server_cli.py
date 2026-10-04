@@ -213,10 +213,6 @@ def test_blank_folder_at_prompt_rejected(cli_env, monkeypatch):
     fake.ENV = "EMU"
     _set_known_server(monkeypatch, slug="lazarus", configured=False)
     monkeypatch.setattr(main.Prompt, "ask", lambda *a, **k: "   ")
-    monkeypatch.setattr(
-        servers, "add_server",
-        lambda slug, **kwargs: (_ for _ in ()).throw(ValueError("needs an EverQuest folder")),
-    )
     with pytest.raises(typer.BadParameter, match="folder"):
         main.server_command(server="lazarus")
     assert calls == []

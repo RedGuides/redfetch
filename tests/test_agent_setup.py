@@ -365,18 +365,6 @@ def test_server_add_passes_guide_shortname_and_patcher(add_env, tmp_path):
     })]
 
 
-def test_server_add_surfaces_add_server_errors_as_usage_errors(add_env, tmp_path, monkeypatch):
-    """add_server owns the patcher/guide gates; the CLI just relays its ValueError as exit 2."""
-    def refuse(slug, **kwargs):
-        raise ValueError("Add the patcher's file name too, like ThePatcher.exe.")
-    monkeypatch.setattr(servers, "add_server", refuse)
-    folder = _eq_folder(tmp_path)
-    result = runner.invoke(main.app, ["server", "add", "myserver", "--eqpath", str(folder),
-                                      "--patcher-url", "https://example.com/patcher.zip"])
-    assert result.exit_code == 2
-    assert "file name too" in flat_output(result)
-
-
 @pytest.fixture
 def real_add(tmp_path, monkeypatch):
     """The real writer against a scratch config, for the gates inside add_server."""

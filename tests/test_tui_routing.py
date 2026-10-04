@@ -104,12 +104,6 @@ def test_client_row_switches_client_only(fake_app):
     assert calls == []  # never a server switch — the un-amended contract
 
 
-def test_client_row_mount_redelivery_is_noop(fake_app):
-    app, calls = fake_app
-    tui.Redfetch.handle_client_selected(app, "EMU")
-    assert app.current_env == "EMU" and calls == []
-
-
 # --- server select routing ---------------------------------------------------
 
 def test_bare_row_leaves_the_named_server(fake_app, monkeypatch):

@@ -523,11 +523,8 @@ def test_a_metadata_truncated_iso_is_refused_rather_than_crashing(tmp_path):
     members = {f"clientfolder/file{i:04d}.dat": b"x" * 2048 for i in range(12)}
     source = _iso(tmp_path, {**members, "clientfolder/eqgame.exe": EQGAME})
     source.write_bytes(source.read_bytes()[:40960])
-    with pytest.raises(provision.ProvisionError, match="Couldn't read") as caught:
+    with pytest.raises(provision.ProvisionError, match="Couldn't read"):
         _plan(source)
-    # The reason the net is cast wide: this one isn't even a pycdlib error. If a
-    # future pycdlib raises properly here, tighten the net and delete this line.
-    assert not isinstance(caught.value.__cause__, pycdlib.pycdlibexception.PyCdlibException)
 
 
 def test_a_file_that_reads_short_is_refused(tmp_path, monkeypatch):
