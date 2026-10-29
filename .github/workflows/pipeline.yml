@@ -109,6 +109,10 @@ jobs:
         run: |
           "PYAPP_EXEC_SCRIPT=$env:GITHUB_WORKSPACE\pyapp_launcher.py" >> $env:GITHUB_ENV
           "PYAPP_PASS_LOCATION=1" >> $env:GITHUB_ENV
+          # this is our PyApp pin
+          "PYAPP_RELEASE_TAG=v0.31.0" >> $env:GITHUB_ENV
+          # we have deps that aren't ready for 3.15
+          "PYAPP_PYTHON_VERSION=3.13" >> $env:GITHUB_ENV
 
           if ($env:GITHUB_REF -eq 'refs/heads/develop') {
             "PYAPP_EMBED_WHEEL=1" >> $env:GITHUB_ENV
@@ -149,10 +153,10 @@ jobs:
       - name: Download PyApp Source
         shell: pwsh
         run: |
-          Invoke-WebRequest https://github.com/ofek/pyapp/releases/latest/download/source.zip -OutFile pyapp-source.zip
+          Invoke-WebRequest "https://github.com/ofek/pyapp/releases/download/$env:PYAPP_RELEASE_TAG/source.zip" -OutFile pyapp-source.zip
           7z x pyapp-source.zip -o"./pyapp-source"
           $dir = Get-ChildItem -Path .\pyapp-source\ -Directory | Select-Object -First 1
-          Move-Item -Path $dir.FullName -Destination pyapp-latest
+          Move-Item -Path $dir.FullName -Destination pyapp-src
 
       - name: Build PyApp Executable
         run: |
@@ -168,19 +172,21 @@ jobs:
           $env:PYAPP_EXEC_SCRIPT = "${{ env.PYAPP_EXEC_SCRIPT }}"
           $env:PYAPP_PASS_LOCATION = "${{ env.PYAPP_PASS_LOCATION }}"
           $env:PYAPP_PIP_EXTRA_ARGS = "${{ env.PYAPP_PIP_EXTRA_ARGS }}"
+          $env:PYAPP_PYTHON_VERSION = "${{ env.PYAPP_PYTHON_VERSION }}"
 
           Write-Host "PYAPP_EXEC_SCRIPT: $env:PYAPP_EXEC_SCRIPT"
           Write-Host "PYAPP_PASS_LOCATION: $env:PYAPP_PASS_LOCATION"
           Write-Host "PYAPP_PIP_EXTRA_ARGS: $env:PYAPP_PIP_EXTRA_ARGS"
+          Write-Host "PYAPP_PYTHON_VERSION: $env:PYAPP_PYTHON_VERSION"
 
           cargo build --release
-        working-directory: .\pyapp-latest
+        working-directory: .\pyapp-src
         shell: pwsh
 
       - name: Rename and Move Executable
         shell: pwsh
         run: |
-          Move-Item .\pyapp-latest\target\release\pyapp.exe redfetch.exe
+          Move-Item .\pyapp-src\target\release\pyapp.exe redfetch.exe
 
       - name: Download rcedit
         shell: pwsh

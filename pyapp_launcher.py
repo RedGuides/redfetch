@@ -20,6 +20,9 @@ def _import_entrypoint():
 # delete the install dir while our python.exe is still running from inside it.
 _REPAIR_BAT = r"""@echo off
 title redfetch - finishing setup
+rem Guard first: if any "<EXE>" call below ends up importing redfetch and failing,
+rem the launcher must not open yet another repair window.
+set "REDFETCH_SELFHEAL=1"
 echo.
 echo   redfetch setup didn't finish!
 echo   Trying to finish it now, this may take a few minutes.
@@ -30,7 +33,6 @@ timeout /t 3 /nobreak > nul
 if %errorlevel% neq 0 goto redfetch_failed
 echo.
 echo   All set -- starting redfetch...
-set "REDFETCH_SELFHEAL=1"
 "<EXE>"
 goto redfetch_cleanup
 :redfetch_failed
